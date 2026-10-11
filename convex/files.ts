@@ -1,0 +1,143 @@
+/**
+ * File storage foundation (Convex Storage).
+ *
+ * Upload flow (3 steps, standard Convex pattern):
+ *   1. const url = await generateUploadUrl({})            // authorized
+ *   2. POST the file to `url` from the browser → { storageId }
+ *   3. await register({ storageId, kind, ownerType, ownerId, fileName })
+ *      → validates ownership/permission, records metadata in `files`.
+ * Download: `getUrl({ fileId })` re-checks read access every time.
+ *
+ * Size and content type are read from Convex's own `_storage` metadata,
+ * never from the client.
+ */
+import { v, type Infer } from "convex/values";
+import type { Doc, Id } from "./_generated/dataModel";
+import type { QueryCtx } from "./_generated/server";
+import { schoolMutation, schoolQuery } from "./core/functions";
+import type { Actor } from "./core/actor";
+import { getInSchool, hasPermission, requireAnyPermission, requireStudentAccess } from "./core/authorization";
+import { conflict, forbidden, invalid, invalidRelationship, notFound } from "./core/errors";
+import { assertNonEmpty, vFileKind, vFileOwnerType } from "./core/validators";
+import { writeAudit } from "./model/audit";
+
+type Ctx = QueryCtx & { actor: Actor };
+type OwnerType = Infer<typeof vFileOwnerType>;
+type FileKind = Infer<typeof vFileKind>;
+
+const MAX_BYTES = 10 * 1024 * 1024;
+const ALLOWED_TYPES = ["application/pdf", "image/png", "image/jpeg", "image/webp"];
+
+/** Which kinds may be attached to which owner, and who may write them. */
+const WRITE_POLICY: Record<FileKind, { owners: OwnerType[]; permission: Parameters<typeof hasPermission>[1] }> = {
+  student_document: { owners: ["student"], permission: "students:write" },
+  profile_photo: { owners: ["student", "teacher"], permission: "students:write" },
+  receipt: { owners: ["receipt"], permission: "fees:manage" },
+  report_card: { owners: ["result"], permission: "exams:publish" },
+  school_document: { owners: ["school"], permission: "settings:manage" },
+};
+
+const OWNER_TABLE = { student: "students", teacher: "teachers", receipt: "receipts", result: "results" } as const;
+
+/** Resolve and tenant-check the owner record. Returns the owner doc (or the school id). */
+async function loadOwner(ctx: Ctx, ownerType: OwnerType, ownerId: string) {
+  if (ownerType === "school") {
+    if (ownerId !== ctx.actor.schoolId) throw notFound("Owner");
+    return { ownerType, doc: null };
+  }
+  const table = OWNER_TABLE[ownerType];
+  const id = ctx.db.normalizeId(table, ownerId);
+  if (!id) throw notFound("Owner");
+  const doc = await getInSchool(ctx, table, id as Id<typeof table>, "Owner");
+  return { ownerType, doc };
+}
+
+/** Read access to a file, based on its owner. */
+async function requireFileRead(ctx: Ctx, file: Doc<"files">) {
+  switch (file.ownerType) {
+    case "school":
+      return; // any member of the school
+    case "student":
+      await requireStudentAccess(ctx, file.ownerId as Id<"students">, { all: "students:read:all", assigned: "students:read:assigned", own: "profile:read:own" });
+      return;
+    case "teacher":
+      if (hasPermission(ctx.actor, "staff:manage") || ctx.actor.teacherId === file.ownerId) return;
+      throw notFound("File");
+    case "receipt": {
+      const receipt = await getInSchool(ctx, "receipts", file.ownerId as Id<"receipts">, "File");
+      await requireStudentAccess(ctx, receipt.studentId, { all: "fees:manage", own: "fees:read:own" });
+      return;
+    }
+    case "result": {
+      const result = await getInSchool(ctx, "results", file.ownerId as Id<"results">, "File");
+      await requireStudentAccess(ctx, result.studentId, { all: "exams:manage", assigned: "exams:read:assigned", own: "results:read:own" });
+      return;
+    }
+  }
+}
+
+export const generateUploadUrl = schoolMutation({
+  args: {},
+  handler: async (ctx) => {
+    requireAnyPermission(ctx.actor, ["files:upload", "students:write", "fees:manage", "exams:publish", "settings:manage"]);
+    return await ctx.storage.generateUploadUrl();
+  },
+});
+
+export const register = schoolMutation({
+  args: { storageId: v.id("_storage"), kind: vFileKind, ownerType: vFileOwnerType, ownerId: v.string(), fileName: v.string() },
+  handler: async (ctx, a) => {
+    const policy = WRITE_POLICY[a.kind];
+    if (!policy.owners.includes(a.ownerType)) throw invalidRelationship(`A ${a.kind} cannot be attached to a ${a.ownerType}.`);
+    const teacherSelfPhoto = a.kind === "profile_photo" && a.ownerType === "teacher" && ctx.actor.teacherId === a.ownerId;
+    const permission = a.kind === "profile_photo" && a.ownerType === "teacher" ? "staff:manage" : policy.permission;
+    if (!teacherSelfPhoto && !hasPermission(ctx.actor, permission)) throw forbidden();
+    await loadOwner(ctx, a.ownerType, a.ownerId);
+
+    const meta = await ctx.db.system.get(a.storageId);
+    if (!meta) throw notFound("Uploaded file");
+    if (await ctx.db.query("files").withIndex("by_storage", (q) => q.eq("storageId", a.storageId)).first()) throw conflict("This upload is already registered.");
+    const contentType = meta.contentType ?? "application/octet-stream";
+    if (!ALLOWED_TYPES.includes(contentType) || meta.size > MAX_BYTES) {
+      await ctx.storage.delete(a.storageId);
+      throw invalid("Only PDF, PNG, JPEG or WebP files up to 10 MB are accepted.");
+    }
+    const id = await ctx.db.insert("files", {
+      schoolId: ctx.actor.schoolId, storageId: a.storageId, kind: a.kind, ownerType: a.ownerType, ownerId: a.ownerId,
+      fileName: assertNonEmpty(a.fileName, "fileName", 200), contentType, size: meta.size, uploadedByUserId: ctx.actor.userId,
+    });
+    await writeAudit(ctx, { schoolId: ctx.actor.schoolId, actor: ctx.actor, action: "file.uploaded", entity: { table: "files", id }, summary: `Uploaded ${a.kind.replace("_", " ")} "${a.fileName}"`, metadata: { ownerType: a.ownerType, ownerId: a.ownerId } });
+    return id;
+  },
+});
+
+export const getUrl = schoolQuery({
+  args: { fileId: v.id("files") },
+  handler: async (ctx, { fileId }) => {
+    const file = await getInSchool(ctx, "files", fileId, "File");
+    await requireFileRead(ctx, file);
+    return { url: await ctx.storage.getUrl(file.storageId), fileName: file.fileName, contentType: file.contentType, size: file.size };
+  },
+});
+
+export const listForOwner = schoolQuery({
+  args: { ownerType: vFileOwnerType, ownerId: v.string() },
+  handler: async (ctx, { ownerType, ownerId }) => {
+    const rows = await ctx.db.query("files").withIndex("by_owner", (q) => q.eq("schoolId", ctx.actor.schoolId).eq("ownerType", ownerType).eq("ownerId", ownerId)).collect();
+    if (rows.length === 0) return [];
+    await requireFileRead(ctx, rows[0]); // same owner → same rule
+    return rows.map((f) => ({ _id: f._id, kind: f.kind, fileName: f.fileName, contentType: f.contentType, size: f.size, uploadedAt: f._creationTime }));
+  },
+});
+
+export const remove = schoolMutation({
+  args: { fileId: v.id("files") },
+  handler: async (ctx, { fileId }) => {
+    const file = await getInSchool(ctx, "files", fileId, "File");
+    if (!hasPermission(ctx.actor, WRITE_POLICY[file.kind].permission)) throw forbidden();
+    await ctx.storage.delete(file.storageId);
+    await ctx.db.delete(file._id);
+    await writeAudit(ctx, { schoolId: ctx.actor.schoolId, actor: ctx.actor, action: "file.deleted", entity: { table: "files", id: file._id }, summary: `Deleted "${file.fileName}"`, metadata: { kind: file.kind, ownerType: file.ownerType, ownerId: file.ownerId } });
+    return { ok: true };
+  },
+});

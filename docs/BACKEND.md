@@ -1,0 +1,320 @@
+# Backend foundation — Smart School Management System
+
+Convex is the backend and database. This document is the **shared contract** for everyone building on it
+(Admin Portal, Teacher Portal, Student/Guardian Portal). If you need to change anything in the
+"Rules" sections, talk to the backend owner first.
+
+> Aster Academy is only demo data (`convex/seedData/asterAcademy.ts`). Nothing in the backend may
+> depend on a particular school.
+
+---
+
+## 1. Layout
+
+```
+convex/
+├── schema.ts              All tables + indexes (single schema for the whole team)
+├── auth.ts                Convex Auth (Password provider, invite-only sign-up, session gate)
+├── auth.config.ts         JWT issuer config (generated, do not edit)
+├── http.ts                Auth HTTP routes (JWKS / OpenID discovery)
+│
+├── core/                  Cross-cutting building blocks — use these, don't re-implement
+│   ├── functions.ts       schoolQuery / schoolMutation / schoolAction / userQuery / userMutation
+│   ├── actor.ts           getCurrentUser, requireAuthenticatedUser, requireActor (school + role resolution)
+│   ├── authorization.ts   requirePermission, getInSchool, requireClassTeacher, requireTeacherAssignment,
+│   │                      requireSectionRead, requireStudentAccess, requireGuardianStudentAccess, …
+│   ├── permissions.ts     THE permission catalogue (shared with the frontend)
+│   ├── validators.ts      Enum validators + date/time/money/email checks
+│   └── errors.ts          AppError + codes
+│
+├── model/                 Server-only domain helpers (not callable from clients)
+│   ├── academics.ts       roster / name helpers
+│   ├── memberships.ts     invitations, activation, access checks
+│   ├── calendar.ts        today-in-school-timezone, school-day rules (working days − holidays)
+│   ├── grading.ts         grading schemes (per school setting)
+│   ├── audit.ts           writeAudit()
+│   └── notifications.ts   notifyUsers(), userIdsForStudent()
+│
+├── users.ts               me, viewer
+├── memberships.ts         invite, acceptInvitation, list, updateAccess
+├── schools.ts             publicProfile, current, updateProfile, updateSettings
+├── academics.ts           years/classes/subjects/sections, roster, assignments, class teacher, enrollment
+├── attendance.ts          getByDate, listBySection, studentHistory, dailyOverview, mark, update
+├── notifications.ts       list, unreadCount, markRead, markAllRead
+├── files.ts               generateUploadUrl, register, getUrl, listForOwner, remove
+├── audit.ts               list
+├── seed.ts                demo (internal) — dataset-driven seeding
+└── seedData/              datasets (types.ts + asterAcademy.ts)
+```
+
+**Why flat module files?** The public API reads as `api.attendance.mark`, `api.academics.listSections`.
+Put a new module in `convex/<module>.ts`; put its non-public helpers in `convex/model/<module>.ts`.
+Do not create a folder with the same name as a module file (Convex paths would collide).
+
+Frontend side: `src/lib/convex/` (provider, hooks, errors, `api` re-export) and `src/proxy.ts`.
+
+---
+
+## 2. Running it
+
+```bash
+npm install
+npx convex dev              # first run: log in / create the project; writes CONVEX_DEPLOYMENT + NEXT_PUBLIC_CONVEX_URL to .env.local
+npx @convex-dev/auth        # once per deployment: sets JWT_PRIVATE_KEY, JWKS, SITE_URL
+npx convex env set ALLOW_DEMO_SEED true   # dev deployments only
+npm run seed:demo           # seeds the Aster Academy demo school + demo logins
+npm run dev                 # Next.js
+```
+
+Demo logins (same as Stage 1): `admin@asteracademy.edu / Admin@123`, `teacher@asteracademy.edu / Teacher@123`
+(Rahul Verma, class teacher 10-A), `meera.iyer@… / Welcome@123` (class teacher 10-B), `sunita.rao@… / Welcome@123`
+(English 10-A/B/C, class teacher 10-C), `student@asteracademy.edu / Student@123` (Aarav, 10-A),
+`guardian@asteracademy.edu / Guardian@123` (Priya Sharma → Aarav 10-A + Ananya 8-B).
+
+`NEXT_PUBLIC_CONVEX_URL` unset → the app runs exactly as Stage 1 (mock services, static pages).
+`NEXT_PUBLIC_CONVEX_URL` set → Convex + Convex Auth providers and `src/proxy.ts` are active.
+
+---
+
+## 3. Rules: multi-school tenancy
+
+1. **Every school-owned table has `schoolId`.** Global tables: `users`, Convex Auth tables, `schools`.
+2. **Access comes only from `schoolMemberships`** (`userId`, `schoolId`, `role`, `status`, person link).
+   The backend resolves `session → user → active membership → school` (`convex/core/actor.ts`).
+3. **The client never supplies a trusted `schoolId`, `role` or `userId`.** Every school function accepts an
+   optional `membershipId` *selector*; it is checked against the caller's own active memberships.
+   - one active membership → used automatically;
+   - several → client must send `membershipId`, else `SCHOOL_SELECTION_REQUIRED`;
+   - not yours / suspended / school suspended → `NO_SCHOOL_ACCESS`.
+4. **Every client-supplied id is loaded with `getInSchool(ctx, table, id)`.** Missing *and* other-school
+   documents both throw `NOT_FOUND`, so ids from School B are indistinguishable from nonexistent ones.
+5. Lists use indexes that start with `schoolId` (or a parent id already verified with `getInSchool`).
+
+Isolation is tested in `tests/convex/tenancy.test.ts` (two schools with identical shapes).
+
+---
+
+## 4. Rules: identity & authentication
+
+- **Convex Auth, Password provider.** Emails are normalised (trim, lowercase, NFKC). Password policy:
+  ≥ 8 chars with a letter and a digit.
+- **No open registration.** An admin calls `memberships.invite` → an *invited* membership + a one-time code
+  (returned once; only its SHA-256 is stored; 14-day expiry). The person signs up with
+  `signIn("password", { email, password, flow: "signUp", inviteCode })`. The `createOrUpdateUser` callback
+  activates matching invitations and creates the user. Without a valid code sign-up is refused.
+- Existing users accept further invitations (another school / role) with `memberships.acceptInvitation`.
+- **Session gate:** `beforeSessionCreation` refuses sign-in for disabled users and users with no active
+  membership in an active school. Suspending a membership also cuts off existing sessions immediately
+  (every call re-resolves the membership).
+- Server-side token for RSC/Route Handlers: `convexAuthNextjsToken()`; cookies are maintained by `src/proxy.ts`.
+
+---
+
+## 5. Rules: roles & permissions (RBAC)
+
+Roles are **portals**: `admin` (Admin/Principal), `teacher`, `student`.
+**Guardian is not a role** — it is a `student`-role membership with `guardianId` set; it sees exactly the
+students linked through `guardianLinks`. **Accountant is not a role** — it is an optional permission set
+(`permissionSets: ["accountant"]`) on an admin-portal membership.
+
+The catalogue lives in **`convex/core/permissions.ts`** and is imported by the frontend
+(`src/lib/permissions/permissions.ts` re-exports it). There is no second list.
+
+| Area | Admin | Teacher | Student / Guardian |
+|---|---|---|---|
+| Students | `students:read:all`, `students:write` | `students:read:assigned` | — |
+| Attendance | `attendance:read:all` (view only) | `attendance:read:assigned`, `attendance:mark:class_teacher`, `attendance:edit:class_teacher` | `attendance:read:own` |
+| Fees | `fees:manage` | — | `fees:read:own` |
+| Exams | `exams:manage`, `exams:publish`, `marks:enter:any` | `marks:enter:assigned`, `exams:read:assigned` | `results:read:own` |
+| Homework | `homework:read:all` | `homework:manage:assigned` | `homework:read:own`, `homework:submit` |
+| Platform | `users:manage`, `audit:read`, `settings:manage`, `academics:manage`, `staff:manage` | `files:upload` | — |
+
+Use `requirePermission(ctx.actor, "...")` / `requireAnyPermission` — **never** `if (actor.role === "admin")`.
+`*:assigned` and `*:own` permissions always need a scope check as well (sections 6–7).
+
+---
+
+## 6. Rules: academic structure & teacher scope
+
+```
+schools ─┬─ schoolSettings (currentAcademicYearId, workingDays, attendance, grading, notifications)
+         ├─ academicYears (2026-27)
+         ├─ classes (Grade 8, level 8)                       year-independent
+         ├─ sections (8-A: classId + academicYearId + classTeacherId)   per year
+         ├─ subjects
+         ├─ teachers ──── teacherAssignments (teacher × subject × class × section × year)
+         ├─ students ─┬── enrollments (student × year × class × section, status, rollNo)  ← placement + history
+         │            └── guardianLinks ── guardians
+         └─ schoolMemberships (user ↔ school, role, teacherId | studentId | guardianId)
+```
+
+- A student's class/section is **never** a field on `students`; it is the enrollment for a year.
+  Moving section closes the old enrollment (`transferred`) and creates a new one. Promotion creates next
+  year's enrollment. History is never overwritten.
+- **Teacher scope** for a year = sections from `teacherAssignments` ∪ sections where they are class teacher
+  (`teacherSectionIds`). "Assigned" read permissions are limited to that scope.
+- **SUBJECT ASSIGNMENT ≠ ATTENDANCE OWNERSHIP.** A teacher can own (be class teacher of) at most one
+  section per academic year (enforced in `academics.setClassTeacher`).
+
+---
+
+## 7. Rules: attendance (first fully implemented workflow)
+
+Owner = `sections.classTeacherId`. Enforced in `requireClassTeacher` inside `attendance.mark` / `attendance.update`:
+authenticated → active membership → `attendance:mark|edit:class_teacher` permission → section in caller's school →
+`section.classTeacherId === actor.teacherId`.
+
+| Who | View | Mark (create register) | Edit / correct |
+|---|---|---|---|
+| Class teacher of the section | ✔ | ✔ | ✔ |
+| Subject teacher of the section | ✔ read-only | ✘ | ✘ |
+| Teacher with no link to the section | ✘ | ✘ | ✘ |
+| Admin / Principal | ✔ all sections + overview | ✘ | ✘ |
+| Student | own records | ✘ | ✘ |
+| Guardian | linked students' records | ✘ | ✘ |
+
+Additional server rules: date must be a real `YYYY-MM-DD`, not in the future (school timezone), a working
+day and not a holiday; one register per section per date (`CONFLICT` → use `update`); entries must cover the
+section's active roster exactly once (no students from other sections). No delete exists. Mark and every
+correction are audited (`attendance.marked`, `attendance.corrected` with a per-student diff). Absences notify
+the student's and linked guardians' accounts when the school enables attendance alerts.
+
+Data: `attendanceSessions` (one per section/date, with counts) + `attendanceRecords` (one per student).
+
+---
+
+## 8. Rules: student & guardian access
+
+`requireStudentAccess(ctx, studentId, { all, assigned, own })`:
+- `all` permission → any student in the school;
+- `assigned` → only if the student's **current active enrollment** is in the teacher's scope;
+- `own` → only the student themself, or a student linked to the caller's guardian record.
+Anything else → `NOT_FOUND` (never confirms that a student exists).
+
+---
+
+## 9. Fees, exams, timetable, homework, notices (schema ready, modules not yet built)
+
+- **Fees:** `feeStructures` → `studentFees` (one obligation per installment, immutable amount) →
+  `feePayments` (append-only transactions with `allocations`; reversals are new rows) → `receipts`;
+  `feeConcessions` (percent in basis points or fixed). Balance = obligations − completed allocations −
+  concessions; **never store a mutable balance**. Money is integer minor units (paise).
+- **Exams:** `exams` → `examSubjects` (paper per class/subject with schedule + max/pass marks) → `marks`
+  (per student per paper) → `results` (snapshot computed at publish, with per-subject breakdown and rank).
+- **Timetable:** `timetableEntries` by section/day/period and by teacher/day/period.
+- **Homework:** `homework` (per section/subject/teacher) → `homeworkSubmissions`.
+- **Notices/events:** `notices` and `events` with a server-resolved `audience` (all / roles / classes / sections).
+
+---
+
+## 10. How to add a query or mutation
+
+```ts
+// convex/homework.ts
+import { v } from "convex/values";
+import { schoolMutation, schoolQuery } from "./core/functions";
+import { getInSchool, requirePermission, requireTeacherAssignment } from "./core/authorization";
+import { assertIsoDate, assertNonEmpty } from "./core/validators";
+import { writeAudit } from "./model/audit";
+
+export const create = schoolMutation({
+  args: { sectionId: v.id("sections"), subjectId: v.id("subjects"), title: v.string(), description: v.string(), dueDate: v.string() },
+  handler: async (ctx, args) => {
+    requirePermission(ctx.actor, "homework:manage:assigned");          // 1. capability
+    const section = await requireTeacherAssignment(ctx, args.sectionId); // 2. scope (+ tenant check)
+    const subject = await getInSchool(ctx, "subjects", args.subjectId);  // 3. every id via getInSchool
+    assertIsoDate(args.dueDate, "dueDate");                              // 4. validate values
+    const id = await ctx.db.insert("homework", {
+      schoolId: ctx.actor.schoolId,                                      // 5. schoolId from the actor, never args
+      academicYearId: section.academicYearId, sectionId: section._id, subjectId: subject._id,
+      teacherId: ctx.actor.teacherId!, title: assertNonEmpty(args.title, "title"), description: args.description,
+      assignedOn: new Date().toISOString().slice(0, 10), dueDate: args.dueDate, status: "published", attachmentFileIds: [],
+    });
+    await writeAudit(ctx, { schoolId: ctx.actor.schoolId, actor: ctx.actor, action: "homework.created",
+      entity: { table: "homework", id }, summary: `Homework "${args.title}" for ${section.displayName}` });
+    return id;
+  },
+});
+```
+
+Checklist (enforced partly by `tests/convex/permissions.test.ts`):
+1. Public functions use `schoolQuery` / `schoolMutation` (or `userQuery` / `userMutation` for pre-school
+   identity calls). Raw `query`/`mutation` only for the allow-listed public endpoints.
+2. Arguments use `v.id("table")` for ids, enum validators from `core/validators.ts`, and value checks
+   (`assertIsoDate`, `assertTime`, `assertAmountMinor`, `assertNonEmpty`, `normalizeEmail`).
+3. Write `schoolId: ctx.actor.schoolId` on inserts — never from args.
+4. Read with `withIndex(...)`; add an index to `schema.ts` only for a real query you are writing.
+   Bound lists with `.take(n)` or pagination.
+5. Throw only `AppError` helpers (`forbidden`, `notFound`, `invalid`, `invalidRelationship`, `conflict`).
+6. Audit important changes with `writeAudit`; notify with `notifyUsers` in the same mutation.
+7. Return plain view-models (strings/ids/numbers) — not whole documents with internal fields.
+
+**Naming:** module files are plural nouns of the domain (`attendance`, `academics`, `notifications`);
+queries are `get…`, `list…`, nouns (`viewer`, `dailyOverview`); mutations are verbs (`mark`, `update`,
+`invite`, `setClassTeacher`). Audit actions are `"<entity>.<past_tense>"`. Indexes are `by_<field>_<field>`.
+**Dates** `YYYY-MM-DD` strings, **times** `HH:MM`, **timestamps** epoch ms, **money** integer minor units.
+
+**Error codes** (`ConvexError.data.code`): `UNAUTHENTICATED`, `NO_SCHOOL_ACCESS`, `SCHOOL_SELECTION_REQUIRED`,
+`FORBIDDEN`, `NOT_FOUND`, `INVALID_ARGUMENT` (with optional `fields`), `INVALID_RELATIONSHIP`, `CONFLICT`.
+
+---
+
+## 11. Storage, notifications, audit
+
+- **Files:** `files.generateUploadUrl` → browser POSTs the file → `files.register({ storageId, kind, ownerType,
+  ownerId, fileName })`. Kind/owner/permission policy is in `convex/files.ts`; size and content type come from
+  Convex's `_storage` metadata (PDF/PNG/JPEG/WebP ≤ 10 MB). `files.getUrl` re-checks access on every read.
+- **Notifications:** `notifyUsers(ctx, schoolId, userIds, { type, title, message, href?, entity? })` inside the
+  producing mutation; clients use `notifications.list / unreadCount / markRead / markAllRead`.
+- **Audit:** `writeAudit(...)`; read with `audit.list` (`audit:read`). There is no update/delete for audit rows.
+
+---
+
+## 12. Frontend usage
+
+```tsx
+import { api } from "@/lib/convex/api";
+import { useSchoolQuery, useSchoolMutation, useMembership } from "@/lib/convex/membership";
+import { getAppError } from "@/lib/convex/errors";
+import { useAuthActions } from "@convex-dev/auth/react";
+
+const register = useSchoolQuery(api.attendance.getByDate, { sectionId, date }); // undefined while loading
+const mark = useSchoolMutation(api.attendance.mark);
+try { await mark({ sectionId, date, entries }); } catch (e) { toast(getAppError(e)?.message ?? "Failed"); }
+
+const { signIn, signOut } = useAuthActions();
+await signIn("password", { email, password, flow: "signIn" });
+```
+
+`useSchoolQuery` / `useSchoolMutation` add the active `membershipId` automatically. `useMembership()` exposes
+`me.memberships` for a school/role switcher.
+
+**Migration path (module by module, one source of truth at a time):**
+1. Auth/session first: switch the login screen to `useAuthActions`, replace `SessionProvider`'s mock session
+   with `api.users.viewer`, and add redirects in `src/proxy.ts`.
+2. Then per module: rewrite the screen's data calls to `useSchoolQuery`/`useSchoolMutation` and **delete** the
+   corresponding mock service + its seed slice in the same PR.
+3. When the last module moves, delete `src/lib/mock-data`, `src/lib/store`, and the mock services.
+
+---
+
+## 13. Tests
+
+| Command | What |
+|---|---|
+| `npm run test:convex` | In-process Convex tests (`convex-test` + Vitest): tenant isolation, auth resolution, attendance ownership, permission catalogue, source guard |
+| `npm run test:convex:integration` | Against a real seeded deployment (`CONVEX_URL=…`): real Convex Auth sign-in, invitations, suspension, attendance rules, notifications, audit |
+| `npm run test:authz` / `npm run test:e2e` | Stage 1 UI + mock service suites (unchanged) |
+
+---
+
+## 14. Not built yet (intentional placeholders)
+
+- Business logic for fees, exams/marks/results, timetable, homework, notices/events, students/teachers CRUD
+  and reports: **schema only**. Build them in the module that owns them following §10.
+- Password reset and email verification (Password provider supports both; needs an email provider such as
+  Resend configured on the deployment).
+- Delivery channels for notifications (push/email/SMS) — add by scheduling an action from `notifyUsers`.
+- Multi-school platform administration (creating a new school is currently done by a seed dataset or a
+  future internal "provision school" mutation).
+- Frontend screens still run on mock services (see §12).

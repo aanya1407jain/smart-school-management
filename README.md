@@ -3,9 +3,11 @@
 A reusable, role-based school management platform built around connected workflows —
 students, academics, attendance, fees, examinations, timetable, homework, notices and reports.
 
-**Stage 1 (this repository state) is the frontend only.** It uses a mock service layer and browser
-storage — no backend, database or auth provider is connected yet. The architecture is designed so
-Stage 2 (Convex + real auth) replaces the service implementations without touching the UI.
+**Status:** the Stage 1 frontend is complete and still runs on its mock service layer. The **production
+backend foundation is in place on Convex** (`convex/`): multi-school tenancy, Convex Auth (invite-only),
+centralised RBAC, the academic structure, server-enforced attendance ownership, audit, notifications,
+storage and a dataset-driven seed. UI modules migrate to Convex one at a time.
+**Backend contract for the team: [docs/BACKEND.md](docs/BACKEND.md).**
 
 ## Product vs. demo school
 
@@ -171,12 +173,24 @@ the top bar shows a student switcher and every query is scoped to the selected l
   more categories are shown as small multiples.
 - Small text uses Lagoon / Deep Purple rather than Teal / Purple to meet WCAG AA contrast.
 
-## Known limits of Stage 1
+## Backend (Convex)
+
+```bash
+npx convex dev                      # link/create a deployment; writes NEXT_PUBLIC_CONVEX_URL to .env.local
+npx @convex-dev/auth                # once per deployment: JWT keys + SITE_URL
+npx convex env set ALLOW_DEMO_SEED true && npm run seed:demo   # dev only: Aster Academy demo school
+```
+
+Without `NEXT_PUBLIC_CONVEX_URL` the app runs exactly as the Stage 1 mock build. See
+[docs/BACKEND.md](docs/BACKEND.md) for the schema, tenancy, auth, permissions, attendance rules and the
+conventions for writing new Convex functions.
+
+## Known limits of Stage 1 UI
 
 - Data lives in the browser (localStorage); each browser has its own copy.
 - File uploads (documents, logos, homework attachments) store names only.
 - Password reset, email/SMS notifications and online payments are simulated.
-- Single tenant: the store holds one school. Locale is fixed to India (`en-IN` dates, INR currency, `+91` phone
+- The mock store holds one school (the Convex backend is multi-school, with per-school timezone/locale/currency). The UI locale is fixed to India (`en-IN` dates, INR currency, `+91` phone
   placeholders) and grading follows the CBSE 8-point scale — these are product defaults to make configurable
   per school in a later stage.
 
@@ -188,4 +202,6 @@ npm run build && npm start          # terminal 1
 npx playwright install chromium     # once
 npm run test:e2e                    # terminal 2 — 80 checks: auth, product identity, route guards, 6 workflows, attendance ownership, mobile
 npm run test:authz                  # 23 service-level checks: unauthorized attendance writes are rejected by the service layer
+npm run test:convex                 # Convex functions in-process (convex-test): tenant isolation, RBAC, attendance ownership
+CONVEX_URL=… npm run test:convex:integration   # against a real seeded deployment, with real Convex Auth sign-in
 ```

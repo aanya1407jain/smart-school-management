@@ -1,9 +1,12 @@
 /**
  * Service registry — the ONLY entry point the UI uses for data.
  *
- * Stage 1 wires every service to its mock implementation. In Stage 2, swap an
- * entry (e.g. `students: convexStudentService`) with an implementation that
- * satisfies the same type; components, forms and pages stay unchanged.
+ * Stage 1 wires every service to its mock implementation. The Convex backend
+ * (convex/, see docs/BACKEND.md) is now the target source of truth. Modules
+ * migrate ONE AT A TIME: a migrated screen calls Convex directly through
+ * `useSchoolQuery` / `useSchoolMutation` (src/lib/convex/membership.tsx) and
+ * its mock service is deleted in the same change, so mock data and Convex are
+ * never two live sources of truth for the same module.
  */
 import { mockAcademicsService, type AcademicsService } from "./academics.service";
 import { mockAttendanceService, type AttendanceService } from "./attendance.service";
