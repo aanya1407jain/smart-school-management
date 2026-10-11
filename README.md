@@ -200,7 +200,7 @@ conventions for writing new Convex functions.
 npm run typecheck
 npm run build && npm start          # terminal 1
 npx playwright install chromium     # once
-npm run test:e2e                    # terminal 2 — 80 checks: auth, product identity, route guards, 6 workflows, attendance ownership, mobile
+npm run test:e2e                    # terminal 2 — 82 checks: auth, product identity, route guards, 6 workflows, attendance ownership, mobile
 npm run test:authz                  # 23 service-level checks: unauthorized attendance writes are rejected by the service layer
 npm run test:convex                 # Convex functions in-process (convex-test): tenant isolation, RBAC, attendance ownership
 CONVEX_URL=… npm run test:convex:integration   # against a real seeded deployment, with real Convex Auth sign-in
