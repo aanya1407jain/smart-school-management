@@ -1,9 +1,9 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { AlertCircle, CircleDollarSign, Clock, Layers, Plus, Receipt, Trash2, Users, Wallet } from "lucide-react";
+import { AlertCircle, CircleDollarSign, Clock, Download, Layers, Plus, Receipt, RotateCcw, Trash2, Users, Wallet } from "lucide-react";
 import type { FeeStanding } from "@/lib/services/derive";
 import { services } from "@/lib/services";
 import { useQuery } from "@/lib/hooks/use-query";
@@ -17,7 +17,8 @@ import { CHART, CHART_GRID } from "@/lib/constants/theme";
 import { useAcademicOptions } from "@/features/shared/use-academic-options";
 import { FormError } from "@/features/shared/form-error";
 import { formatCurrency, formatPercent } from "@/lib/utils/format";
-import { formatDate, formatShortDate } from "@/lib/utils/dates";
+import { formatDate, formatShortDate, todayISO } from "@/lib/utils/dates";
+import { downloadCsv } from "@/lib/utils/csv";
 import { PAYMENT_METHOD_LABELS } from "@/lib/constants/labels";
 import { ReceiptModal } from "./fee-tables";
 import { StudentPickerModal } from "./student-picker";
@@ -112,16 +113,95 @@ function Balances() {
   const opts = useAcademicOptions();
   const [search, setSearch] = useState("");
   const [classId, setClassId] = useState("");
+  const [sectionId, setSectionId] = useState("");
   const [standing, setStanding] = useState<string>(params.get("standing") ?? "");
   const [dueBy, setDueBy] = useState("");
-  const q = useQuery(() => services.fees.listBalances({ search, classId, standing: (standing || "all") as FeeStanding | "all" }), [search, classId, standing]);
+
+  const q = useQuery(
+    () => services.fees.listBalances({ search, classId, sectionId, standing: (standing || "all") as FeeStanding | "all" }),
+    [search, classId, sectionId, standing]
+  );
   const rows = (q.data ?? []).filter((r) => !dueBy || (r.nextDue && r.nextDue.dueDate <= dueBy));
   const total = rows.reduce((a, r) => a + r.outstanding, 0);
+
+  const sectionOptions = useMemo(
+    () =>
+      (opts.data?.sections ?? [])
+        .filter((s) => !classId || s.classId === classId)
+        .map((s) => ({ value: s.id, label: classId ? `Section ${s.name}` : `Class ${s.label}` })),
+    [opts.data, classId]
+  );
+
+  const hasActiveFilters = Boolean(search || classId || sectionId || standing || dueBy);
+
+  const resetFilters = () => {
+    setSearch("");
+    setClassId("");
+    setSectionId("");
+    setStanding("");
+    setDueBy("");
+  };
+
+  const handleExport = () => {
+    if (!rows.length) return;
+    const selectedClass = opts.data?.classes.find((c) => c.id === classId)?.name.replace(/\s+/g, "_") ?? "all_classes";
+    const filename = `student_balances_${selectedClass}_${todayISO()}`;
+    const headers = [
+      "Student Name",
+      "Admission No",
+      "Class",
+      "Net Fees (INR)",
+      "Amount Paid (INR)",
+      "Outstanding (INR)",
+      "Payment Status",
+      "Next Due Date",
+      "Last Payment Date",
+    ];
+    const dataRows = rows.map((r) => [
+      r.name,
+      r.admissionNo,
+      r.classLabel,
+      r.net,
+      r.paid,
+      r.outstanding,
+      r.standing,
+      r.nextDue?.dueDate ?? "—",
+      r.lastPayment ?? "—",
+    ]);
+    downloadCsv(filename, headers, dataRows);
+  };
+
   return (
     <Card className="p-4 sm:p-5">
-      <FilterBar actions={<p className="text-[13px] text-ink-muted">{rows.length} students · <span className="font-semibold text-ink">{formatCurrency(total)}</span> outstanding</p>}>
+      <FilterBar
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-[13px] text-ink-muted">
+              {rows.length} students · <span className="font-semibold text-ink">{formatCurrency(total)}</span> outstanding
+            </p>
+            {hasActiveFilters && (
+              <Button variant="ghost" size="sm" onClick={resetFilters} aria-label="Reset filters">
+                <RotateCcw className="h-3.5 w-3.5" /> Reset
+              </Button>
+            )}
+            <Button variant="outline" size="sm" onClick={handleExport} disabled={!rows.length} aria-label="Export balances to CSV">
+              <Download className="h-4 w-4" /> Export CSV
+            </Button>
+          </div>
+        }
+      >
         <SearchInput value={search} onChange={setSearch} placeholder="Student name or admission no." className="col-span-2 sm:w-64" label="Search student" />
-        <FilterSelect label="Class" value={classId} onChange={setClassId} allLabel="All classes" options={(opts.data?.classes ?? []).map((c) => ({ value: c.id, label: c.name }))} />
+        <FilterSelect
+          label="Class"
+          value={classId}
+          onChange={(val) => {
+            setClassId(val);
+            setSectionId("");
+          }}
+          allLabel="All classes"
+          options={(opts.data?.classes ?? []).map((c) => ({ value: c.id, label: c.name }))}
+        />
+        <FilterSelect label="Section" value={sectionId} onChange={setSectionId} allLabel="All sections" options={sectionOptions} />
         <FilterSelect label="Status" value={standing} onChange={setStanding} allLabel="All statuses" options={[{ value: "overdue", label: "Overdue" }, { value: "due_soon", label: "Due soon" }, { value: "clear", label: "Up to date" }, { value: "paid", label: "Fully paid" }, { value: "not_assigned", label: "Not assigned" }]} />
         <div className="flex items-center gap-2"><label htmlFor="dueby" className="whitespace-nowrap text-[13px] text-ink-muted">Due by</label><Input id="dueby" type="date" value={dueBy} onChange={(e) => setDueBy(e.target.value)} className="w-40" /></div>
       </FilterBar>
@@ -133,7 +213,19 @@ function Balances() {
               rows={rows}
               getRowId={(r) => r.studentId}
               onRowClick={(r) => router.push(`/admin/fees/${r.studentId}`)}
-              empty={<EmptyState title="No fee records available" description="No students match these filters." />}
+              empty={
+                <EmptyState
+                  title="No fee records available"
+                  description="No students match these filters."
+                  action={
+                    hasActiveFilters ? (
+                      <Button variant="outline" onClick={resetFilters}>
+                        <RotateCcw className="h-4 w-4" /> Reset filters
+                      </Button>
+                    ) : undefined
+                  }
+                />
+              }
               columns={[
                 { key: "student", header: "Student", primary: true, cell: (r) => <div className="flex items-center gap-3"><Avatar name={r.name} size="sm" /><div><p className="font-semibold text-ink">{r.name}</p><p className="font-mono text-[11.5px] text-ink-muted">{r.admissionNo}</p></div></div> },
                 { key: "class", header: "Class", cell: (r) => r.classLabel },
@@ -270,9 +362,67 @@ function Payments() {
   const [to, setTo] = useState("");
   const [receiptId, setReceiptId] = useState<string | null>(null);
   const q = useQuery(() => services.fees.listPayments({ search, classId, method, from: from || undefined, to: to || undefined }), [search, classId, method, from, to]);
+
+  const hasActiveFilters = Boolean(search || classId || method || from || to);
+  const resetFilters = () => {
+    setSearch("");
+    setClassId("");
+    setMethod("");
+    setFrom("");
+    setTo("");
+  };
+
+  const handleExport = () => {
+    if (!q.data?.length) return;
+    const filename = `fee-payments-${todayISO()}`;
+    const headers = [
+      "Receipt No",
+      "Date",
+      "Student Name",
+      "Class",
+      "Payment Method",
+      "Reference",
+      "Amount (INR)",
+    ];
+    const dataRows = q.data.map((p) => [
+      p.receiptNo,
+      p.paidOn,
+      p.studentName,
+      p.classLabel,
+      PAYMENT_METHOD_LABELS[p.method] ?? p.method,
+      p.reference,
+      p.amount,
+    ]);
+    downloadCsv(filename, headers, dataRows);
+  };
+
   return (
     <Card className="p-4 sm:p-5">
-      <FilterBar actions={q.data && <p className="text-[13px] text-ink-muted">{q.data.length} payments · <span className="font-semibold text-ink">{formatCurrency(q.data.reduce((a, p) => a + p.amount, 0))}</span></p>}>
+      <FilterBar
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            {q.data && (
+              <p className="text-[13px] text-ink-muted">
+                {q.data.length} payments · <span className="font-semibold text-ink">{formatCurrency(q.data.reduce((a, p) => a + p.amount, 0))}</span>
+              </p>
+            )}
+            {hasActiveFilters && (
+              <Button variant="ghost" size="sm" onClick={resetFilters} aria-label="Reset payment filters">
+                <RotateCcw className="h-3.5 w-3.5" /> Reset
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExport}
+              disabled={!q.data?.length}
+              aria-label="Export payments to CSV"
+            >
+              <Download className="h-4 w-4" /> Export CSV
+            </Button>
+          </div>
+        }
+      >
         <SearchInput value={search} onChange={setSearch} placeholder="Student or receipt no." className="col-span-2 sm:w-56" label="Search payments" />
         <FilterSelect label="Class" value={classId} onChange={setClassId} allLabel="All classes" options={(opts.data?.classes ?? []).map((c) => ({ value: c.id, label: c.name }))} />
         <FilterSelect label="Method" value={method} onChange={setMethod} allLabel="All methods" options={Object.entries(PAYMENT_METHOD_LABELS).map(([value, label]) => ({ value, label }))} />
@@ -286,7 +436,19 @@ function Payments() {
               caption="Payments"
               rows={rows}
               getRowId={(p) => p.id}
-              empty={<EmptyState title="No payments found" />}
+              empty={
+                <EmptyState
+                  title="No payments found"
+                  description="No payment records match the current filters."
+                  action={
+                    hasActiveFilters ? (
+                      <Button variant="outline" onClick={resetFilters}>
+                        <RotateCcw className="h-4 w-4" /> Reset filters
+                      </Button>
+                    ) : undefined
+                  }
+                />
+              }
               columns={[
                 { key: "receipt", header: "Receipt", primary: true, cell: (p) => <div><p className="font-mono text-[13px] font-semibold text-ink">{p.receiptNo}</p><p className="text-[12px] text-ink-muted">{formatDate(p.paidOn)}</p></div> },
                 { key: "student", header: "Student", cell: (p) => <Link href={`/admin/fees/${p.studentId}`} className="hover:text-lagoon"><span className="font-medium text-ink">{p.studentName}</span> <span className="text-[12px] text-ink-muted">· {p.classLabel}</span></Link> },
