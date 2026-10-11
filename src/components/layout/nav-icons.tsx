@@ -1,0 +1,24 @@
+import {
+  BarChart3, Bell, BookOpenCheck, CalendarClock, CalendarCheck2, ClipboardList, GraduationCap, LayoutDashboard, Megaphone,
+  School, Settings, UserRound, Users, Wallet, Award, Presentation, type LucideIcon,
+} from "lucide-react";
+import type { NavIcon } from "@/lib/permissions";
+
+export const NAV_ICONS: Record<NavIcon, LucideIcon> = {
+  dashboard: LayoutDashboard,
+  students: GraduationCap,
+  academics: School,
+  teachers: Users,
+  attendance: CalendarCheck2,
+  fees: Wallet,
+  exams: BookOpenCheck,
+  timetable: CalendarClock,
+  homework: ClipboardList,
+  notices: Megaphone,
+  notifications: Bell,
+  reports: BarChart3,
+  settings: Settings,
+  classes: Presentation,
+  results: Award,
+  profile: UserRound,
+};
