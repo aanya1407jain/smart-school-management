@@ -1,0 +1,47 @@
+{
+  "name": "smart-school-management",
+  "description": "Smart School Management System — reusable, role-based school management platform (Stage 1: frontend with mock services; demo tenant: Aster Academy).",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test:e2e": "node scripts/e2e.mjs",
+    "test:authz": "tsx --tsconfig tsconfig.json scripts/attendance-authz.test.ts"
+  },
+  "dependencies": {
+    "@fontsource-variable/plus-jakarta-sans": "5.3.0",
+    "@fontsource/fraunces": "5.3.0",
+    "@hookform/resolvers": "3.10.0",
+    "@radix-ui/react-dialog": "1.1.6",
+    "@radix-ui/react-dropdown-menu": "2.1.6",
+    "@radix-ui/react-tabs": "1.1.3",
+    "clsx": "2.1.1",
+    "framer-motion": "11.18.2",
+    "lucide-react": "0.468.0",
+    "next": "16.3.8",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-hook-form": "7.54.2",
+    "recharts": "2.15.1",
+    "tailwind-merge": "2.6.0",
+    "zod": "3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.5",
+    "@types/react": "19.1.8",
+    "@types/react-dom": "19.1.6",
+    "autoprefixer": "10.4.20",
+    "playwright": "1.51.1",
+    "postcss": "8.4.49",
+    "tailwindcss": "3.4.17",
+    "tsx": "4.23.15",
+    "typescript": "5.7.3"
+  },
+  "overrides": {
+    "react-is": "19.2.8"
+  }
+}
