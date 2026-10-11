@@ -305,13 +305,16 @@ const waitText = async (page, re, timeout = 10000) => { try { await page.getByTe
   await login(page, "teacher@asteracademy.edu", "Teacher@123", "teacher");
   await page.goto(BASE + "/teacher/examinations");
   await page.getByRole("link", { name: /Mathematics · Class 10-A/ }).first().click();
-  await waitText(page, /Mathematics · Class 10-A/);
+  // The link text also matches the list page, so wait for the marks sheet itself
+  // (URL + its inputs) before counting rows — count() does not auto-wait.
+  await page.waitForURL(/\/teacher\/examinations\/marks\?/);
   const inputs = page.getByRole("textbox", { name: /Marks for/ });
+  await inputs.first().waitFor();
   const n = await inputs.count();
   const marks = [72, 67.5, 58, 61, 70, 49, 75, 66, 55];
   for (let i = 0; i < n; i++) await inputs.nth(i).fill(String(marks[i % marks.length]));
   await page.getByRole("button", { name: /save marks/i }).click();
-  check("W5 Teacher enters marks for assigned subject", await waitText(page, /Marks saved/));
+  check("W5 Teacher enters marks for assigned subject", await waitText(page, /Marks saved/) && await waitText(page, /All students entered/));
   await page.goto(BASE + "/teacher/examinations/marks?paper=ep_ex_hy_12_mat&section=sec_12a");
   check("W5 Teacher cannot enter marks for unassigned class", await waitText(page, /not assigned|don't have access/i));
   await logout(page);
@@ -323,11 +326,12 @@ const waitText = async (page, re, timeout = 10000) => { try { await page.getByTe
   await page.goto(BASE + "/admin/examinations/marks?paper=ep_ex_hy_12_hin&section=sec_12c");
   await waitText(page, /Hindi · Class 12-C/);
   const in2 = page.getByRole("textbox", { name: /Marks for/ });
+  await in2.first().waitFor();
   for (let i = 0; i < (await in2.count()); i++) await in2.nth(i).fill(String(50 + i));
   await page.getByRole("button", { name: /save marks/i }).click();
-  await waitText(page, /Marks saved/);
+  check("W5 Admin completes the last pending sheet", await waitText(page, /Marks saved/) && await waitText(page, /All students entered/));
   await page.goto(BASE + "/admin/examinations/ex_hy");
-  await waitText(page, /ready to publish/i);
+  check("W5 Exam reports ready to publish", await waitText(page, /ready to publish/i));
   await page.getByRole("button", { name: /publish results/i }).first().click();
   await page.getByRole("dialog").getByRole("button", { name: /publish results/i }).click();
   check("W5 Admin publishes results", await waitText(page, /Results published/));

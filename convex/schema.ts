@@ -1,0 +1,555 @@
+/**
+ * Smart School Management System — production schema.
+ *
+ * MULTI-TENANT RULES (read docs/BACKEND.md before adding a table):
+ *  1. Every school-owned table has a `schoolId` field.
+ *  2. Every index used to LIST school data starts with `schoolId` or with a
+ *     parent id that is itself school-scoped (e.g. `sectionId`), and the
+ *     function verifies that parent belongs to the caller's school first.
+ *  3. Functions never trust a schoolId/role/userId from the client; they use
+ *     `ctx.actor` from `schoolQuery` / `schoolMutation` (convex/core/functions.ts).
+ *
+ * Global (non-tenant) tables: `users` and Convex Auth's internal tables
+ * (identity is global; access to a school is granted by `schoolMemberships`),
+ * and `schools` itself.
+ *
+ * Conventions: dates are ISO "YYYY-MM-DD" strings, times are "HH:MM",
+ * timestamps are epoch milliseconds, money is integer MINOR units (paise).
+ */
+import { defineSchema, defineTable } from "convex/server";
+import { authTables } from "@convex-dev/auth/server";
+import { v } from "convex/values";
+import {
+  vAcademicYearStatus, vAttendanceStatus, vAudience, vConcessionKind, vEnrollmentStatus, vEntityRef, vEventKind,
+  vExamStatus, vFileKind, vFileOwnerType, vGender, vHomeworkStatus, vMembershipStatus, vNoticeStatus, vNoticeType,
+  vNotificationType, vPaymentMethod, vPaymentStatus, vPermissionSet, vPersonStatus, vPriority, vRole, vSchoolStatus,
+  vStaffStatus, vSubmissionStatus,
+} from "./core/validators";
+
+export default defineSchema({
+  // Convex Auth internal tables (sessions, accounts, refresh tokens, …).
+  ...authTables,
+
+  // ============================================================ identity (global)
+  /**
+   * A person's login identity. Global — one person can belong to several
+   * schools (e.g. a parent with children at two schools). Overrides Convex
+   * Auth's default `users` table (same required fields + indexes) and adds
+   * account-level flags. School-specific data lives in schoolMemberships.
+   */
+  users: defineTable({
+    name: v.optional(v.string()),
+    image: v.optional(v.string()),
+    email: v.optional(v.string()),
+    emailVerificationTime: v.optional(v.number()),
+    phone: v.optional(v.string()),
+    phoneVerificationTime: v.optional(v.number()),
+    isAnonymous: v.optional(v.boolean()),
+    /** Platform-level kill switch; a disabled user cannot start a session. */
+    disabled: v.optional(v.boolean()),
+  })
+    .index("email", ["email"])
+    .index("phone", ["phone"]),
+
+  // ============================================================ tenancy
+  schools: defineTable({
+    name: v.string(),
+    /** URL/subdomain-safe unique key, e.g. "aster-academy". */
+    slug: v.string(),
+    shortName: v.string(),
+    /** Prefix for generated numbers (admission, employee, receipt), e.g. "AA". */
+    code: v.string(),
+    status: vSchoolStatus,
+    timezone: v.string(), // IANA, e.g. "Asia/Kolkata"
+    locale: v.string(), // BCP-47, e.g. "en-IN"
+    currency: v.string(), // ISO 4217, e.g. "INR"
+    tagline: v.optional(v.string()),
+    address: v.optional(v.string()),
+    phone: v.optional(v.string()),
+    email: v.optional(v.string()),
+    website: v.optional(v.string()),
+    affiliation: v.optional(v.string()),
+    logoStorageId: v.optional(v.id("_storage")),
+  }).index("by_slug", ["slug"]),
+
+  /** One row per school. Kept separate so settings can change without touching identity. */
+  schoolSettings: defineTable({
+    schoolId: v.id("schools"),
+    currentAcademicYearId: v.optional(v.id("academicYears")),
+    /** ISO weekday numbers (0 = Sunday) on which school is in session. */
+    workingDays: v.array(v.number()),
+    attendance: v.object({
+      lateCountsAsPresent: v.boolean(),
+      lowAttendanceThreshold: v.number(), // percent
+    }),
+    grading: v.object({
+      scheme: v.string(), // e.g. "cbse_8_point"; resolved by the exams module
+      passPercentage: v.number(),
+    }),
+    notifications: v.object({
+      attendanceAlerts: v.boolean(),
+      feeReminders: v.boolean(),
+      homeworkAlerts: v.boolean(),
+      examAlerts: v.boolean(),
+      noticeAlerts: v.boolean(),
+    }),
+  }).index("by_school", ["schoolId"]),
+
+  /**
+   * A user's access to ONE school. This is the only thing that grants access.
+   * role = portal (admin | teacher | student). Links:
+   *  - teacher role → teacherId (required)
+   *  - student role → studentId (the student) OR guardianId (a guardian using
+   *    the student portal for their linked children). Exactly one of the two.
+   *  - admin role   → optionally teacherId if the principal also teaches.
+   * Invitations are memberships with status "invited" and no userId yet.
+   */
+  schoolMemberships: defineTable({
+    schoolId: v.id("schools"),
+    userId: v.optional(v.id("users")),
+    /** Normalised login email; used to match an invitation at activation. */
+    email: v.string(),
+    displayName: v.string(),
+    role: vRole,
+    status: vMembershipStatus,
+    permissionSets: v.array(vPermissionSet),
+    teacherId: v.optional(v.id("teachers")),
+    studentId: v.optional(v.id("students")),
+    guardianId: v.optional(v.id("guardians")),
+    /** SHA-256 of the one-time invitation code (the code itself is never stored). */
+    inviteCodeHash: v.optional(v.string()),
+    inviteExpiresAt: v.optional(v.number()),
+    invitedByUserId: v.optional(v.id("users")),
+    activatedAt: v.optional(v.number()),
+  })
+    .index("by_user", ["userId"])
+    .index("by_email_status", ["email", "status"])
+    .index("by_school_email", ["schoolId", "email"])
+    .index("by_school_role", ["schoolId", "role"])
+    .index("by_teacher", ["teacherId"])
+    .index("by_student", ["studentId"])
+    .index("by_guardian", ["guardianId"]),
+
+  // ============================================================ academic structure
+  academicYears: defineTable({
+    schoolId: v.id("schools"),
+    name: v.string(), // "2026-27"
+    startDate: v.string(),
+    endDate: v.string(),
+    status: vAcademicYearStatus,
+  }).index("by_school_start", ["schoolId", "startDate"]),
+
+  /** A grade level ("Grade 8"). Year-independent; sections are per year. */
+  classes: defineTable({
+    schoolId: v.id("schools"),
+    name: v.string(),
+    /** Numeric level used for ordering/promotion (8 for Grade 8). */
+    level: v.number(),
+    active: v.boolean(),
+  }).index("by_school_level", ["schoolId", "level"]),
+
+  /**
+   * A section of a class in ONE academic year ("8-A" in 2026-27).
+   * classTeacherId is the attendance OWNER of this section.
+   */
+  sections: defineTable({
+    schoolId: v.id("schools"),
+    academicYearId: v.id("academicYears"),
+    classId: v.id("classes"),
+    name: v.string(), // "A"
+    displayName: v.string(), // "8-A"
+    classTeacherId: v.optional(v.id("teachers")),
+    room: v.optional(v.string()),
+    capacity: v.optional(v.number()),
+  })
+    .index("by_school_year", ["schoolId", "academicYearId"])
+    .index("by_class_year", ["classId", "academicYearId"])
+    .index("by_class_teacher_year", ["classTeacherId", "academicYearId"]),
+
+  subjects: defineTable({
+    schoolId: v.id("schools"),
+    name: v.string(),
+    code: v.string(),
+    active: v.boolean(),
+  }).index("by_school_code", ["schoolId", "code"]),
+
+  // ============================================================ people
+  teachers: defineTable({
+    schoolId: v.id("schools"),
+    employeeId: v.string(),
+    title: v.optional(v.string()),
+    firstName: v.string(),
+    lastName: v.string(),
+    gender: v.optional(vGender),
+    email: v.optional(v.string()),
+    phone: v.optional(v.string()),
+    designation: v.optional(v.string()),
+    qualification: v.optional(v.string()),
+    specializationSubjectIds: v.array(v.id("subjects")),
+    joiningDate: v.optional(v.string()),
+    status: vStaffStatus,
+    address: v.optional(v.string()),
+    photoStorageId: v.optional(v.id("_storage")),
+  })
+    .index("by_school_employee", ["schoolId", "employeeId"])
+    .index("by_school_status", ["schoolId", "status"]),
+
+  students: defineTable({
+    schoolId: v.id("schools"),
+    admissionNo: v.string(),
+    firstName: v.string(),
+    lastName: v.string(),
+    gender: v.optional(vGender),
+    dateOfBirth: v.optional(v.string()),
+    admissionDate: v.optional(v.string()),
+    status: vPersonStatus,
+    email: v.optional(v.string()),
+    phone: v.optional(v.string()),
+    address: v.optional(v.string()),
+    bloodGroup: v.optional(v.string()),
+    photoStorageId: v.optional(v.id("_storage")),
+  })
+    .index("by_school_admission", ["schoolId", "admissionNo"])
+    .index("by_school_status_name", ["schoolId", "status", "lastName"]),
+
+  guardians: defineTable({
+    schoolId: v.id("schools"),
+    name: v.string(),
+    phone: v.string(),
+    email: v.optional(v.string()),
+    occupation: v.optional(v.string()),
+    address: v.optional(v.string()),
+  }).index("by_school_phone", ["schoolId", "phone"]),
+
+  /** Guardian ↔ student (many-to-many). The ONLY basis for guardian data access. */
+  guardianLinks: defineTable({
+    schoolId: v.id("schools"),
+    guardianId: v.id("guardians"),
+    studentId: v.id("students"),
+    relationship: v.string(), // "Mother", "Father", "Guardian", …
+    isPrimary: v.boolean(),
+  })
+    .index("by_guardian", ["guardianId"])
+    .index("by_student", ["studentId"]),
+
+  /**
+   * Academic placement per year. History is preserved: promotion creates a new
+   * enrollment for the next year and closes the old one; never overwrite.
+   */
+  enrollments: defineTable({
+    schoolId: v.id("schools"),
+    studentId: v.id("students"),
+    academicYearId: v.id("academicYears"),
+    classId: v.id("classes"),
+    sectionId: v.id("sections"),
+    rollNo: v.optional(v.number()),
+    status: vEnrollmentStatus,
+    startDate: v.string(),
+    endDate: v.optional(v.string()),
+  })
+    .index("by_student_year", ["studentId", "academicYearId"])
+    .index("by_section_status", ["sectionId", "status"])
+    .index("by_school_year", ["schoolId", "academicYearId"]),
+
+  /**
+   * Who teaches what to whom. SUBJECT ASSIGNMENT != ATTENDANCE OWNERSHIP:
+   * attendance ownership is `sections.classTeacherId` only.
+   */
+  teacherAssignments: defineTable({
+    schoolId: v.id("schools"),
+    academicYearId: v.id("academicYears"),
+    teacherId: v.id("teachers"),
+    subjectId: v.id("subjects"),
+    classId: v.id("classes"),
+    sectionId: v.id("sections"),
+    periodsPerWeek: v.optional(v.number()),
+  })
+    .index("by_teacher_year", ["teacherId", "academicYearId"])
+    .index("by_section_subject", ["sectionId", "subjectId"]),
+
+  // ============================================================ attendance
+  /** One register per section per school day. */
+  attendanceSessions: defineTable({
+    schoolId: v.id("schools"),
+    academicYearId: v.id("academicYears"),
+    sectionId: v.id("sections"),
+    date: v.string(),
+    markedByUserId: v.id("users"),
+    markedByTeacherId: v.id("teachers"),
+    markedAt: v.number(),
+    lastEditedByUserId: v.optional(v.id("users")),
+    lastEditedAt: v.optional(v.number()),
+    presentCount: v.number(),
+    absentCount: v.number(),
+    lateCount: v.number(),
+    excusedCount: v.number(),
+  })
+    .index("by_section_date", ["sectionId", "date"])
+    .index("by_school_date", ["schoolId", "date"]),
+
+  /** One row per student per register. */
+  attendanceRecords: defineTable({
+    schoolId: v.id("schools"),
+    sessionId: v.id("attendanceSessions"),
+    sectionId: v.id("sections"),
+    studentId: v.id("students"),
+    date: v.string(),
+    status: vAttendanceStatus,
+    remark: v.optional(v.string()),
+  })
+    .index("by_session_student", ["sessionId", "studentId"])
+    .index("by_student_date", ["studentId", "date"]),
+
+  // ============================================================ fees
+  feeStructures: defineTable({
+    schoolId: v.id("schools"),
+    academicYearId: v.id("academicYears"),
+    name: v.string(),
+    classIds: v.array(v.id("classes")),
+    components: v.array(v.object({ label: v.string(), amountMinor: v.number() })),
+    installments: v.array(v.object({ label: v.string(), dueDate: v.string(), amountMinor: v.number() })),
+    status: v.union(v.literal("draft"), v.literal("active"), v.literal("archived")),
+  }).index("by_school_year", ["schoolId", "academicYearId"]),
+
+  /** A single obligation (one installment of one structure for one student). Immutable amount; corrections via concessions. */
+  studentFees: defineTable({
+    schoolId: v.id("schools"),
+    studentId: v.id("students"),
+    academicYearId: v.id("academicYears"),
+    feeStructureId: v.id("feeStructures"),
+    label: v.string(),
+    amountMinor: v.number(),
+    dueDate: v.string(),
+    status: v.union(v.literal("active"), v.literal("cancelled")),
+  })
+    .index("by_student_year", ["studentId", "academicYearId"])
+    .index("by_school_due", ["schoolId", "dueDate"]),
+
+  feeConcessions: defineTable({
+    schoolId: v.id("schools"),
+    studentId: v.id("students"),
+    academicYearId: v.id("academicYears"),
+    /** Applies to one obligation, or to all of the student's obligations in the year when absent. */
+    studentFeeId: v.optional(v.id("studentFees")),
+    kind: vConcessionKind,
+    /** percent: basis points (1000 = 10%); fixed: minor units. */
+    value: v.number(),
+    reason: v.string(),
+    approvedByUserId: v.id("users"),
+    status: v.union(v.literal("active"), v.literal("revoked")),
+  }).index("by_student_year", ["studentId", "academicYearId"]),
+
+  /** Append-only payment transactions. A reversal is a new row pointing at the original. */
+  feePayments: defineTable({
+    schoolId: v.id("schools"),
+    studentId: v.id("students"),
+    academicYearId: v.id("academicYears"),
+    amountMinor: v.number(),
+    method: vPaymentMethod,
+    reference: v.optional(v.string()),
+    paidOn: v.string(),
+    status: vPaymentStatus,
+    reversalOfPaymentId: v.optional(v.id("feePayments")),
+    allocations: v.array(v.object({ studentFeeId: v.id("studentFees"), amountMinor: v.number() })),
+    recordedByUserId: v.id("users"),
+    note: v.optional(v.string()),
+  })
+    .index("by_student_paid", ["studentId", "paidOn"])
+    .index("by_school_paid", ["schoolId", "paidOn"]),
+
+  receipts: defineTable({
+    schoolId: v.id("schools"),
+    paymentId: v.id("feePayments"),
+    studentId: v.id("students"),
+    receiptNo: v.string(),
+    issuedAt: v.number(),
+    storageId: v.optional(v.id("_storage")),
+  })
+    .index("by_school_number", ["schoolId", "receiptNo"])
+    .index("by_payment", ["paymentId"])
+    .index("by_student", ["studentId"]),
+
+  // ============================================================ examinations
+  exams: defineTable({
+    schoolId: v.id("schools"),
+    academicYearId: v.id("academicYears"),
+    name: v.string(),
+    term: v.optional(v.string()),
+    classIds: v.array(v.id("classes")),
+    startDate: v.string(),
+    endDate: v.string(),
+    status: vExamStatus,
+    publishedAt: v.optional(v.number()),
+    publishedByUserId: v.optional(v.id("users")),
+  }).index("by_school_year", ["schoolId", "academicYearId"]),
+
+  /** One paper: exam × class × subject, with its schedule and marking scheme. */
+  examSubjects: defineTable({
+    schoolId: v.id("schools"),
+    examId: v.id("exams"),
+    classId: v.id("classes"),
+    subjectId: v.id("subjects"),
+    date: v.string(),
+    startTime: v.string(),
+    endTime: v.string(),
+    maxMarks: v.number(),
+    passMarks: v.number(),
+  }).index("by_exam_class", ["examId", "classId"]),
+
+  marks: defineTable({
+    schoolId: v.id("schools"),
+    examId: v.id("exams"),
+    examSubjectId: v.id("examSubjects"),
+    studentId: v.id("students"),
+    sectionId: v.id("sections"),
+    marks: v.optional(v.number()),
+    isAbsent: v.boolean(),
+    enteredByUserId: v.id("users"),
+    updatedAt: v.number(),
+  })
+    .index("by_paper_section", ["examSubjectId", "sectionId"])
+    .index("by_paper_student", ["examSubjectId", "studentId"])
+    .index("by_student_exam", ["studentId", "examId"]),
+
+  /** Computed per student per exam when results are published (a snapshot, not a mutable "current result"). */
+  results: defineTable({
+    schoolId: v.id("schools"),
+    examId: v.id("exams"),
+    studentId: v.id("students"),
+    sectionId: v.id("sections"),
+    totalMarks: v.number(),
+    maxMarks: v.number(),
+    percentage: v.number(),
+    grade: v.optional(v.string()),
+    rank: v.optional(v.number()),
+    subjects: v.array(v.object({
+      examSubjectId: v.id("examSubjects"),
+      subjectId: v.id("subjects"),
+      marks: v.optional(v.number()),
+      isAbsent: v.boolean(),
+      maxMarks: v.number(),
+      grade: v.optional(v.string()),
+      passed: v.boolean(),
+    })),
+    publishedAt: v.number(),
+  })
+    .index("by_student_exam", ["studentId", "examId"])
+    .index("by_exam_section", ["examId", "sectionId"]),
+
+  // ============================================================ timetable
+  timetableEntries: defineTable({
+    schoolId: v.id("schools"),
+    academicYearId: v.id("academicYears"),
+    sectionId: v.id("sections"),
+    dayOfWeek: v.number(), // 0 = Sunday … 6 = Saturday
+    periodNo: v.number(),
+    startTime: v.string(),
+    endTime: v.string(),
+    subjectId: v.id("subjects"),
+    teacherId: v.id("teachers"),
+    room: v.optional(v.string()),
+  })
+    .index("by_section_day", ["sectionId", "dayOfWeek", "periodNo"])
+    .index("by_teacher_day", ["teacherId", "dayOfWeek", "periodNo"]),
+
+  // ============================================================ homework
+  homework: defineTable({
+    schoolId: v.id("schools"),
+    academicYearId: v.id("academicYears"),
+    sectionId: v.id("sections"),
+    subjectId: v.id("subjects"),
+    teacherId: v.id("teachers"),
+    title: v.string(),
+    description: v.string(),
+    assignedOn: v.string(),
+    dueDate: v.string(),
+    status: vHomeworkStatus,
+    attachmentFileIds: v.array(v.id("files")),
+  })
+    .index("by_section_due", ["sectionId", "dueDate"])
+    .index("by_teacher_due", ["teacherId", "dueDate"]),
+
+  homeworkSubmissions: defineTable({
+    schoolId: v.id("schools"),
+    homeworkId: v.id("homework"),
+    studentId: v.id("students"),
+    submittedAt: v.number(),
+    content: v.optional(v.string()),
+    attachmentFileIds: v.array(v.id("files")),
+    status: vSubmissionStatus,
+    feedback: v.optional(v.string()),
+    reviewedByUserId: v.optional(v.id("users")),
+  })
+    .index("by_homework_student", ["homeworkId", "studentId"])
+    .index("by_student", ["studentId"]),
+
+  // ============================================================ communication
+  notices: defineTable({
+    schoolId: v.id("schools"),
+    title: v.string(),
+    body: v.string(),
+    type: vNoticeType,
+    priority: vPriority,
+    audience: vAudience,
+    status: vNoticeStatus,
+    publishDate: v.string(),
+    expiresOn: v.optional(v.string()),
+    eventDate: v.optional(v.string()),
+    createdByUserId: v.id("users"),
+  }).index("by_school_status_publish", ["schoolId", "status", "publishDate"]),
+
+  events: defineTable({
+    schoolId: v.id("schools"),
+    title: v.string(),
+    description: v.optional(v.string()),
+    kind: vEventKind,
+    startDate: v.string(),
+    endDate: v.string(),
+    audience: vAudience,
+    createdByUserId: v.id("users"),
+  }).index("by_school_start", ["schoolId", "startDate"]),
+
+  notifications: defineTable({
+    schoolId: v.id("schools"),
+    userId: v.id("users"),
+    type: vNotificationType,
+    title: v.string(),
+    message: v.string(),
+    isRead: v.boolean(),
+    readAt: v.optional(v.number()),
+    href: v.optional(v.string()),
+    entity: v.optional(vEntityRef),
+  })
+    .index("by_user_school", ["userId", "schoolId"])
+    .index("by_user_school_read", ["userId", "schoolId", "isRead"]),
+
+  // ============================================================ platform
+  /** Append-only trail of important actions. Written via convex/audit/log.ts. */
+  auditLogs: defineTable({
+    schoolId: v.id("schools"),
+    actorUserId: v.optional(v.id("users")), // absent for system jobs (seed, migrations)
+    actorRole: v.optional(vRole),
+    action: v.string(), // "<entity>.<verb>", e.g. "attendance.corrected"
+    entity: vEntityRef,
+    summary: v.string(),
+    metadata: v.optional(v.any()),
+  })
+    .index("by_school", ["schoolId"])
+    .index("by_school_entity", ["schoolId", "entity.table", "entity.id"])
+    .index("by_school_action", ["schoolId", "action"]),
+
+  /** Metadata for every stored file; the blob lives in Convex storage. */
+  files: defineTable({
+    schoolId: v.id("schools"),
+    storageId: v.id("_storage"),
+    kind: vFileKind,
+    ownerType: vFileOwnerType,
+    ownerId: v.string(),
+    fileName: v.string(),
+    contentType: v.string(),
+    size: v.number(),
+    uploadedByUserId: v.id("users"),
+  })
+    .index("by_owner", ["schoolId", "ownerType", "ownerId"])
+    .index("by_storage", ["storageId"]),
+});

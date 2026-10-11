@@ -51,7 +51,20 @@ function examProgress(db: Database, exam: Exam) {
       }
     }
   }
-  return { total, complete, percentage: total ? (complete / total) * 100 : 0, pending };
+  return { total, complete, percentage: total ? (complete / total) * 100 : 0, pending, ...publishReadiness(exam, total, pending.length) };
+}
+
+/**
+ * Single source of truth for "can these results be published?". Used by the
+ * exam detail view (button + message) AND enforced by `publish` below.
+ */
+function publishReadiness(exam: Exam, totalSheets: number, pendingSheets: number): { readyToPublish: boolean; publishBlockedReason: string | null } {
+  const blocked = (reason: string) => ({ readyToPublish: false, publishBlockedReason: reason });
+  if (exam.status === "published") return blocked("Results are already published.");
+  if (exam.status !== "in_progress" && exam.status !== "marks_entry") return blocked("Open marks entry before publishing results.");
+  if (totalSheets === 0) return blocked("This examination has no papers to publish.");
+  if (pendingSheets > 0) return blocked(`${pendingSheets} paper(s) still need marks before results can be published.`);
+  return { readyToPublish: true, publishBlockedReason: null };
 }
 
 export const mockExamService = {
@@ -245,7 +258,7 @@ export const mockExamService = {
         const exam = db.exams.find((e) => e.id === examId);
         if (!exam) throw notFound("Examination");
         const prog = examProgress(db, exam);
-        if (prog.pending.length) throw new ServiceError("CONFLICT", `${prog.pending.length} paper(s) still need marks before results can be published.`);
+        if (!prog.readyToPublish) throw new ServiceError("CONFLICT", prog.publishBlockedReason ?? "These results cannot be published yet.");
         exam.status = "published";
         exam.publishedAt = new Date().toISOString();
         const sectionIds = db.sections.filter((s) => exam.classIds.includes(s.classId)).map((s) => s.id);

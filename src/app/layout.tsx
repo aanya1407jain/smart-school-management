@@ -5,7 +5,8 @@ import "@fontsource/fraunces/600.css";
 import { Providers } from "./providers";
 import "./globals.css";
 import { PRODUCT } from "@/lib/constants/product";
-
+import { ConvexServerProvider } from "@/lib/convex/server-provider";
+import { ConvexClientProvider } from "@/lib/convex/client-provider";
 
 export const metadata: Metadata = {
   title: { default: PRODUCT.name, template: `%s · ${PRODUCT.name}` },
@@ -20,7 +21,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en-IN">
       <body>
-        <Providers>{children}</Providers>
+        <ConvexServerProvider>
+          <ConvexClientProvider>
+            <Providers>{children}</Providers>
+          </ConvexClientProvider>
+        </ConvexServerProvider>
       </body>
     </html>
   );
