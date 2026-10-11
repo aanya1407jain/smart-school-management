@@ -1,0 +1,99 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ------------------------------------------------------------------
+   Smart School Management System design tokens
+   Palette (exact): Scooter #2F9D94 · Blue Lagoon #025F67 · Sapphire #063154
+   Soft Pink Lavender #F3CCDE · Dusty Lavender #D6A8C4 · Muted Purple #BA88AE
+   Purple #9E6899 · Deep Purple #5B3765 · Alabaster #F7F6F2 · Heather #BCC5CC
+   Values are stored as RGB channels so Tailwind opacity modifiers work.
+------------------------------------------------------------------- */
+:root {
+  /* Fonts are self-hosted via @fontsource (no runtime call to Google). */
+  --font-sans: "Plus Jakarta Sans Variable";
+  --font-display: "Fraunces";
+  --c-teal: 47 157 148;        /* #2F9D94 */
+  --c-teal-soft: 224 241 239;  /* teal tint for fills */
+  --c-lagoon: 2 95 103;        /* #025F67 */
+  --c-sapphire: 6 49 84;       /* #063154 */
+  --c-blush: 243 204 222;      /* #F3CCDE */
+  --c-lavender: 214 168 196;   /* #D6A8C4 */
+  --c-mauve: 186 136 174;      /* #BA88AE */
+  --c-purple: 158 104 153;     /* #9E6899 */
+  --c-plum: 91 55 101;         /* #5B3765 */
+  --c-alabaster: 247 246 242;  /* #F7F6F2 */
+  --c-heather: 188 197 204;    /* #BCC5CC */
+
+  --bg: var(--c-alabaster);
+  --surface: 255 255 255;
+  --ink: var(--c-sapphire);
+  --ink-soft: 45 72 96;
+  --ink-muted: 98 114 130;
+  --line: 226 224 218;
+  --primary: var(--c-lagoon);
+  --primary-hover: var(--c-sapphire);
+  --primary-fg: 255 255 255;
+  --accent: var(--c-teal);
+  --success: var(--c-teal);
+  --warning: var(--c-purple);
+  --danger: var(--c-plum);
+}
+
+@layer base {
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    @apply bg-bg text-ink font-sans antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+  ::selection { background: rgb(var(--c-lavender) / 0.45); }
+  :focus-visible { outline: 2px solid rgb(var(--c-teal)); outline-offset: 2px; border-radius: 6px; }
+  h1, h2, h3 { letter-spacing: -0.015em; }
+  input[type="date"]::-webkit-calendar-picker-indicator { opacity: .55; cursor: pointer; }
+}
+
+@layer components {
+  /* Glass is used selectively: cards, modals, dropdowns, login panel. */
+  .glass {
+    background: linear-gradient(160deg, rgb(255 255 255 / 0.78), rgb(255 255 255 / 0.6));
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    border: 1px solid rgb(255 255 255 / 0.7);
+    box-shadow: 0 0 0 1px rgb(var(--c-heather) / 0.25), 0 1px 0 0 rgb(255 255 255 / 0.7) inset, 0 10px 34px -14px rgb(var(--c-sapphire) / 0.2);
+  }
+  .glass-strong {
+    background: rgb(255 255 255 / 0.86);
+    backdrop-filter: blur(20px) saturate(150%);
+    -webkit-backdrop-filter: blur(20px) saturate(150%);
+    border: 1px solid rgb(255 255 255 / 0.8);
+    box-shadow: 0 0 0 1px rgb(var(--c-heather) / 0.3), 0 24px 60px -20px rgb(var(--c-sapphire) / 0.35);
+  }
+  .solid-card {
+    @apply bg-surface rounded-2xl border border-line/80 shadow-soft;
+  }
+  .ambient {
+    position: relative;
+    isolation: isolate;
+    overflow-x: clip;
+  }
+  .ambient::before, .ambient::after {
+    content: ""; position: absolute; z-index: -1; pointer-events: none; border-radius: 9999px; filter: blur(70px);
+  }
+  .ambient::before { width: 46vw; height: 46vw; max-width: 620px; max-height: 620px; top: -12%; right: -8%; background: radial-gradient(circle, rgb(var(--c-lavender) / 0.45), transparent 65%); }
+  .ambient::after { width: 40vw; height: 40vw; max-width: 540px; max-height: 540px; bottom: -14%; left: -10%; background: radial-gradient(circle, rgb(var(--c-teal) / 0.22), transparent 65%); }
+  .scrollbar-thin { scrollbar-width: thin; scrollbar-color: rgb(var(--c-heather)) transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+}
+
+@keyframes modal-in { from { opacity: 0; transform: translate(-50%, -48%) scale(.97); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+@keyframes drawer-r { from { transform: translateX(100%); } to { transform: none; } }
+@keyframes drawer-l { from { transform: translateX(-100%); } to { transform: none; } }
+
+@media print {
+  body * { visibility: hidden !important; }
+  #receipt, #receipt * { visibility: visible !important; }
+  #receipt { position: fixed; inset: 0; margin: 2rem; border: none; }
+}
