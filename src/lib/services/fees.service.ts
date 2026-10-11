@@ -41,6 +41,7 @@ export interface FeeBalanceFilters {
   search?: string;
   classId?: string;
   sectionId?: string;
+  academicYearId?: string;
   standing?: FeeStanding | "all";
 }
 
@@ -125,9 +126,10 @@ export const mockFeeService = {
 
   async listBalances(filters: FeeBalanceFilters = {}) {
     return handle(() => {
-      requirePermission(requireActor(), "fees:manage");
+      requireAny(requireActor(), ["fees:manage", "reports:read", "reports:finance"]);
       const db = readDb();
       const q = filters.search?.trim().toLowerCase();
+      const targetYearId = filters.academicYearId;
       const rows = db.students
         .filter((s) => s.status === "active")
         .map((s) => {
@@ -139,6 +141,7 @@ export const mockFeeService = {
             name: fullName(s),
             admissionNo: s.admissionNo,
             classId: info.cls?.id ?? "",
+            academicYearId: info.cls?.academicYearId ?? db.school.currentAcademicYearId,
             sectionId: enr?.sectionId ?? "",
             classLabel: info.label,
             grade: info.cls?.grade ?? 0,
@@ -148,6 +151,7 @@ export const mockFeeService = {
             lastPayment: ledger.payments.at(-1)?.paidOn ?? null,
           };
         })
+        .filter((r) => !targetYearId || r.academicYearId === targetYearId)
         .filter((r) => !filters.classId || r.classId === filters.classId)
         .filter((r) => !filters.sectionId || r.sectionId === filters.sectionId)
         .filter((r) => !filters.standing || filters.standing === "all" || r.standing === filters.standing)
