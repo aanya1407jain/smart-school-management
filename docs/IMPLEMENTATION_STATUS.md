@@ -1,0 +1,191 @@
+# Implementation status — Smart School Management System
+
+_Audit date: 12 Oct 2026 (contract fixes applied the same day on `feat/convex-backend-foundation`, uncommitted — see §11) · audited code: GitHub `main` @ `6fda652` (PR #1 merged; identical to local `feat/convex-backend-foundation` @ `1b807b5`) · auditor: backend/integration lead (Aanya) with Claude._
+
+Every statement below was checked against the code, not the README. "Tested" means an automated test exercises it.
+
+---
+
+## 1. Current architecture
+
+```
+Browser (Next.js 16 App Router, React 19, Tailwind)
+ ├─ UI modules (src/features/*) ──► services.* registry (src/lib/services/index.ts)
+ │                                   └─ mock services ──► src/lib/store/db.ts  (in-memory + localStorage "ssms-db")
+ │                                                         seeded by src/lib/mock-data/seed.ts
+ │   mock session: src/lib/services/session-store.ts (localStorage/sessionStorage "ssms-session")
+ │
+ └─ Convex wiring (only when NEXT_PUBLIC_CONVEX_URL is set):
+      src/app/layout.tsx → ConvexServerProvider + ConvexClientProvider (Convex Auth)
+      src/lib/convex/membership.tsx → useSchoolQuery / useSchoolMutation
+      src/proxy.ts → Convex Auth cookie proxy (no route protection yet)
+
+Convex (convex/*)
+ ├─ auth.ts            Convex Auth, Password provider, invite-only sign-up, session gate
+ ├─ core/              functions.ts (schoolQuery/schoolMutation/…), actor.ts, authorization.ts,
+ │                     permissions.ts (shared with frontend), validators.ts, errors.ts
+ ├─ model/             memberships, academics, calendar, grading, audit, notifications helpers
+ ├─ schema.ts          34 tables (incl. Convex Auth tables)
+ └─ public modules     users, memberships, schools, academics, attendance, notifications, files, audit, seed
+```
+
+**Key fact: the running UI is 100 % mock.** No screen calls Convex yet (`useSchoolQuery`/`useSchoolMutation` are used in 0 components). Convex is a working, tested backend that nothing in the UI consumes.
+
+A Convex Cloud **dev** deployment is linked on Aanya's machine (`.env.local` → `CONVEX_DEPLOYMENT=dev:…`). No production deployment and no Vercel environment were inspected or changed.
+
+---
+
+## 2. Module matrix
+
+Legend: ✅ done · 🟡 partial · ⚪ none · **M** = mock only.
+
+| Module | UI | Convex schema | Convex queries | Convex mutations | UI → Convex | Server authz | Persistent | Tests | **Status** |
+|---|---|---|---|---|---|---|---|---|---|
+| Authentication / session | ✅ (M) | ✅ authTables + users | ✅ `users.me`, `users.viewer` | ✅ Convex Auth signIn/signOut, invite activation | ⚪ | ✅ | ✅ (Convex) / M (UI) | ✅ integration (sign-in, invite, suspension) | Backend done & tested · **UI mock** |
+| Users / memberships / roles | ⚪ (no admin UI) | ✅ `schoolMemberships` | ✅ `memberships.list` | ✅ `invite`, `acceptInvitation`, `updateAccess` | ⚪ | ✅ `users:manage` | ✅ | ✅ integration | **Backend only** |
+| Students (+ guardians) | ✅ (M) | ✅ students, guardians, guardianLinks | 🟡 roster via `academics.sectionRoster` only | ⚪ no create/update/profile/status | ⚪ | 🟡 helpers exist (`requireStudentAccess`) | M | ⚪ | **Schema only** (+ `enrollStudent`) |
+| Academics (years, classes, sections, subjects, curriculum, enrollments, assignments) | ✅ (M) | ✅ incl. `classSubjects` curriculum | ✅ list years/classes/subjects/sections, `listClassSubjects`, roster, assignments, `myTeaching` | 🟡 create year/class/subject/section, `setClassSubjects`, `setClassTeacher`, `assignSubjectTeacher` (curriculum-checked), `removeTeacherAssignment`, `enrollStudent`. Missing: update/archive, set current year, promotion | ⚪ | ✅ | M | ✅ unit + integration | **Partial backend · UI mock** |
+| Teachers / staff | ✅ (M) incl. leave & staff attendance | ✅ `teachers`, `staffAttendance`, `leaveRequests` (schema only) | ⚪ | ⚪ | ⚪ | ⚪ | M | ⚪ | **Schema partial / frontend only** |
+| Student attendance | ✅ (M) | ✅ sessions + records | ✅ `getByDate`, `listBySection`, `studentHistory`, `dailyOverview` | ✅ `mark`, `update` (class teacher only) | ⚪ | ✅ ownership enforced server-side | ✅ | ✅ unit + integration | **Backend done & tested · UI mock** |
+| Fees (structures, obligations, concessions) | ✅ (M) | ✅ | ⚪ | ⚪ | ⚪ | ⚪ | M | ⚪ | **Schema only** |
+| Payments | ✅ (M) | ✅ `feePayments` (append-only) | ⚪ | ⚪ | ⚪ | ⚪ | M | ⚪ | **Schema only** |
+| Receipts | ✅ (M) | ✅ + atomic `counters` / `nextReceiptNumber` helper | ⚪ | ⚪ | ⚪ | ⚪ | M | ⚪ | **Schema only** |
+| Examinations | ✅ (M) | ✅ status flow matches UI (incl. `in_progress`) | ⚪ | ⚪ | ⚪ | ⚪ | M | ⚪ (mock E2E only) | **Schema only** |
+| Marks | ✅ (M) | ✅ | ⚪ | ⚪ | ⚪ | ⚪ | M | ⚪ | **Schema only** |
+| Results | ✅ (M) | ✅ snapshot table | ⚪ (seed writes them) | ⚪ | ⚪ | ⚪ | M | ⚪ | **Schema only** |
+| Timetable | ✅ (M) | ✅ `periods` + entries referencing `periodId` | ⚪ | ⚪ | ⚪ | ⚪ | M | ⚪ | **Schema only** |
+| Homework & submissions | ✅ (M) | ✅ status `active \| closed` (matches UI) | ⚪ | ⚪ | ⚪ | ⚪ | M | ⚪ | **Schema only** |
+| Notices | ✅ (M) | ✅ (audience model differs slightly from UI) | ⚪ | ⚪ | ⚪ | ⚪ | M | ⚪ | **Schema only** |
+| Events | ⚪ (notices cover events in UI) | ✅ (used for holidays) | ⚪ | ⚪ | ⚪ | ⚪ | — | ⚪ | **Schema only** |
+| Notifications | ✅ (M) | ✅ | ✅ `list`, `unreadCount` | 🟡 `markRead`, `markAllRead` (no `remove`); producers only in attendance + class-teacher change | ⚪ | ✅ own only | ✅ | ✅ integration + unit | **Partial backend · UI mock** |
+| Dashboards (admin / teacher / student) | ✅ (M) | n/a (derived) | ⚪ | n/a | ⚪ | ⚪ | M | mock E2E | **Frontend + mock only** |
+| Reports | ✅ (M) | n/a (derived) | ⚪ | n/a | ⚪ | ⚪ | M | ⚪ | **Frontend + mock only** |
+| Settings (school profile/settings) | ✅ (M) | ✅ | ✅ `schools.current`, `publicProfile` | ✅ `updateProfile`, `updateSettings` (no set-current-year, no logo flow) | ⚪ | ✅ `settings:manage` | ✅ | ⚪ | **Partial backend · UI mock** |
+| Profile (my contact, password) | ✅ (M) | — | ⚪ | ⚪ (no change-password/contact) | ⚪ | ⚪ | M | ⚪ | **Frontend + mock only** |
+| Files / storage | ⚪ | ✅ `files` | ✅ `getUrl`, `listForOwner` | ✅ `generateUploadUrl`, `register`, `remove` | ⚪ | ✅ owner-based | ✅ | 🟡 unit (cross-school) | **Backend only** |
+| Audit log | ⚪ | ✅ | ✅ `audit.list` | written by helpers | ⚪ | ✅ `audit:read` | ✅ | ✅ | **Backend only** |
+| Guardian child switching | ✅ (M) | ✅ guardianLinks | ✅ `users.viewer.students` | n/a | ⚪ | ✅ `requireStudentAccess` | — | ✅ integration | **Backend ready · UI mock** |
+
+### Classification summary
+- **Fully implemented & tested (backend):** authentication/identity, memberships/invitations, tenancy isolation, RBAC, student attendance, audit, notifications (core), file storage (core).
+- **Partially implemented:** academics (create-only), settings, notifications (no delete, few producers).
+- **Schema only:** students/guardians CRUD, fees, payments, receipts, examinations, marks, results, timetable, homework, notices, events.
+- **Schema missing for existing UI features:** none after the §11 contract fixes (staff attendance, leave requests, periods, curriculum and counters were added).
+- **Frontend + mock only:** every UI screen, dashboards, reports, profile.
+- **Missing entirely:** password reset/email verification, real route protection, Convex-backed login.
+
+---
+
+## 3. Completed backend functionality (verified)
+- Multi-school isolation: every school table carries `schoolId`; ids are loaded with `getInSchool` (cross-school ⇒ `NOT_FOUND`).
+- Server-derived actor (`requireActor`): session → user → active membership → active school; optional `membershipId` selector verified against the caller's own memberships.
+- Convex Auth Password provider; invite-only sign-up with hashed one-time codes; `beforeSessionCreation` blocks disabled users and users without active access; Convex Auth's built-in sign-in rate limit (10 failed attempts / hour / account) applies.
+- One permission catalogue (`convex/core/permissions.ts`) shared with the frontend.
+- Attendance: class-teacher-only mark/edit; school-day, future-date, roster-completeness checks; audit + absence notifications.
+- Dataset-driven demo seed guarded by `ALLOW_DEMO_SEED`.
+
+## 4. Completed frontend functionality
+- All Stage 1 screens for Admin, Teacher and Student/Guardian portals, working end-to-end **against mock data** (82 E2E checks).
+- Convex client/provider, `useSchoolQuery`/`useSchoolMutation`, error helper and auth proxy are in place but unused by screens.
+
+## 5. Modules still using mocks / localStorage
+**All of them.** Specifically: `src/lib/store/db.ts` (whole database in `localStorage["ssms-db"]`), `src/lib/services/session-store.ts` (session in local/session storage), `src/lib/mock-data/seed.ts`, and every `src/lib/services/*.service.ts`. Only harmless UI preference storage (`app-shell.tsx` sidebar state) should remain after migration.
+
+## 6. Missing backend functions (by owner)
+| Area | Missing | Owner |
+|---|---|---|
+| Auth/session | Convex login screen wiring, session provider on `users.viewer`, route protection in `src/proxy.ts`, password reset (needs email provider), sign-out everywhere | **Aanya** |
+| Users | admin UI for invites/access; resend/revoke invite; `users:manage` list filters | **Aanya** (backend) + Apporva (settings UI) |
+| Students & guardians | `students.list/get/create/update/setStatus`, guardian create/link/unlink, admission-number counter | Trisha (with Aanya review) |
+| Academics | update/archive class/section/subject, `setCurrentAcademicYear`, class-subject curriculum, promotion/year rollover | Trisha |
+| Teachers/staff | `teachers.list/get/create/update`, staff attendance + leave (tables + functions) | Trisha |
+| Exams/marks/results | exams CRUD + status flow (add `in_progress`), paper schedule, `saveMarks` (assigned-subject check), publish (single readiness rule, results snapshot + notifications) | Trisha |
+| Timetable | `periods` table, entries CRUD with clash checks, teacher/section/student views | Trisha |
+| Homework | CRUD, submissions, review, attachments via `files` | Trisha |
+| Fees/payments/receipts | structures, assignment → obligations, concessions, `recordPayment` (allocation + receipt counter, atomic), reversal, ledger/balance queries | Apporva (Aanya reviews money/security) |
+| Notices/events/notifications | notices CRUD + audience resolution, events, notification `remove`, producers for fees/homework/exams | Apporva |
+| Dashboards/reports | server-side aggregate queries (bounded/paginated) | Apporva |
+| Settings/profile | logo upload, set current year, my contact/password change | Apporva (Aanya: password) |
+
+## 7. Security gaps (prioritised)
+1. **Critical (if deployed as is):** the live UI authenticates against a mock user table in the browser's `localStorage` (plain-text demo passwords, editable role). Any Vercel deployment of the current UI has **no real authentication or authorization**. Do not put real data in it until auth is migrated.
+2. **High:** `src/proxy.ts` performs no route protection; protection is client-side (`AppShell`) only.
+3. **High:** no Convex functions yet for fees/exams/students etc. — when teammates build them, every function must use `schoolQuery/schoolMutation` + `getInSchool` (a source-guard test enforces the builder; reviews must enforce the rest).
+4. ~~**Medium:** `attendance.getByDate` reads the clock in a query~~ — **fixed** (§11): `today` is an explicit argument; `mark` still checks the real date.
+5. ~~**Medium:** unbounded user-facing queries~~ — **fixed** (§11): `studentHistory` / `listBySection` limited to ≤ 366-day ranges, `memberships.list` paginated. Remaining `.collect()` calls are bounded by domain size (rosters, sections per year, a user's memberships) — see §11.
+6. ~~**Medium:** schema/UI contract mismatches~~ — **fixed** (§11).
+7. **Low:** invitation-code sign-up attempts are not rate limited (codes are ~60-bit random, expire in 14 days).
+8. **Low:** no security headers/CSP in `next.config.ts`.
+9. **Process:** `ALLOW_DEMO_SEED` must never be set on a production deployment; seed refuses otherwise.
+
+## 8. Test / build status (run during this audit on a clean clone of `main` @ 6fda652)
+| Command | Result |
+|---|---|
+| `npm ci` | ✅ |
+| `npm run typecheck` | ✅ |
+| `npm run build` | ✅ |
+| `npm run test:authz` (mock attendance rules) | ✅ 23/23 |
+| `npm run test:convex` (convex-test: tenancy, RBAC, attendance) | ✅ 31/31 |
+| `npm run test:e2e` (Playwright vs mock UI) | ✅ 82/82, no page errors |
+| `npm run test:convex:integration` (fresh local Convex backend, seeded) | ✅ 58/58 |
+| `npm audit --omit=dev` | ✅ 0 vulnerabilities (8 remain in dev tooling: Tailwind 3 watcher chain, Playwright 1.51) |
+
+Not run: anything against the Convex Cloud dev deployment (no deploy/seed performed), Vercel.
+
+## 9. Recommended implementation order
+1. ✅ **Contract fixes (Aanya, small) — done, see §11:** align schema with UI — add exam `in_progress`, homework status mapping, `periods`, `staffAttendance`, `leaveRequests`, class-subject curriculum, per-school counters table; remove clock read from `attendance.getByDate`; bound `.collect()` hot spots. Unblocks everyone.
+2. **Auth & session migration (Aanya):** login via Convex Auth, `SessionProvider` from `users.viewer`, guardian child switch from `viewer.students`, route protection in `src/proxy.ts`, logout. Everything else depends on a real identity.
+3. **Attendance UI → Convex (Aanya + Trisha):** first module migration (backend already done); delete mock attendance service. Establishes the migration pattern.
+4. **Students, guardians, teachers, academics CRUD (Trisha):** core records everything else references.
+5. **Timetable, homework, exams/marks/results (Trisha).**
+6. **Fees → payments → receipts (Apporva, Aanya reviews):** money; needs atomic counters + audit.
+7. **Notices/events/notifications producers, settings/profile (Apporva).**
+8. **Dashboards & reports (Apporva)** last — they aggregate everything above.
+9. **Remove mock layer** (`src/lib/store`, `mock-data`, mock services, `test:authz`), production deployment checklist.
+
+## 10. Aanya's checklist
+- [ ] Decide what to do with untracked files on your machine: `AGENTS.md`, `CLAUDE.md`, `convex/_generated/ai/`, `.agents/`, `skills-lock.json` (Convex AI files — commit or add to `.gitignore`), `.claude/` (local, don't commit).
+- [ ] Update local `main` (it is behind `origin/main`): `git switch main && git pull`.
+- [x] Contract fixes (step 1) implemented and tested — **review, then commit/push on `feat/convex-backend-foundation`**.
+- [ ] Fix the date-dependent E2E check A7 (fails on school-day mornings on untouched `main` too — see §11).
+- [ ] Convex Cloud dev: run `npx @convex-dev/auth` once if not done; set `SITE_URL`; set `ALLOW_DEMO_SEED=true` **only on dev**; `npm run seed:demo`; run `test:convex:integration` with `CONVEX_URL` set.
+- [ ] Auth/session migration PR (step 2) with E2E updated to real sign-in.
+- [ ] Route protection in `src/proxy.ts`.
+- [ ] Review checklist for teammates' PRs: builders, `getInSchool`, permissions, bounded queries, audit, tests (docs/BACKEND.md §10).
+- [ ] Email provider decision (password reset / invites by email).
+- [ ] Production: separate Convex prod deployment + Vercel env vars; never enable demo seed there; security headers.
+
+---
+
+## 11. Contract fixes applied (12 Oct 2026, branch `feat/convex-backend-foundation`, not yet committed)
+
+| # | Change | Where |
+|---|---|---|
+| 1 | Exam status adds `in_progress` (flow `draft → scheduled → in_progress → marks_entry → published`, same as UI) | `convex/core/validators.ts` |
+| 2 | Homework status canonical `active \| closed` (no drafts in the product); submissions `submitted \| late \| reviewed` | validators, seed |
+| 3 | `periods` table (bell schedule); `timetableEntries.periodId` replaces copied `periodNo/startTime/endTime`; slot indexes for clash checks | `convex/schema.ts`, seed |
+| 4 | `staffAttendance` table (present / absent / on_leave per teacher per date) | schema |
+| 5 | `leaveRequests` table (type, dates, status, decision fields) | schema |
+| 6 | `classSubjects` curriculum + `academics.listClassSubjects` / `academics.setClassSubjects` (academics:manage, audited, blocks removing assigned subjects); `assignSubjectTeacher` now requires a curriculum subject | schema, `convex/academics.ts`, seed |
+| 7 | `counters` table + `convex/model/counters.ts` (`allocateNumber`, `ensureCounterAtLeast`, `nextAdmissionNumber`, `nextEmployeeId`, `nextReceiptNumber`); seed allocates through it | new file, schema, seed |
+| 8 | `attendance.getByDate` takes `today` (no clock read in the query) | `convex/attendance.ts` |
+| 9 | `studentHistory` defaults to the academic year, ranges ≤ 366 days; `listBySection` validates range instead of silently truncating at 200; `memberships.list` paginated | `convex/attendance.ts`, `convex/memberships.ts` |
+
+`.collect()` review (33 outside the seed): fixed the 3 that grow without bound with school size or time
+(above). The rest are bounded by domain size and left as is: academic years/classes/subjects per school,
+sections per year, assignments per section or teacher, rosters (enrollments per section), records per register,
+a user's/teacher's/student's/guardian's memberships and links, holidays in a 60-day window, files per owner.
+
+Security: every new/changed public function uses `schoolQuery`/`schoolMutation`, loads ids with `getInSchool`,
+checks permissions (`academics:manage`, `users:manage`) and audits writes (`curriculum.updated`). No new
+authorization system; attendance ownership rules unchanged (new tests confirm a subject assignment still grants no
+mark rights).
+
+Tests after the fixes (fresh clone + fresh local Convex backend):
+`npm run typecheck` ✅ · `npm run test:convex` ✅ 44/44 (was 31) · `npm run test:convex:integration` ✅ 68/68 (was 58)
+· `npm run test:authz` ✅ 23/23 · `npm run build` ✅ · `npm run test:e2e` ⚠️ 81/82 — **A7 fails identically on
+untouched `main`** (date-dependent mock-UI check: on a school-day morning today's 10-A register is not yet marked,
+so no "Present" label is shown). Not caused by these backend changes (no `src/` file changed).
+
+Contract changes teammates must know: `getByDate` requires `today`; `memberships.list` takes `paginationOpts` and
+returns `{ page, isDone, continueCursor }`; `studentHistory` returns `range`; timetable entries use `periodId`.

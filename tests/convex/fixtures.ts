@@ -16,6 +16,8 @@ export type T = ReturnType<typeof makeTest>;
 export type SchoolFixture = {
   schoolId: Id<"schools">;
   yearId: Id<"academicYears">;
+  classId: Id<"classes">;
+  subjectId: Id<"subjects">; // Mathematics, in Grade 8's curriculum
   sectionA: Id<"sections">;
   sectionB: Id<"sections">;
   studentA: Id<"students">;
@@ -68,7 +70,8 @@ export async function createSchool(t: T, slug: string): Promise<SchoolFixture> {
       student: await member(users.student, "student", { studentId: studentA }),
       guardian: await member(users.guardian, "student", { guardianId }),
     };
-    return { schoolId, yearId, sectionA, sectionB, studentA, studentB, classTeacher, subjectTeacher, users, memberships };
+    await ctx.db.insert("classSubjects", { schoolId, academicYearId: yearId, classId, subjectId });
+    return { schoolId, yearId, classId, subjectId, sectionA, sectionB, studentA, studentB, classTeacher, subjectTeacher, users, memberships };
   });
 }
 

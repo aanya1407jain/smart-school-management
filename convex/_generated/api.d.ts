@@ -24,6 +24,7 @@ import type * as memberships from "../memberships.js";
 import type * as model_academics from "../model/academics.js";
 import type * as model_audit from "../model/audit.js";
 import type * as model_calendar from "../model/calendar.js";
+import type * as model_counters from "../model/counters.js";
 import type * as model_grading from "../model/grading.js";
 import type * as model_memberships from "../model/memberships.js";
 import type * as model_notifications from "../model/notifications.js";
@@ -57,6 +58,7 @@ declare const fullApi: ApiFromModules<{
   "model/academics": typeof model_academics;
   "model/audit": typeof model_audit;
   "model/calendar": typeof model_calendar;
+  "model/counters": typeof model_counters;
   "model/grading": typeof model_grading;
   "model/memberships": typeof model_memberships;
   "model/notifications": typeof model_notifications;
