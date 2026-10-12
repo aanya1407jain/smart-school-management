@@ -237,6 +237,9 @@ async function serverAnswer(ctx, path) {
   await page.goto(BASE + "/teacher/attendance?section=sec_10a");
   await waitText(page, /Class 10-A ·/);
   check("A1/A2 Rahul (class teacher) gets mark/edit controls for 10-A", await editable());
+  await page.getByRole("button", { name: /mark all present/i }).click();
+  await page.getByRole("button", { name: /update attendance|save attendance/i }).click();
+  await waitText(page, /Attendance (saved|updated)/i);
   await page.goto(BASE + "/teacher/attendance?section=sec_10b");
   await waitText(page, /Class 10-B ·/);
   check("A3/A4 Rahul sees 10-B read-only (subject teacher, not class teacher)", await readOnly() && await waitText(page, /Only the class teacher of 10-B \(Ms\. Meera Iyer\)/));
@@ -266,7 +269,7 @@ async function serverAnswer(ctx, path) {
   check("A8a Admin dashboard has no 'Mark attendance' action", (await page.getByText(/^Mark attendance$/).count()) === 0 && await waitText(page, /Review attendance/));
   await page.goto(BASE + "/admin/attendance?section=sec_10a");
   await waitText(page, /Class 10-A ·/);
-  check("A7 Admin can view 10-A register and school overview", await waitText(page, /School attendance/) && ((await page.getByText(/present/i).count()) > 0 || (await page.getByText(/not marked/i).count()) > 0));
+  check("A7 Admin can view 10-A register and school overview", await waitText(page, /School attendance/) && (await page.getByText("Present", { exact: true }).count()) > 0);
   check("A8/A9 Admin has no mark/edit controls", await readOnly() && await waitText(page, /Administrators can view and monitor attendance/));
   await logout(page);
 
