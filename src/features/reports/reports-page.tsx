@@ -1,15 +1,22 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, ReferenceLine } from "recharts";
-import { Award, GraduationCap, Users } from "lucide-react";
+import { AlertCircle, Award, Download, GraduationCap, RotateCcw, Users, Wallet } from "lucide-react";
 import { services } from "@/lib/services";
 import { useQuery } from "@/lib/hooks/use-query";
-import { Avatar, Badge, Card, CardHeader, DataTable, EmptyState, PageHeader, QueryView, Select, StatCard, StatusBadge, Tabs, TabsContent, TabsList } from "@/components/ui";
+import type { FeeStanding } from "@/lib/services/derive";
+import {
+  Avatar, Badge, Button, Card, CardHeader, DataTable, EmptyState, FilterBar, FilterSelect,
+  Input, PageHeader, QueryView, SearchInput, Select, StatCard, StatusBadge, Tabs, TabsContent, TabsList,
+} from "@/components/ui";
 import { ChartCard, ChartTooltip, axisProps } from "@/components/charts/chart-card";
 import { CHART, CHART_GRID } from "@/lib/constants/theme";
 import { formatCurrency, formatPercent } from "@/lib/utils/format";
+import { formatDate, todayISO } from "@/lib/utils/dates";
+import { downloadCsv } from "@/lib/utils/csv";
+import { useAcademicOptions } from "@/features/shared/use-academic-options";
 import { PAYMENT_METHOD_LABELS } from "@/lib/constants/labels";
 
 export function ReportsPage() {
@@ -139,19 +146,147 @@ function AttendanceReport() {
 }
 
 function FeeReport() {
+  const opts = useAcademicOptions();
+  const [search, setSearch] = useState("");
+  const [academicYearId, setAcademicYearId] = useState("");
+  const [classId, setClassId] = useState("");
+  const [sectionId, setSectionId] = useState("");
+  const [standing, setStanding] = useState<string>("");
+  const [paidFrom, setPaidFrom] = useState("");
+  const [paidTo, setPaidTo] = useState("");
+
   const q = useQuery(() => services.fees.getSummary(), []);
   const payments = useQuery(() => services.fees.listPayments({}), []);
-  const byMethod = Object.entries((payments.data ?? []).reduce<Record<string, number>>((acc, p) => { acc[p.method] = (acc[p.method] ?? 0) + p.amount; return acc; }, {})).map(([m, amount]) => ({ method: PAYMENT_METHOD_LABELS[m as keyof typeof PAYMENT_METHOD_LABELS], amount })).sort((a, b) => b.amount - a.amount);
+  const balances = useQuery(
+    () =>
+      services.fees.listBalances({
+        search,
+        classId,
+        sectionId,
+        academicYearId: academicYearId || undefined,
+        standing: (standing || "all") as FeeStanding | "all",
+      }),
+    [search, classId, sectionId, academicYearId, standing]
+  );
+
+  const sectionOptions = useMemo(
+    () =>
+      (opts.data?.sections ?? [])
+        .filter((s) => !classId || s.classId === classId)
+        .map((s) => ({ value: s.id, label: classId ? `Section ${s.name}` : `Class ${s.label}` })),
+    [opts.data, classId]
+  );
+
+  const filteredRows = useMemo(() => {
+    let rows = balances.data ?? [];
+    if (paidFrom) {
+      rows = rows.filter((r) => r.lastPayment && r.lastPayment >= paidFrom);
+    }
+    if (paidTo) {
+      rows = rows.filter((r) => r.lastPayment && r.lastPayment <= paidTo);
+    }
+    return rows;
+  }, [balances.data, paidFrom, paidTo]);
+
+  const hasActiveFilters = Boolean(
+    search || academicYearId || classId || sectionId || standing || paidFrom || paidTo
+  );
+
+  const resetFilters = () => {
+    setSearch("");
+    setAcademicYearId("");
+    setClassId("");
+    setSectionId("");
+    setStanding("");
+    setPaidFrom("");
+    setPaidTo("");
+  };
+
+  const filteredTotals = useMemo(() => {
+    const net = filteredRows.reduce((a, r) => a + r.net, 0);
+    const paid = filteredRows.reduce((a, r) => a + r.paid, 0);
+    const outstanding = filteredRows.reduce((a, r) => a + r.outstanding, 0);
+    const overdue = filteredRows.reduce((a, r) => a + r.overdue, 0);
+    const collectionRate = net > 0 ? (paid / net) * 100 : 0;
+    return { net, paid, outstanding, overdue, collectionRate };
+  }, [filteredRows]);
+
+  const byMethod = useMemo(
+    () =>
+      Object.entries(
+        (payments.data ?? []).reduce<Record<string, number>>((acc, p) => {
+          acc[p.method] = (acc[p.method] ?? 0) + p.amount;
+          return acc;
+        }, {})
+      )
+        .map(([m, amount]) => ({
+          method: PAYMENT_METHOD_LABELS[m as keyof typeof PAYMENT_METHOD_LABELS],
+          amount,
+        }))
+        .sort((a, b) => b.amount - a.amount),
+    [payments.data]
+  );
+
+  const handleExportCsv = () => {
+    if (!filteredRows.length) return;
+    const selectedClassLabel = opts.data?.classes.find((c) => c.id === classId)?.name.replace(/\s+/g, "_") ?? "all_classes";
+    const filename = `fee_collection_report_${selectedClassLabel}_${todayISO()}`;
+    const headers = [
+      "Student Name",
+      "Admission No",
+      "Class",
+      "Net Fees (INR)",
+      "Amount Paid (INR)",
+      "Outstanding (INR)",
+      "Payment Status",
+      "Last Payment Date",
+    ];
+    const dataRows = filteredRows.map((r) => [
+      r.name,
+      r.admissionNo,
+      r.classLabel,
+      r.net,
+      r.paid,
+      r.outstanding,
+      r.standing,
+      r.lastPayment ?? "—",
+    ]);
+    downloadCsv(filename, headers, dataRows);
+  };
+
   return (
     <QueryView query={q}>
       {(s) => (
-        <div className="space-y-5">
-          <div className="grid gap-4 sm:grid-cols-4">
-            <StatCard label="Net fees" value={formatCurrency(s.totals.net)} icon={<Award className="h-5 w-5" />} hint={`Concessions ${formatCurrency(s.totals.concession)}`} />
-            <StatCard label="Collected" value={formatCurrency(s.totals.paid)} icon={<Award className="h-5 w-5" />} tone="sapphire" hint={`${formatPercent(s.totals.collectionRate, 1)} collection rate`} />
-            <StatCard label="Outstanding" value={formatCurrency(s.totals.outstanding)} icon={<Award className="h-5 w-5" />} tone="purple" />
-            <StatCard label="Overdue" value={formatCurrency(s.totals.overdue)} icon={<Award className="h-5 w-5" />} tone="lavender" hint={`${s.standing.overdue} students`} />
+        <div className="space-y-6">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <StatCard
+              label={hasActiveFilters ? "Filtered Net Fees" : "Net fees"}
+              value={formatCurrency(hasActiveFilters ? filteredTotals.net : s.totals.net)}
+              icon={<Award className="h-5 w-5" />}
+              hint={hasActiveFilters ? `${filteredRows.length} matching students` : `Concessions ${formatCurrency(s.totals.concession)}`}
+            />
+            <StatCard
+              label={hasActiveFilters ? "Filtered Collected" : "Collected"}
+              value={formatCurrency(hasActiveFilters ? filteredTotals.paid : s.totals.paid)}
+              icon={<Award className="h-5 w-5" />}
+              tone="sapphire"
+              hint={`${formatPercent(hasActiveFilters ? filteredTotals.collectionRate : s.totals.collectionRate, 1)} collection rate`}
+            />
+            <StatCard
+              label={hasActiveFilters ? "Filtered Outstanding" : "Outstanding"}
+              value={formatCurrency(hasActiveFilters ? filteredTotals.outstanding : s.totals.outstanding)}
+              icon={<Wallet className="h-5 w-5" />}
+              tone="purple"
+            />
+            <StatCard
+              label={hasActiveFilters ? "Filtered Overdue" : "Overdue"}
+              value={formatCurrency(hasActiveFilters ? filteredTotals.overdue : s.totals.overdue)}
+              icon={<AlertCircle className="h-5 w-5" />}
+              tone="lavender"
+              hint={hasActiveFilters ? undefined : `${s.standing.overdue} students`}
+            />
           </div>
+
           <div className="grid gap-4 lg:grid-cols-2">
             <ChartCard title="Collected vs outstanding by class">
               <ResponsiveContainer width="100%" height="100%">
@@ -178,9 +313,188 @@ function FeeReport() {
               </ResponsiveContainer>
             </ChartCard>
           </div>
-          <Card>
-            <CardHeader title="Account standing" />
-            <div className="flex flex-wrap gap-3 p-5">{(["paid", "clear", "due_soon", "overdue", "not_assigned"] as const).map((k) => <div key={k} className="flex items-center gap-2 rounded-xl border border-line/70 px-3 py-2"><StatusBadge status={k} /><span className="text-sm font-semibold text-ink">{s.standing[k]}</span></div>)}</div>
+
+          <Card className="p-4 sm:p-5">
+            <CardHeader
+              title="Student Fee Ledger & Collection Report"
+              description="Filter by academic year, class, standing, and payment dates. Export report data to CSV."
+              action={
+                <div className="flex items-center gap-2">
+                  {hasActiveFilters && (
+                    <Button variant="ghost" size="sm" onClick={resetFilters} aria-label="Reset filters">
+                      <RotateCcw className="h-4 w-4" /> Reset
+                    </Button>
+                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleExportCsv}
+                    disabled={filteredRows.length === 0}
+                    aria-label="Export filtered fee report to CSV"
+                  >
+                    <Download className="h-4 w-4" /> Export CSV
+                  </Button>
+                </div>
+              }
+            />
+
+            <div className="mt-4">
+              <FilterBar
+                actions={
+                  <p className="text-[13px] text-ink-muted">
+                    {filteredRows.length} record{filteredRows.length === 1 ? "" : "s"} ·{" "}
+                    <span className="font-semibold text-ink">{formatCurrency(filteredTotals.outstanding)}</span>{" "}
+                    outstanding
+                  </p>
+                }
+              >
+                <SearchInput
+                  value={search}
+                  onChange={setSearch}
+                  placeholder="Student name or admission no."
+                  className="col-span-2 sm:w-60"
+                  label="Search student"
+                />
+                <FilterSelect
+                  label="Academic year"
+                  value={academicYearId}
+                  onChange={setAcademicYearId}
+                  allLabel="All academic years"
+                  options={(opts.data?.years ?? []).map((y) => ({ value: y.id, label: y.name }))}
+                />
+                <FilterSelect
+                  label="Class"
+                  value={classId}
+                  onChange={(val) => {
+                    setClassId(val);
+                    setSectionId("");
+                  }}
+                  allLabel="All classes"
+                  options={(opts.data?.classes ?? []).map((c) => ({ value: c.id, label: c.name }))}
+                />
+                <FilterSelect
+                  label="Section"
+                  value={sectionId}
+                  onChange={setSectionId}
+                  allLabel="All sections"
+                  options={sectionOptions}
+                />
+                <FilterSelect
+                  label="Status"
+                  value={standing}
+                  onChange={setStanding}
+                  allLabel="All statuses"
+                  options={[
+                    { value: "overdue", label: "Overdue" },
+                    { value: "due_soon", label: "Due soon" },
+                    { value: "clear", label: "Up to date" },
+                    { value: "paid", label: "Fully paid" },
+                    { value: "not_assigned", label: "Not assigned" },
+                  ]}
+                />
+                <div className="flex items-center gap-1.5">
+                  <label htmlFor="paid-from" className="whitespace-nowrap text-[12.5px] text-ink-muted">
+                    Paid from
+                  </label>
+                  <Input
+                    id="paid-from"
+                    type="date"
+                    value={paidFrom}
+                    onChange={(e) => setPaidFrom(e.target.value)}
+                    className="w-36 text-xs"
+                  />
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <label htmlFor="paid-to" className="whitespace-nowrap text-[12.5px] text-ink-muted">
+                    Paid to
+                  </label>
+                  <Input
+                    id="paid-to"
+                    type="date"
+                    value={paidTo}
+                    onChange={(e) => setPaidTo(e.target.value)}
+                    className="w-36 text-xs"
+                  />
+                </div>
+              </FilterBar>
+            </div>
+
+            <div className="mt-5">
+              <QueryView query={balances} loading="table" wrapError={false}>
+                {() =>
+                  filteredRows.length === 0 ? (
+                    <EmptyState
+                      title="No fee records match the selected filters"
+                      description="Try clearing or adjusting your search, class, status, or date range filters."
+                      action={
+                        hasActiveFilters ? (
+                          <Button variant="outline" onClick={resetFilters}>
+                            <RotateCcw className="h-4 w-4" /> Reset all filters
+                          </Button>
+                        ) : undefined
+                      }
+                    />
+                  ) : (
+                    <DataTable
+                      caption="Student fee report"
+                      rows={filteredRows}
+                      getRowId={(r) => r.studentId}
+                      columns={[
+                        {
+                          key: "student",
+                          header: "Student",
+                          primary: true,
+                          cell: (r) => (
+                            <div className="flex items-center gap-3">
+                              <Avatar name={r.name} size="sm" />
+                              <div>
+                                <p className="font-semibold text-ink">{r.name}</p>
+                                <p className="font-mono text-[11.5px] text-ink-muted">{r.admissionNo}</p>
+                              </div>
+                            </div>
+                          ),
+                        },
+                        { key: "class", header: "Class", cell: (r) => r.classLabel },
+                        { key: "net", header: "Net fees", align: "right", cell: (r) => formatCurrency(r.net) },
+                        { key: "paid", header: "Amount paid", align: "right", cell: (r) => formatCurrency(r.paid) },
+                        {
+                          key: "outstanding",
+                          header: "Outstanding",
+                          align: "right",
+                          cell: (r) => (
+                            <span
+                              className={
+                                r.overdue > 0
+                                  ? "font-semibold text-plum"
+                                  : r.outstanding > 0
+                                  ? "font-semibold text-ink"
+                                  : "text-ink-muted"
+                              }
+                            >
+                              {formatCurrency(r.outstanding)}
+                            </span>
+                          ),
+                        },
+                        { key: "status", header: "Status", cell: (r) => <StatusBadge status={r.standing} /> },
+                        {
+                          key: "lastPayment",
+                          header: "Last payment",
+                          cell: (r) => (r.lastPayment ? formatDate(r.lastPayment) : "—"),
+                        },
+                      ]}
+                      rowActions={(r) => (
+                        <Link
+                          href={`/admin/fees/${r.studentId}`}
+                          className="inline-flex items-center text-[12.5px] font-medium text-lagoon hover:underline"
+                        >
+                          View ledger →
+                        </Link>
+                      )}
+                    />
+                  )
+                }
+              </QueryView>
+            </div>
           </Card>
         </div>
       )}
