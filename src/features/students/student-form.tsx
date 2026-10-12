@@ -53,7 +53,7 @@ export function StudentForm({ studentId }: { studentId?: string }) {
   const opts = useAcademicOptions();
   const editable = useQuery(() => services.students.getEditable(studentId!), [studentId], { enabled: !!studentId });
   const [serverError, setServerError] = useState<Error | null>(null);
-  const [created, setCreated] = useState<{ id: string; email: string; password: string; feeAssigned: boolean } | null>(null);
+  const [created, setCreated] = useState<{ id: string; email: string; feeAssigned: boolean } | null>(null);
 
   const { register, handleSubmit, watch, reset, setValue, setError, formState: { errors, isSubmitting } } = useForm<Values>({ resolver: zodResolver(schema), defaultValues: EMPTY });
 
@@ -168,9 +168,9 @@ export function StudentForm({ studentId }: { studentId?: string }) {
           <div className="space-y-4 text-sm">
             <p className="flex items-center gap-2 text-ink-soft"><CheckCircle2 className="h-5 w-5 text-lagoon" /> The student appears in class lists, attendance registers and the teachers&apos; rosters.</p>
             <div className="rounded-2xl border border-line bg-alabaster p-4">
-              <p className="flex items-center gap-2 text-[12px] font-semibold uppercase tracking-wide text-ink-muted"><KeyRound className="h-3.5 w-3.5" /> Portal login (demo)</p>
+              <p className="flex items-center gap-2 text-[12px] font-semibold uppercase tracking-wide text-ink-muted"><KeyRound className="h-3.5 w-3.5" /> Portal login email</p>
               <p className="mt-2 font-mono text-[13px] text-ink">{created.email}</p>
-              <p className="font-mono text-[13px] text-ink">{created.password}</p>
+              <p className="mt-1 text-[12.5px] text-ink-muted">Sign-in access is issued by school invitation — no password is generated here.</p>
             </div>
             <p className="text-ink-muted">{created.feeAssigned ? "Class fee structure assigned — obligations created." : "No fee structure was assigned."}</p>
           </div>

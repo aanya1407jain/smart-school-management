@@ -9,6 +9,7 @@
  * `acceptInvitation` while signed in.
  */
 import { v } from "convex/values";
+import { paginationOptsValidator } from "convex/server";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { internalMutation } from "./_generated/server";
@@ -111,19 +112,27 @@ export const acceptInvitation = userMutation({
   },
 });
 
-/** Members of the caller's school (admin). */
+/**
+ * Members of the caller's school (admin), newest first, PAGINATED — a school
+ * has one membership per staff member, student and guardian (thousands).
+ * Use with `usePaginatedQuery(api.memberships.list, { role }, { initialNumItems: 50 })`.
+ */
 export const list = schoolQuery({
-  args: { role: v.optional(vRole) },
-  handler: async (ctx, { role }) => {
+  args: { role: v.optional(vRole), paginationOpts: paginationOptsValidator },
+  handler: async (ctx, { role, paginationOpts }) => {
     requirePermission(ctx.actor, "users:manage");
-    const rows = role
-      ? await ctx.db.query("schoolMemberships").withIndex("by_school_role", (q) => q.eq("schoolId", ctx.actor.schoolId).eq("role", role)).collect()
-      : await ctx.db.query("schoolMemberships").withIndex("by_school_role", (q) => q.eq("schoolId", ctx.actor.schoolId)).collect();
-    return rows.map((m) => ({
-      _id: m._id, email: m.email, displayName: m.displayName, role: m.role, status: m.status, permissionSets: m.permissionSets,
-      teacherId: m.teacherId ?? null, studentId: m.studentId ?? null, guardianId: m.guardianId ?? null,
-      activatedAt: m.activatedAt ?? null, inviteExpiresAt: m.inviteExpiresAt ?? null,
-    }));
+    const query = role
+      ? ctx.db.query("schoolMemberships").withIndex("by_school_role", (q) => q.eq("schoolId", ctx.actor.schoolId).eq("role", role))
+      : ctx.db.query("schoolMemberships").withIndex("by_school_role", (q) => q.eq("schoolId", ctx.actor.schoolId));
+    const result = await query.order("desc").paginate(paginationOpts);
+    return {
+      ...result,
+      page: result.page.map((m) => ({
+        _id: m._id, email: m.email, displayName: m.displayName, role: m.role, status: m.status, permissionSets: m.permissionSets,
+        teacherId: m.teacherId ?? null, studentId: m.studentId ?? null, guardianId: m.guardianId ?? null,
+        activatedAt: m.activatedAt ?? null, inviteExpiresAt: m.inviteExpiresAt ?? null,
+      })),
+    };
   },
 });
 

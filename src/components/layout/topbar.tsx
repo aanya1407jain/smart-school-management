@@ -15,6 +15,7 @@ import { DropdownContent, DropdownItem, DropdownLabel, DropdownMenu, DropdownSep
 import { useUnreadCount } from "@/features/notifications/use-unread-count";
 import { CategoryIcon } from "@/features/notifications/category-icon";
 import { useSchoolProfile } from "@/lib/hooks/use-school-profile";
+import { useToast } from "@/components/ui/toast";
 
 const AREA_LABEL: Record<string, string> = { admin: "Administration", teacher: "Teacher", student: "Student portal" };
 const SUBPAGE_LABEL: Record<string, string> = { new: "New", edit: "Edit" };
@@ -89,6 +90,7 @@ function NotificationBell() {
 
 function StudentSwitcher() {
   const { user, activeStudentId, setActiveStudent } = useSession();
+  const { toast } = useToast();
   const linked = useQuery(() => services.dashboard.getLinkedStudents(), [user?.id], { enabled: !!user && (user.studentIds?.length ?? 0) > 1 });
   if (!user || (user.studentIds?.length ?? 0) < 2 || !linked.data) return null;
   const current = linked.data.find((s) => s.id === activeStudentId) ?? linked.data[0];
@@ -107,7 +109,7 @@ function StudentSwitcher() {
       <DropdownContent align="start">
         <DropdownLabel>Linked students</DropdownLabel>
         {linked.data.map((s) => (
-          <DropdownItem key={s.id} onSelect={() => setActiveStudent(s.id)} className={s.id === current.id ? "bg-teal-soft text-lagoon" : undefined}>
+          <DropdownItem key={s.id} onSelect={() => { setActiveStudent(s.id).catch((e: Error) => toast({ tone: "error", title: "Couldn't switch student", description: e.message })); }} className={s.id === current.id ? "bg-teal-soft text-lagoon" : undefined}>
             <Avatar name={s.name} size="xs" />
             <span className="flex-1">{s.name}<span className="block text-[11px] text-ink-muted">Class {s.classLabel}</span></span>
           </DropdownItem>

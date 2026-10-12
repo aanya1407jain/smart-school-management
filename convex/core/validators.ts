@@ -25,6 +25,10 @@ export const vAcademicYearStatus = v.union(v.literal("planned"), v.literal("acti
 export const vGender = v.union(v.literal("male"), v.literal("female"), v.literal("other"));
 export const vPersonStatus = v.union(v.literal("active"), v.literal("inactive"), v.literal("alumni"), v.literal("transferred"));
 export const vStaffStatus = v.union(v.literal("active"), v.literal("on_leave"), v.literal("inactive"));
+/** Daily staff (teacher) attendance — matches the Teachers & Staff UI. */
+export const vStaffAttendanceStatus = v.union(v.literal("present"), v.literal("absent"), v.literal("on_leave"));
+export const vLeaveType = v.union(v.literal("casual"), v.literal("sick"), v.literal("earned"), v.literal("duty"));
+export const vLeaveStatus = v.union(v.literal("pending"), v.literal("approved"), v.literal("rejected"));
 export const vEnrollmentStatus = v.union(
   v.literal("active"), v.literal("promoted"), v.literal("transferred"), v.literal("withdrawn"), v.literal("completed"),
 );
@@ -36,9 +40,23 @@ export const vPaymentMethod = v.union(
 );
 export const vPaymentStatus = v.union(v.literal("completed"), v.literal("reversed"));
 export const vConcessionKind = v.union(v.literal("percent"), v.literal("fixed"));
-export const vExamStatus = v.union(v.literal("draft"), v.literal("scheduled"), v.literal("marks_entry"), v.literal("published"));
-export const vHomeworkStatus = v.union(v.literal("draft"), v.literal("published"), v.literal("closed"));
-export const vSubmissionStatus = v.union(v.literal("submitted"), v.literal("late"), v.literal("reviewed"), v.literal("returned"));
+/**
+ * Exam lifecycle (same order as the UI's EXAM_STATUS_FLOW):
+ *   draft → scheduled → in_progress → marks_entry → published
+ * Marks can be entered in `in_progress` and `marks_entry`; publishing requires
+ * one of those two states and no pending paper–section sheets.
+ */
+export const EXAM_STATUSES = ["draft", "scheduled", "in_progress", "marks_entry", "published"] as const;
+export const vExamStatus = v.union(
+  v.literal("draft"), v.literal("scheduled"), v.literal("in_progress"), v.literal("marks_entry"), v.literal("published"),
+);
+export type ExamStatusValue = Infer<typeof vExamStatus>;
+const _examStatusesMatch: readonly ExamStatusValue[] = EXAM_STATUSES;
+void _examStatusesMatch;
+
+/** Homework is either open for submission (`active`) or `closed`. There are no drafts in the product. */
+export const vHomeworkStatus = v.union(v.literal("active"), v.literal("closed"));
+export const vSubmissionStatus = v.union(v.literal("submitted"), v.literal("late"), v.literal("reviewed"));
 export const vNoticeStatus = v.union(v.literal("draft"), v.literal("published"), v.literal("archived"));
 export const vNoticeType = v.union(v.literal("notice"), v.literal("event"), v.literal("holiday"));
 export const vPriority = v.union(v.literal("normal"), v.literal("high"), v.literal("urgent"));

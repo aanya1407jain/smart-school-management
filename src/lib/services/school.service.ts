@@ -91,17 +91,7 @@ export const mockSchoolService = {
     });
   },
 
-  async changePassword(input: { current: string; next: string }) {
-    return handle(() => {
-      const actor = requireActor();
-      if (actor.password !== input.current) throw invalid("Current password is incorrect", { current: "Incorrect password" });
-      if (input.next.length < 8) throw invalid("Use at least 8 characters", { next: "At least 8 characters" });
-      return writeDb((db) => {
-        db.users.find((x) => x.id === actor.id)!.password = input.next;
-        return { ok: true };
-      });
-    });
-  },
+  // Password changes are handled by Convex Auth (convex/account.ts → changePassword).
 };
 
 export type SchoolService = typeof mockSchoolService;

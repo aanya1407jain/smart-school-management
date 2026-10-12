@@ -32,13 +32,14 @@ convex/
 │   ├── memberships.ts     invitations, activation, access checks
 │   ├── calendar.ts        today-in-school-timezone, school-day rules (working days − holidays)
 │   ├── grading.ts         grading schemes (per school setting)
+│   ├── counters.ts        atomic per-school document numbers (admission, employee, receipt)
 │   ├── audit.ts           writeAudit()
 │   └── notifications.ts   notifyUsers(), userIdsForStudent()
 │
 ├── users.ts               me, viewer
-├── memberships.ts         invite, acceptInvitation, list, updateAccess
+├── memberships.ts         invite, acceptInvitation, list (paginated), updateAccess
 ├── schools.ts             publicProfile, current, updateProfile, updateSettings
-├── academics.ts           years/classes/subjects/sections, roster, assignments, class teacher, enrollment
+├── academics.ts           years/classes/subjects/sections, curriculum, roster, assignments, class teacher, enrollment
 ├── attendance.ts          getByDate, listBySection, studentHistory, dailyOverview, mark, update
 ├── notifications.ts       list, unreadCount, markRead, markAllRead
 ├── files.ts               generateUploadUrl, register, getUrl, listForOwner, remove
@@ -141,8 +142,12 @@ schools ─┬─ schoolSettings (currentAcademicYearId, workingDays, attendance
          ├─ academicYears (2026-27)
          ├─ classes (Grade 8, level 8)                       year-independent
          ├─ sections (8-A: classId + academicYearId + classTeacherId)   per year
-         ├─ subjects
-         ├─ teachers ──── teacherAssignments (teacher × subject × class × section × year)
+         ├─ subjects ──── classSubjects (class × subject × year)        ← CURRICULUM
+         ├─ teachers ─┬── teacherAssignments (teacher × curriculum subject × section × year)
+         │            ├── staffAttendance (teacher × date: present | absent | on_leave)
+         │            └── leaveRequests (casual | sick | earned | duty; pending | approved | rejected)
+         ├─ periods (bell schedule) ── timetableEntries (section × weekday × period → subject + teacher)
+         ├─ counters (per-school document number sequences)
          ├─ students ─┬── enrollments (student × year × class × section, status, rollNo)  ← placement + history
          │            └── guardianLinks ── guardians
          └─ schoolMemberships (user ↔ school, role, teacherId | studentId | guardianId)
@@ -153,7 +158,17 @@ schools ─┬─ schoolSettings (currentAcademicYearId, workingDays, attendance
   year's enrollment. History is never overwritten.
 - **Teacher scope** for a year = sections from `teacherAssignments` ∪ sections where they are class teacher
   (`teacherSectionIds`). "Assigned" read permissions are limited to that scope.
-- **SUBJECT ASSIGNMENT ≠ ATTENDANCE OWNERSHIP.** A teacher can own (be class teacher of) at most one
+- Three different relationships — never mix them up:
+
+  | Relationship | Table / field | Means | Grants |
+  |---|---|---|---|
+  | Curriculum | `classSubjects` | the class studies this subject this year | nothing |
+  | Subject assignment | `teacherAssignments` | this teacher teaches that curriculum subject to this section | read access to the section (teacher scope), marks entry later |
+  | Class teacher | `sections.classTeacherId` | this teacher owns the section | **attendance mark/edit** |
+
+  `academics.assignSubjectTeacher` rejects subjects that are not in the class's curriculum
+  (`INVALID_RELATIONSHIP`); `academics.setClassSubjects` refuses to remove a subject that still has a teacher
+  assigned. **SUBJECT ASSIGNMENT ≠ ATTENDANCE OWNERSHIP.** A teacher can own (be class teacher of) at most one
   section per academic year (enforced in `academics.setClassTeacher`).
 
 ---
@@ -181,6 +196,14 @@ the student's and linked guardians' accounts when the school enables attendance 
 
 Data: `attendanceSessions` (one per section/date, with counts) + `attendanceRecords` (one per student).
 
+Query contracts:
+- `getByDate({ sectionId, date, today })` — queries must not read the clock, so the client passes **today in the
+  school's timezone** (`users.viewer().school.timezone`). `today` only drives the `canMark` hint; `mark` re-checks
+  the real date server-side.
+- `listBySection({ sectionId, from, to })` and `studentHistory({ studentId, from?, to? })` accept ranges of at most
+  366 days (longer → `INVALID_ARGUMENT`, never silent truncation). `studentHistory` defaults to the current
+  academic year and returns the `range` it used.
+
 ---
 
 ## 8. Rules: student & guardian access
@@ -199,10 +222,23 @@ Anything else → `NOT_FOUND` (never confirms that a student exists).
   `feePayments` (append-only transactions with `allocations`; reversals are new rows) → `receipts`;
   `feeConcessions` (percent in basis points or fixed). Balance = obligations − completed allocations −
   concessions; **never store a mutable balance**. Money is integer minor units (paise).
-- **Exams:** `exams` → `examSubjects` (paper per class/subject with schedule + max/pass marks) → `marks`
+- **Exams:** status flow `draft → scheduled → in_progress → marks_entry → published` (same as the UI).
+  Marks entry is open in `in_progress` and `marks_entry`; publishing requires one of those states, at least one
+  paper and no pending paper–section sheets. `exams` → `examSubjects` (paper per class/subject with schedule + max/pass marks) → `marks`
   (per student per paper) → `results` (snapshot computed at publish, with per-subject breakdown and rank).
-- **Timetable:** `timetableEntries` by section/day/period and by teacher/day/period.
-- **Homework:** `homework` (per section/subject/teacher) → `homeworkSubmissions`.
+- **Timetable:** `periods` is the school's bell schedule (`index`, `label`, `startTime`, `endTime`, `isBreak`).
+  `timetableEntries` reference a `periodId` (times are read from the period, never copied). Clash checks use
+  `by_section_day_period` (one lesson per section per slot) and `by_teacher_day_period` (one section per teacher
+  per slot).
+- **Homework:** `homework` status is `active | closed` (no drafts) → `homeworkSubmissions`
+  (`submitted | late | reviewed`).
+- **Staff:** `staffAttendance` (one row per teacher per date; `on_leave` may point at the approved
+  `leaveRequests` row) and `leaveRequests` (applied-at = `_creationTime`). Workflows not built yet.
+- **Document numbers:** `counters` + `convex/model/counters.ts`. Allocate **inside the mutation that creates the
+  document**: `nextAdmissionNumber(ctx, school, "2026")` → `AA-2026-0001`, `nextEmployeeId(ctx, school)` →
+  `AA-EMP-001`, `nextReceiptNumber(ctx, school, year)` → `AA/26-27/0001`. Convex mutations are serializable, so
+  concurrent allocations from the same key cannot produce duplicates; there is no public "give me a number"
+  function. Use `ensureCounterAtLeast` when importing existing documents.
 - **Notices/events:** `notices` and `events` with a server-resolved `audience` (all / roles / classes / sections).
 
 ---
@@ -278,7 +314,7 @@ import { useSchoolQuery, useSchoolMutation, useMembership } from "@/lib/convex/m
 import { getAppError } from "@/lib/convex/errors";
 import { useAuthActions } from "@convex-dev/auth/react";
 
-const register = useSchoolQuery(api.attendance.getByDate, { sectionId, date }); // undefined while loading
+const register = useSchoolQuery(api.attendance.getByDate, { sectionId, date, today }); // undefined while loading
 const mark = useSchoolMutation(api.attendance.mark);
 try { await mark({ sectionId, date, entries }); } catch (e) { toast(getAppError(e)?.message ?? "Failed"); }
 
@@ -290,8 +326,14 @@ await signIn("password", { email, password, flow: "signIn" });
 `me.memberships` for a school/role switcher.
 
 **Migration path (module by module, one source of truth at a time):**
-1. Auth/session first: switch the login screen to `useAuthActions`, replace `SessionProvider`'s mock session
-   with `api.users.viewer`, and add redirects in `src/proxy.ts`.
+1. ✅ Auth/session (done): the login screen uses `useAuthActions().signIn("password", …)`; `SessionProvider`
+   reads `api.users.session` (signedOut / noSchool / signedIn + viewer); `src/proxy.ts` redirects signed-out
+   requests for `/admin|teacher|student/*` to `/login`; guardian child switching is verified with
+   `api.users.studentContext`; password changes use `api.account.changePassword`. Until each module
+   migrates, the server identity is bound in memory to its demo-data record (by login email; linked students
+   by name, and only if linked on both sides) so the mock services know the caller — no session, role or
+   password is kept in Web Storage by the app. (The Convex Auth client caches its 1-hour access JWT in
+   localStorage; its `inMemory` mode is broken in 0.0.96. The refresh token stays in the httpOnly cookie.)
 2. Then per module: rewrite the screen's data calls to `useSchoolQuery`/`useSchoolMutation` and **delete** the
    corresponding mock service + its seed slice in the same PR.
 3. When the last module moves, delete `src/lib/mock-data`, `src/lib/store`, and the mock services.
@@ -304,7 +346,8 @@ await signIn("password", { email, password, flow: "signIn" });
 |---|---|
 | `npm run test:convex` | In-process Convex tests (`convex-test` + Vitest): tenant isolation, auth resolution, attendance ownership, permission catalogue, source guard |
 | `npm run test:convex:integration` | Against a real seeded deployment (`CONVEX_URL=…`): real Convex Auth sign-in, invitations, suspension, attendance rules, notifications, audit |
-| `npm run test:authz` / `npm run test:e2e` | Stage 1 UI + mock service suites (unchanged) |
+| `npm run test:authz` | Mock-service attendance ownership, acting as server-shaped identities (no passwords) + identity-bridge rules |
+| `npm run test:e2e` | Browser suite. Needs a seeded Convex deployment and a build with `NEXT_PUBLIC_CONVEX_URL`: real sign-in, server-side route protection, role routing, workflows |
 
 ---
 

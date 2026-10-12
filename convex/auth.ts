@@ -20,8 +20,8 @@ import { normalizeEmail } from "./core/validators";
 import { AppError, invalid } from "./core/errors";
 import { activateInvitationsForNewUser, hasActiveAccess } from "./model/memberships";
 
-/** Password policy for school accounts. */
-function validatePassword(password: string) {
+/** Password policy for school accounts (also used by account.changePassword). */
+export function validatePassword(password: string) {
   if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
     throw invalid("Use at least 8 characters, including a letter and a number.", { password: "Too weak" });
   }

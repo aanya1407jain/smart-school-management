@@ -12,6 +12,7 @@
  */
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
+import type { QueryCtx } from "./_generated/server";
 import { schoolMutation, schoolQuery } from "./core/functions";
 import {
   getCurrentAcademicYearId, getInSchool, getSchoolSettings, hasPermission, linkedStudentIds, requirePermission,
@@ -230,6 +231,9 @@ export const assignSubjectTeacher = schoolMutation({
     const subject = await getInSchool(ctx, "subjects", a.subjectId, "Subject");
     const teacher = await getInSchool(ctx, "teachers", a.teacherId, "Teacher");
     if (teacher.status !== "active") throw invalidRelationship("Only active teachers can be assigned.");
+    if (!(await isInCurriculum(ctx, section.classId, section.academicYearId, subject._id))) {
+      throw invalidRelationship(`${subject.name} is not in the curriculum of ${section.displayName}'s class for this academic year.`);
+    }
     const existing = await ctx.db.query("teacherAssignments").withIndex("by_section_subject", (q) => q.eq("sectionId", section._id).eq("subjectId", subject._id)).unique();
     let id: Id<"teacherAssignments">;
     if (existing) {
@@ -246,6 +250,92 @@ export const assignSubjectTeacher = schoolMutation({
       summary: `${subject.name} in ${section.displayName} → ${teacherDisplayName(teacher)}`, metadata: { previousTeacherId: existing?.teacherId ?? null },
     });
     return id;
+  },
+});
+
+// ================================================================ curriculum (class ↔ subject per year)
+const MAX_SUBJECTS_PER_CLASS = 40;
+
+async function isInCurriculum(ctx: QueryCtx, classId: Id<"classes">, academicYearId: Id<"academicYears">, subjectId: Id<"subjects">) {
+  const row = await ctx.db
+    .query("classSubjects")
+    .withIndex("by_class_year_subject", (q) => q.eq("classId", classId).eq("academicYearId", academicYearId).eq("subjectId", subjectId))
+    .unique();
+  return row !== null;
+}
+
+async function resolveYearId(ctx: Parameters<typeof getInSchool>[0], academicYearId: Id<"academicYears"> | undefined) {
+  return academicYearId ? (await getInSchool(ctx, "academicYears", academicYearId, "Academic year"))._id : await getCurrentAcademicYearId(ctx, ctx.actor.schoolId);
+}
+
+/** Subjects a class studies in a year (default: current year). Curriculum is not sensitive: any member may read it. */
+export const listClassSubjects = schoolQuery({
+  args: { classId: v.id("classes"), academicYearId: v.optional(v.id("academicYears")) },
+  handler: async (ctx, { classId, academicYearId }) => {
+    const cls = await getInSchool(ctx, "classes", classId, "Class");
+    const yearId = await resolveYearId(ctx, academicYearId);
+    const rows = await ctx.db
+      .query("classSubjects")
+      .withIndex("by_class_year_subject", (q) => q.eq("classId", cls._id).eq("academicYearId", yearId))
+      .take(MAX_SUBJECTS_PER_CLASS);
+    const out = [];
+    for (const r of rows) {
+      const subject = await ctx.db.get(r.subjectId);
+      if (subject && subject.schoolId === ctx.actor.schoolId) out.push({ subjectId: subject._id, name: subject.name, code: subject.code });
+    }
+    return out.sort((x, y) => x.name.localeCompare(y.name));
+  },
+});
+
+/**
+ * Replace a class's curriculum for a year. Removing a subject that still has
+ * subject-teacher assignments in that class's sections is rejected — remove
+ * the assignments first, so no orphaned assignment is left behind.
+ */
+export const setClassSubjects = schoolMutation({
+  args: { classId: v.id("classes"), academicYearId: v.id("academicYears"), subjectIds: v.array(v.id("subjects")) },
+  handler: async (ctx, a) => {
+    requirePermission(ctx.actor, "academics:manage");
+    const cls = await getInSchool(ctx, "classes", a.classId, "Class");
+    const year = await getInSchool(ctx, "academicYears", a.academicYearId, "Academic year");
+    const wanted = [...new Set(a.subjectIds)];
+    if (wanted.length > MAX_SUBJECTS_PER_CLASS) throw invalid(`A class can have at most ${MAX_SUBJECTS_PER_CLASS} subjects.`, { subjectIds: "Too many" });
+    for (const id of wanted) {
+      const subject = await getInSchool(ctx, "subjects", id, "Subject");
+      if (!subject.active) throw invalidRelationship(`${subject.name} is inactive.`);
+    }
+    const current = await ctx.db
+      .query("classSubjects")
+      .withIndex("by_class_year_subject", (q) => q.eq("classId", cls._id).eq("academicYearId", year._id))
+      .take(MAX_SUBJECTS_PER_CLASS + 1);
+    const currentIds = new Set(current.map((r) => r.subjectId));
+    const added = wanted.filter((id) => !currentIds.has(id));
+    const removed = current.filter((r) => !wanted.includes(r.subjectId));
+
+    if (removed.length) {
+      const sections = await ctx.db.query("sections").withIndex("by_class_year", (q) => q.eq("classId", cls._id).eq("academicYearId", year._id)).collect();
+      for (const r of removed) {
+        for (const section of sections) {
+          const assigned = await ctx.db.query("teacherAssignments").withIndex("by_section_subject", (q) => q.eq("sectionId", section._id).eq("subjectId", r.subjectId)).first();
+          if (assigned) {
+            const subject = await ctx.db.get(r.subjectId);
+            throw invalidRelationship(`${subject?.name ?? "A subject"} still has a teacher assigned in ${section.displayName}. Remove the assignment first.`);
+          }
+        }
+      }
+    }
+    for (const r of removed) await ctx.db.delete(r._id);
+    for (const subjectId of added) {
+      await ctx.db.insert("classSubjects", { schoolId: ctx.actor.schoolId, academicYearId: year._id, classId: cls._id, subjectId });
+    }
+    if (added.length || removed.length) {
+      await writeAudit(ctx, {
+        schoolId: ctx.actor.schoolId, actor: ctx.actor, action: "curriculum.updated", entity: { table: "classes", id: cls._id },
+        summary: `Updated ${cls.name} curriculum for ${year.name} (+${added.length} / −${removed.length})`,
+        metadata: { academicYearId: year._id, added, removed: removed.map((r) => r.subjectId) },
+      });
+    }
+    return { added: added.length, removed: removed.length };
   },
 });
 

@@ -21,9 +21,9 @@ import { authTables } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import {
   vAcademicYearStatus, vAttendanceStatus, vAudience, vConcessionKind, vEnrollmentStatus, vEntityRef, vEventKind,
-  vExamStatus, vFileKind, vFileOwnerType, vGender, vHomeworkStatus, vMembershipStatus, vNoticeStatus, vNoticeType,
-  vNotificationType, vPaymentMethod, vPaymentStatus, vPermissionSet, vPersonStatus, vPriority, vRole, vSchoolStatus,
-  vStaffStatus, vSubmissionStatus,
+  vExamStatus, vFileKind, vFileOwnerType, vGender, vHomeworkStatus, vLeaveStatus, vLeaveType, vMembershipStatus, vNoticeStatus,
+  vNoticeType, vNotificationType, vPaymentMethod, vPaymentStatus, vPermissionSet, vPersonStatus, vPriority, vRole, vSchoolStatus,
+  vStaffAttendanceStatus, vStaffStatus, vSubmissionStatus,
 } from "./core/validators";
 
 export default defineSchema({
@@ -173,6 +173,22 @@ export default defineSchema({
     active: v.boolean(),
   }).index("by_school_code", ["schoolId", "code"]),
 
+  /**
+   * CURRICULUM: which subjects a class studies in an academic year.
+   *   classSubjects       = what is taught to the class (curriculum)
+   *   teacherAssignments  = who teaches a curriculum subject to one section
+   *   sections.classTeacherId = who owns the section (ATTENDANCE OWNER)
+   * A subject assignment must be for a subject in the class's curriculum.
+   */
+  classSubjects: defineTable({
+    schoolId: v.id("schools"),
+    academicYearId: v.id("academicYears"),
+    classId: v.id("classes"),
+    subjectId: v.id("subjects"),
+  })
+    .index("by_class_year_subject", ["classId", "academicYearId", "subjectId"])
+    .index("by_school_year", ["schoolId", "academicYearId"]),
+
   // ============================================================ people
   teachers: defineTable({
     schoolId: v.id("schools"),
@@ -193,6 +209,36 @@ export default defineSchema({
   })
     .index("by_school_employee", ["schoolId", "employeeId"])
     .index("by_school_status", ["schoolId", "status"]),
+
+  /** One row per teacher per date (present / absent / on_leave). Marked by staff managers. */
+  staffAttendance: defineTable({
+    schoolId: v.id("schools"),
+    teacherId: v.id("teachers"),
+    date: v.string(),
+    status: vStaffAttendanceStatus,
+    leaveRequestId: v.optional(v.id("leaveRequests")),
+    markedByUserId: v.id("users"),
+    note: v.optional(v.string()),
+  })
+    .index("by_school_date", ["schoolId", "date"])
+    .index("by_teacher_date", ["teacherId", "date"]),
+
+  /** A teacher's leave application. Applied-at time is `_creationTime`. */
+  leaveRequests: defineTable({
+    schoolId: v.id("schools"),
+    teacherId: v.id("teachers"),
+    type: vLeaveType,
+    fromDate: v.string(),
+    toDate: v.string(),
+    reason: v.string(),
+    status: vLeaveStatus,
+    requestedByUserId: v.id("users"),
+    decidedByUserId: v.optional(v.id("users")),
+    decidedAt: v.optional(v.number()),
+    decisionNote: v.optional(v.string()),
+  })
+    .index("by_school_status_from", ["schoolId", "status", "fromDate"])
+    .index("by_teacher_from", ["teacherId", "fromDate"]),
 
   students: defineTable({
     schoolId: v.id("schools"),
@@ -437,20 +483,37 @@ export default defineSchema({
     .index("by_exam_section", ["examId", "sectionId"]),
 
   // ============================================================ timetable
+  /**
+   * The school's bell schedule (periods and breaks). Timetable entries point at
+   * a period, so changing a period's times updates every timetable that uses it.
+   */
+  periods: defineTable({
+    schoolId: v.id("schools"),
+    /** Display/order position within the school day (1, 2, 3 …), unique per school. */
+    index: v.number(),
+    label: v.string(), // "Period 1", "Lunch"
+    startTime: v.string(), // HH:MM
+    endTime: v.string(), // HH:MM
+    isBreak: v.boolean(),
+  }).index("by_school_index", ["schoolId", "index"]),
+
+  /**
+   * One lesson slot: section × weekday × period → subject + teacher.
+   * Uniqueness (one lesson per section per slot; one section per teacher per
+   * slot) is checked by the timetable mutations using the two slot indexes.
+   */
   timetableEntries: defineTable({
     schoolId: v.id("schools"),
     academicYearId: v.id("academicYears"),
     sectionId: v.id("sections"),
     dayOfWeek: v.number(), // 0 = Sunday … 6 = Saturday
-    periodNo: v.number(),
-    startTime: v.string(),
-    endTime: v.string(),
+    periodId: v.id("periods"),
     subjectId: v.id("subjects"),
     teacherId: v.id("teachers"),
     room: v.optional(v.string()),
   })
-    .index("by_section_day", ["sectionId", "dayOfWeek", "periodNo"])
-    .index("by_teacher_day", ["teacherId", "dayOfWeek", "periodNo"]),
+    .index("by_section_day_period", ["sectionId", "dayOfWeek", "periodId"])
+    .index("by_teacher_day_period", ["teacherId", "dayOfWeek", "periodId"]),
 
   // ============================================================ homework
   homework: defineTable({
@@ -524,6 +587,20 @@ export default defineSchema({
     .index("by_user_school_read", ["userId", "schoolId", "isRead"]),
 
   // ============================================================ platform
+  /**
+   * Per-school sequence counters for human-readable document numbers
+   * (admission numbers, employee ids, receipt numbers). Only ever read and
+   * incremented inside a mutation via `allocateNumber` (convex/model/counters.ts);
+   * Convex's serializable transactions make each allocation unique.
+   * Keys: "admission:<YYYY>", "employee", "receipt:<academicYearId>".
+   */
+  counters: defineTable({
+    schoolId: v.id("schools"),
+    key: v.string(),
+    value: v.number(), // last number handed out
+  }).index("by_school_key", ["schoolId", "key"]),
+
+
   /** Append-only trail of important actions. Written via convex/audit/log.ts. */
   auditLogs: defineTable({
     schoolId: v.id("schools"),

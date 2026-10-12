@@ -23,6 +23,7 @@ import { generateInviteCode, hashInviteCode, INVITE_TTL_MS } from "./model/membe
 import { addDays, isSchoolDay, todayIn } from "./model/calendar";
 import { gradeFor } from "./model/grading";
 import { writeAudit } from "./model/audit";
+import { nextAdmissionNumber, nextEmployeeId, nextReceiptNumber } from "./model/counters";
 import { notifyUsers } from "./model/notifications";
 import { asterAcademy } from "./seedData/asterAcademy";
 import type { SeedDataset } from "./seedData/types";
@@ -88,6 +89,7 @@ export const createStructure = internalMutation({
     if (existing) throw conflict(`A school with slug "${ds.school.slug}" already exists.`);
 
     const schoolId = await ctx.db.insert("schools", { ...ds.school, status: "active" });
+    const school = (await ctx.db.get(schoolId))!;
     const yearId = await ctx.db.insert("academicYears", { schoolId, ...ds.academicYear, status: "active" });
     await ctx.db.insert("schoolSettings", {
       schoolId, currentAcademicYearId: yearId, workingDays: ds.settings.workingDays, attendance: ds.settings.attendance, grading: ds.settings.grading,
@@ -109,15 +111,26 @@ export const createStructure = internalMutation({
     }
 
     const teacherIds: Record<string, Id<"teachers">> = {};
-    let emp = 1;
     for (const t of ds.teachers) {
       teacherIds[t.key] = await ctx.db.insert("teachers", {
-        schoolId, employeeId: `${ds.school.code}-EMP-${String(emp++).padStart(3, "0")}`, title: t.title, firstName: t.firstName, lastName: t.lastName,
+        schoolId, employeeId: await nextEmployeeId(ctx, school), title: t.title, firstName: t.firstName, lastName: t.lastName,
         gender: t.gender, email: t.email, designation: t.designation, qualification: t.qualification,
         specializationSubjectIds: t.subjects.map((c) => subjectIds[c]), joiningDate: t.joiningDate, status: "active",
       });
     }
     for (const [label, key] of Object.entries(ds.classTeachers)) await ctx.db.patch(sectionIds[label], { classTeacherId: teacherIds[key] });
+    // Curriculum: each class studies the subjects assigned in any of its sections.
+    const curriculum = new Map<Id<"classes">, Set<Id<"subjects">>>();
+    for (const [label, bySubject] of Object.entries(ds.assignments)) {
+      const classId = classIds[Number(label.split("-")[0])];
+      const set = curriculum.get(classId) ?? new Set();
+      Object.keys(bySubject).forEach((code) => set.add(subjectIds[code]));
+      curriculum.set(classId, set);
+    }
+    for (const [classId, subjects] of curriculum) {
+      for (const subjectId of subjects) await ctx.db.insert("classSubjects", { schoolId, academicYearId: yearId, classId, subjectId });
+    }
+
     for (const [label, bySubject] of Object.entries(ds.assignments)) {
       const section = (await ctx.db.get(sectionIds[label]))!;
       for (const [code, key] of Object.entries(bySubject)) {
@@ -128,11 +141,10 @@ export const createStructure = internalMutation({
     }
 
     const studentIds: Record<string, Id<"students">> = {};
-    let adm = 1;
     for (const s of ds.students) {
       const section = (await ctx.db.get(sectionIds[s.section]))!;
       studentIds[s.key] = await ctx.db.insert("students", {
-        schoolId, admissionNo: `${ds.school.code}-${ds.academicYear.startDate.slice(0, 4)}-${String(adm++).padStart(4, "0")}`,
+        schoolId, admissionNo: await nextAdmissionNumber(ctx, school, ds.academicYear.startDate.slice(0, 4)),
         firstName: s.firstName, lastName: s.lastName, gender: s.gender, dateOfBirth: s.dateOfBirth, admissionDate: ds.academicYear.startDate, status: "active", email: s.email,
       });
       await ctx.db.insert("enrollments", {
@@ -195,14 +207,18 @@ export const createStructure = internalMutation({
       }
     }
 
-    // Timetables.
+    // Bell schedule + timetables (entries reference periods).
+    const periodIds: Id<"periods">[] = [];
+    for (const [i, p] of ds.periods.entries()) {
+      periodIds.push(await ctx.db.insert("periods", { schoolId, index: i + 1, label: `Period ${i + 1}`, startTime: p.start, endTime: p.end, isBreak: false }));
+    }
     for (const [label, days] of Object.entries(ds.timetables)) {
       const sectionId = sectionIds[label];
       for (const [day, codes] of Object.entries(days)) {
         for (const [i, code] of codes.entries()) {
           const teacherKey = ds.assignments[label][code];
           await ctx.db.insert("timetableEntries", {
-            schoolId, academicYearId: yearId, sectionId, dayOfWeek: Number(day), periodNo: i + 1, startTime: ds.periods[i].start, endTime: ds.periods[i].end,
+            schoolId, academicYearId: yearId, sectionId, dayOfWeek: Number(day), periodId: periodIds[i],
             subjectId: subjectIds[code], teacherId: teacherIds[teacherKey], room: `Room ${label.replace("-", "")}`,
           });
         }
@@ -276,7 +292,7 @@ export const createActivity = internalMutation({
     }
 
     // --- Fees: payments (FIFO allocation to the earliest obligations) + receipts; concessions.
-    const yearCode = ds.academicYear.name.replace(/^20(\d\d)-(\d\d)$/, "$1-$2");
+    const year = (await ctx.db.get(yearId))!;
     let receiptSeq = 1;
     for (const p of ds.payments) {
       const student = keyToStudent(p.student);
@@ -284,10 +300,10 @@ export const createActivity = internalMutation({
         .sort((a, b) => a.dueDate.localeCompare(b.dueDate)).slice(0, p.installments);
       const amountMinor = fees.reduce((a, f) => a + f.amountMinor, 0);
       const paymentId = await ctx.db.insert("feePayments", {
-        schoolId, studentId: student._id, academicYearId: yearId, amountMinor, method: p.method, reference: `SEED-${receiptSeq}`, paidOn: addDays(today, -p.daysAgo),
+        schoolId, studentId: student._id, academicYearId: yearId, amountMinor, method: p.method, reference: `SEED-${receiptSeq++}`, paidOn: addDays(today, -p.daysAgo),
         status: "completed", allocations: fees.map((f) => ({ studentFeeId: f._id, amountMinor: f.amountMinor })), recordedByUserId: adminUserId,
       });
-      await ctx.db.insert("receipts", { schoolId, paymentId, studentId: student._id, receiptNo: `${school.code}/${yearCode}/${String(receiptSeq++).padStart(4, "0")}`, issuedAt: Date.now() });
+      await ctx.db.insert("receipts", { schoolId, paymentId, studentId: student._id, receiptNo: await nextReceiptNumber(ctx, school, year), issuedAt: Date.now() });
     }
     for (const c of ds.concessions) {
       const student = keyToStudent(c.student);
@@ -339,7 +355,7 @@ export const createActivity = internalMutation({
       const assignment = await ctx.db.query("teacherAssignments").withIndex("by_section_subject", (q) => q.eq("sectionId", section._id).eq("subjectId", subjectByCode[h.subject]._id)).unique();
       await ctx.db.insert("homework", {
         schoolId, academicYearId: yearId, sectionId: section._id, subjectId: subjectByCode[h.subject]._id, teacherId: assignment!.teacherId,
-        title: h.title, description: h.description, assignedOn: today, dueDate: addDays(today, h.dueInDays), status: "published", attachmentFileIds: [],
+        title: h.title, description: h.description, assignedOn: today, dueDate: addDays(today, h.dueInDays), status: "active", attachmentFileIds: [],
       });
     }
 
