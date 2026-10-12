@@ -98,6 +98,25 @@ async function main() {
   check("Student viewer sees only themself", vAarav.students.length === 1 && vAarav.students[0].name === "Aarav Sharma");
   await expectCode("A membershipId that is not yours is rejected", () => aarav.query(api.users.viewer, { membershipId: vAdmin.membershipId }), "NO_SCHOOL_ACCESS");
 
+  // ---------------------------------------------------------------- session (the frontend's single identity source)
+  check("Signed-out users.session reports signedOut", (await anon.query(api.users.session, {})).status === "signedOut");
+  const sessions = { admin: await admin.query(api.users.session, {}), rahul: await rahul.query(api.users.session, {}), aarav: await aarav.query(api.users.session, {}), guardian: await guardian.query(api.users.session, {}) };
+  const roleOf = (x: (typeof sessions)[keyof typeof sessions]) => (x.status === "signedIn" ? x.viewer.role : x.status);
+  check("users.session derives each role server-side", roleOf(sessions.admin) === "admin" && roleOf(sessions.rahul) === "teacher" && roleOf(sessions.aarav) === "student" && roleOf(sessions.guardian) === "student",
+    Object.values(sessions).map(roleOf).join(","));
+  check("Session links: teacher record / own student / guardian with 2 children",
+    sessions.rahul.status === "signedIn" && !!sessions.rahul.viewer.teacher &&
+    sessions.aarav.status === "signedIn" && sessions.aarav.viewer.student?.name === "Aarav Sharma" && !sessions.aarav.viewer.isGuardian &&
+    sessions.guardian.status === "signedIn" && !!sessions.guardian.viewer.guardian && sessions.guardian.viewer.students.length === 2 && sessions.guardian.viewer.student === null);
+  const forgedSession = await aarav.query(api.users.session, { membershipId: vAdmin.membershipId });
+  check("Session with someone else's membershipId gets no identity (noSchool)", forgedSession.status === "noSchool");
+  try {
+    await aarav.query(api.users.session, { role: "admin" } as never);
+    check("A role passed by the client is rejected", false);
+  } catch (e) {
+    check("A role passed by the client is rejected", /ArgumentValidationError|extra field/i.test(codeOf(e)), codeOf(e).replace(/\s+/g, " ").slice(0, 80));
+  }
+
   // ---------------------------------------------------------------- sections
   const sections = await admin.query(api.academics.listSections, {});
   const sec = (label: string) => sections.find((s) => s.displayName === label)!._id;
@@ -169,6 +188,12 @@ async function main() {
   const amairaId = roster10B.students.find((s) => s.name === "Amaira Desai")!.studentId;
   await expectCode("Student cannot read another student", () => aarav.query(api.attendance.studentHistory, { studentId: amairaId }), "NOT_FOUND");
   await expectCode("Guardian cannot read an unlinked student", () => guardian.query(api.attendance.studentHistory, { studentId: amairaId }), "NOT_FOUND");
+  for (const s of vGuardian.students) {
+    const c = await guardian.query(api.users.studentContext, { studentId: s.studentId });
+    check(`Guardian can switch to linked child ${c.name}`, c.relation === "guardian" && c.studentId === s.studentId);
+  }
+  await expectCode("Guardian cannot switch to an unlinked student", () => guardian.query(api.users.studentContext, { studentId: amairaId }), "NOT_FOUND");
+  await expectCode("Teacher has no student-portal context", () => rahul.query(api.users.studentContext, { studentId: amairaId }), "NOT_FOUND");
   const rahulReadsAmaira = await rahul.query(api.attendance.studentHistory, { studentId: amairaId });
   check("Subject teacher can VIEW a student in a section they teach", rahulReadsAmaira.name === "Amaira Desai");
 
@@ -247,6 +272,23 @@ async function main() {
     check("Suspended member cannot start a new session", true);
   }
   await expectCode("Admin cannot change their own access", () => admin.mutation(api.memberships.updateAccess, { targetMembershipId: vAdmin.membershipId, status: "suspended" }), "FORBIDDEN");
+
+  // ---------------------------------------------------------------- change password (Convex Auth credentials)
+  {
+    const email = `meera.iyer@${D}`;
+    const NEW = "Changed@456";
+    const me = await signIn(email, PW.welcome);
+    await expectCode("Change password: wrong current password rejected", () => me.action(api.account.changePassword, { currentPassword: "not-it-1", newPassword: NEW }), "INVALID_ARGUMENT");
+    await expectCode("Change password: weak new password rejected", () => me.action(api.account.changePassword, { currentPassword: PW.welcome, newPassword: "short" }), "INVALID_ARGUMENT");
+    await expectCode("Change password: signed out rejected", () => anon.action(api.account.changePassword, { currentPassword: PW.welcome, newPassword: NEW }), "UNAUTHENTICATED");
+    await me.action(api.account.changePassword, { currentPassword: PW.welcome, newPassword: NEW });
+    let oldWorks = true;
+    try { await signIn(email, PW.welcome); } catch { oldWorks = false; }
+    const again = await signIn(email, NEW);
+    check("Change password: old password stops working, new one signs in", !oldWorks && (await again.query(api.users.viewer, {})).email === email);
+    await again.action(api.account.changePassword, { currentPassword: NEW, newPassword: PW.welcome }); // restore the demo password
+    check("Change password: restored demo password signs in", !!(await signIn(email, PW.welcome)));
+  }
 
   console.log(`\n${passed}/${passed + failed} passed`);
   if (failed) process.exit(1);

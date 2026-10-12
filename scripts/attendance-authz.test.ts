@@ -1,14 +1,18 @@
 /**
  * Service-level authorization tests for attendance ownership.
  *
- * Calls the mock service layer DIRECTLY (no UI), signed in as different users,
+ * Calls the mock service layer DIRECTLY (no UI), acting as different users,
  * to prove unauthorized attendance mutations are rejected at the service /
  * permission layer — not just hidden in the UI.
+ *
+ * Sign-in itself is Convex Auth (covered by test:convex / test:convex:integration
+ * / test:e2e). Here each user is bound the way the session provider does it:
+ * from a SERVER-shaped identity (email, role, linked students) — no passwords.
  *
  * Run: npm run test:authz
  */
 
-// ---- minimal browser shim (the mock store/session use Web Storage) ----------
+// ---- minimal browser shim (the mock store uses Web Storage) -----------------
 class MemoryStorage {
   private m = new Map<string, string>();
   getItem(k: string) { return this.m.has(k) ? this.m.get(k)! : null; }
@@ -40,8 +44,16 @@ async function main() {
   const { readDb } = await import("../src/lib/store/db");
 
   const DAY = previousSchoolDay(addDays(todayISO(), -1)); // last school day — registers exist
-  const login = (email: string, password: string, role: "admin" | "teacher" | "student") =>
-    services.auth.login({ email, password, role, remember: false });
+  /** What users.session would return for these demo accounts (role + linked students are server-derived). */
+  const SERVER_STUDENTS: Record<string, { studentId: string; name: string }[]> = {
+    "student@asteracademy.edu": [{ studentId: "cvx_aarav", name: "Aarav Sharma" }],
+    "guardian@asteracademy.edu": [{ studentId: "cvx_aarav", name: "Aarav Sharma" }, { studentId: "cvx_ananya", name: "Ananya Sharma" }],
+  };
+  const login = (email: string, role: "admin" | "teacher" | "student") => {
+    const bound = services.auth.bindIdentity({ email, role, displayName: email, permissionSets: [], students: SERVER_STUDENTS[email] ?? [] });
+    if (!bound.ok) throw new Error(`could not bind ${email}`);
+    return bound.user;
+  };
   const rejects = async (fn: () => Promise<unknown>) => {
     try { await fn(); return { rejected: false, code: "" }; } catch (e) { return { rejected: true, code: (e as { code?: string }).code ?? (e as Error).message }; }
   };
@@ -55,7 +67,7 @@ async function main() {
   check("Data: Sunita Rao teaches English in 10-A and is class teacher of 10-C", db.teacherAssignments.some((a) => a.teacherId === "t_rao" && a.sectionId === "sec_10a" && a.subjectId === "sub_eng") && sec("sec_10c").classTeacherId === "t_rao");
 
   // ---------------- Rahul (class teacher of 10-A)
-  await login("teacher@asteracademy.edu", "Teacher@123", "teacher");
+  login("teacher@asteracademy.edu", "teacher");
   const markDate = unmarkedDay("sec_10a");
   const r1 = await rejects(() => services.attendance.saveRegister("sec_10a", markDate, allPresent("sec_10a")));
   check("1. Rahul can MARK 10-A (new register)", !r1.rejected, `${markDate} ${r1.code}`);
@@ -74,10 +86,10 @@ async function main() {
   check("4. Rahul cannot EDIT 10-B (service rejects)", r4.rejected && r4.code === "FORBIDDEN", r4.code);
   const r4b = await rejects(() => services.attendance.saveRegister("sec_12a", DAY, allPresent("sec_12a")));
   check("4b. Rahul cannot write a class he doesn't teach at all (12-A)", r4b.rejected && r4b.code === "FORBIDDEN", r4b.code);
-  await services.auth.logout();
+  services.auth.clearIdentity();
 
   // ---------------- Sunita Rao (English in 10-A, class teacher of 10-C)
-  await login("sunita.rao@asteracademy.edu", "Welcome@123", "teacher");
+  login("sunita.rao@asteracademy.edu", "teacher");
   const free10a = unmarkedDay("sec_10a");
   const r5 = await rejects(() => services.attendance.saveRegister("sec_10a", free10a, allPresent("sec_10a")));
   check("5. Subject teacher of 10-A (Sunita) cannot MARK 10-A", r5.rejected && r5.code === "FORBIDDEN", r5.code);
@@ -86,10 +98,10 @@ async function main() {
   const reg10c = await services.attendance.getRegister("sec_10c", DAY);
   const r6b = await rejects(() => services.attendance.saveRegister("sec_10c", DAY, { ...reg10c.entries! }));
   check("6b. Sunita CAN edit her own class 10-C", reg10c.canEdit && !r6b.rejected, r6b.code);
-  await services.auth.logout();
+  services.auth.clearIdentity();
 
   // ---------------- Admin
-  await login("admin@asteracademy.edu", "Admin@123", "admin");
+  login("admin@asteracademy.edu", "admin");
   const adminReg = await services.attendance.getRegister("sec_10a", DAY);
   const overview = await services.attendance.getDailyOverview(DAY);
   check("7. Admin can VIEW 10-A attendance + school overview", !!adminReg.entries && overview.rows.length === 15);
@@ -98,18 +110,18 @@ async function main() {
   check("8. Admin cannot MARK 10-A", r8.rejected && r8.code === "FORBIDDEN", r8.code);
   const r9 = await rejects(() => services.attendance.saveRegister("sec_10a", DAY, allPresent("sec_10a")));
   check("9. Admin cannot EDIT 10-A", r9.rejected && r9.code === "FORBIDDEN", r9.code);
-  await services.auth.logout();
+  services.auth.clearIdentity();
 
   // ---------------- Student & guardian
-  await login("student@asteracademy.edu", "Student@123", "student");
+  login("student@asteracademy.edu", "student");
   const mine = await services.attendance.getStudentAttendance("stu_aarav");
   check("10. Student can view own attendance", mine.stats.total > 0);
   const r11 = await rejects(() => services.attendance.saveRegister("sec_10a", DAY, allPresent("sec_10a")));
   const r11b = await rejects(() => services.attendance.getRegister("sec_10a", DAY));
   check("11. Student cannot modify (or open the register)", r11.rejected && r11b.rejected, `${r11.code}/${r11b.code}`);
-  await services.auth.logout();
+  services.auth.clearIdentity();
 
-  await login("guardian@asteracademy.edu", "Guardian@123", "student");
+  login("guardian@asteracademy.edu", "student");
   const g1 = await services.attendance.getStudentAttendance("stu_aarav");
   const g2 = await services.attendance.getStudentAttendance("stu_ananya");
   check("12. Guardian can view both linked students", g1.stats.total > 0 && g2.stats.total > 0);
@@ -117,17 +129,37 @@ async function main() {
   check("12b. Guardian cannot view an unlinked student", g3.rejected);
   const r13 = await rejects(() => services.attendance.saveRegister("sec_8b", DAY, allPresent("sec_8b")));
   check("13. Guardian cannot modify attendance", r13.rejected && r13.code === "FORBIDDEN", r13.code);
-  await services.auth.logout();
+  services.auth.clearIdentity();
 
   // ---------------- Ownership follows the class-teacher assignment
-  await login("admin@asteracademy.edu", "Admin@123", "admin");
+  login("admin@asteracademy.edu", "admin");
   const s10b = sec("sec_10b");
   await services.academics.updateSection("sec_10b", { room: s10b.room, capacity: s10b.capacity, classTeacherId: "t_kapoor" });
-  await services.auth.logout();
-  await login("meera.iyer@asteracademy.edu", "Welcome@123", "teacher");
+  services.auth.clearIdentity();
+  login("meera.iyer@asteracademy.edu", "teacher");
   const r16 = await rejects(() => services.attendance.saveRegister("sec_10b", DAY, allPresent("sec_10b")));
   check("15b. After admin reassigns 10-B's class teacher, Meera loses edit rights", r16.rejected && r16.code === "FORBIDDEN", r16.code);
-  await services.auth.logout();
+  services.auth.clearIdentity();
+
+  // ---------------- Identity bridge: the browser cannot widen what the server derived
+  const storage = (g.window as { localStorage: MemoryStorage; sessionStorage: MemoryStorage });
+  const noSessionInStorage = [storage.localStorage, storage.sessionStorage].every((st) => st.getItem("ssms-session") === null);
+  check("16. No session / role / password is written to Web Storage", noSessionInStorage && !JSON.stringify(readDb().users).includes("password"));
+  const b1 = services.auth.bindIdentity({ email: "nobody@asteracademy.edu", role: "admin", displayName: "x", permissionSets: [], students: [] });
+  const r17 = await rejects(() => services.attendance.getDailyOverview(DAY));
+  check("17. Unknown server identity binds nothing (no actor)", !b1.ok && r17.rejected && r17.code === "UNAUTHENTICATED", r17.code);
+  const b2 = services.auth.bindIdentity({ email: "teacher@asteracademy.edu", role: "admin", displayName: "x", permissionSets: [], students: [] });
+  check("18. Role disagreeing with the account's record is not bound", !b2.ok && services.auth.getSessionSnapshot().user === null);
+  // Server lists only Aarav for this guardian → Ananya must stay out of reach even though demo data links her.
+  const b3 = services.auth.bindIdentity({ email: "guardian@asteracademy.edu", role: "student", displayName: "Priya Sharma", permissionSets: [], students: [{ studentId: "cvx_aarav", name: "Aarav Sharma" }] });
+  const r19 = await rejects(() => services.attendance.getStudentAttendance("stu_ananya"));
+  let switchRejected = false;
+  try { services.auth.setActiveStudent("stu_ananya"); } catch { switchRejected = true; }
+  check("19. Guardian children come only from the server list (unlisted child rejected)", b3.ok && r19.rejected && switchRejected, r19.code);
+  // A server-listed name with no demo-data link is ignored, never added.
+  const b4 = services.auth.bindIdentity({ email: "student@asteracademy.edu", role: "student", displayName: "Aarav Sharma", permissionSets: [], students: [{ studentId: "cvx_aarav", name: "Aarav Sharma" }, { studentId: "cvx_x", name: db.students.find((x) => x.id === "stu_045")!.firstName + " " + db.students.find((x) => x.id === "stu_045")!.lastName }] });
+  check("20. A student can never be bound to another student's records", b4.ok && JSON.stringify(b4.ok && b4.user.studentIds) === JSON.stringify(["stu_aarav"]));
+  services.auth.clearIdentity();
 
   const passed = results.filter((r) => r.ok).length;
   console.log(`\n${passed}/${results.length} passed`);

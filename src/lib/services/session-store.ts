@@ -1,81 +1,56 @@
 /**
- * Mock session token storage. With "remember me" the session lives in
- * localStorage (survives browser restarts); otherwise in sessionStorage
- * (cleared when the tab closes). A real provider will replace this with an
- * httpOnly cookie / auth SDK.
+ * Domain identity for the (temporary) mock domain services.
+ *
+ * Authentication is real: Convex Auth owns the session (httpOnly cookies set
+ * by the Next.js proxy) and `users.session` derives the user's role, school and
+ * linked students on the server. While the business modules still run on the
+ * mock store, the session provider BINDS that server-derived identity here so
+ * the mock services know who is calling.
+ *
+ * This module is memory-only by design: nothing is written to localStorage or
+ * sessionStorage, there is no token, no password and no role the browser could
+ * edit. Reloading the page re-derives the identity from the server.
  */
 import type { ID, Role } from "@/types/domain";
 import { STORAGE_NAMESPACE } from "@/lib/constants/product";
 
-export interface Session {
-  token: string;
+export interface DomainIdentity {
+  /** Mock user record the server identity was matched to (by login email). */
   userId: ID;
+  /** Server-derived (users.session): these override whatever the mock record says. */
   role: Role;
-  issuedAt: string;
-  expiresAt: string;
-  /** For student-portal accounts linked to several students (guardians). */
+  permissionSets: readonly string[];
+  email: string;
+  displayName: string;
+  /** Mock student ids, derived ONLY from the server's linked-student list. */
+  studentIds: ID[];
+  /** Student-portal accounts linked to several students (guardians): the one being viewed. */
   activeStudentId: ID | null;
 }
 
-const KEY = `${STORAGE_NAMESPACE}-session`;
 const listeners = new Set<() => void>();
-let cache: Session | null | undefined;
+let current: DomainIdentity | null = null;
 
-function storages(): Storage[] {
-  if (typeof window === "undefined") return [];
-  const out: Storage[] = [];
-  try { out.push(window.sessionStorage); } catch { /* blocked */ }
-  try { out.push(window.localStorage); } catch { /* blocked */ }
-  return out;
+const emit = () => listeners.forEach((l) => l());
+
+export function readSession(): DomainIdentity | null {
+  return current;
 }
 
-export function readSession(): Session | null {
-  if (cache !== undefined) return cache;
-  for (const s of storages()) {
-    try {
-      const raw = s.getItem(KEY);
-      if (!raw) continue;
-      const parsed = JSON.parse(raw) as Session;
-      if (new Date(parsed.expiresAt).getTime() > Date.now()) {
-        cache = parsed;
-        return parsed;
-      }
-      s.removeItem(KEY);
-    } catch { /* ignore */ }
-  }
-  cache = null;
-  return null;
+/** Called by the session provider after `users.session` resolves (or with null on sign-out). */
+export function setDomainIdentity(next: DomainIdentity | null) {
+  current = next;
+  emit();
 }
 
-export function writeSession(session: Session, remember: boolean) {
-  clearStored();
-  const [sessionStore, localStore] = storages();
-  try { (remember ? localStore : sessionStore)?.setItem(KEY, JSON.stringify(session)); } catch { /* ignore */ }
-  cache = session;
-  listeners.forEach((l) => l());
-}
-
-export function updateSession(patch: Partial<Session>) {
-  const current = readSession();
+export function updateSession(patch: Partial<Pick<DomainIdentity, "activeStudentId">>) {
   if (!current) return;
-  const next = { ...current, ...patch };
-  for (const s of storages()) {
-    try { if (s.getItem(KEY)) s.setItem(KEY, JSON.stringify(next)); } catch { /* ignore */ }
-  }
-  cache = next;
-  listeners.forEach((l) => l());
-}
-
-function clearStored() {
-  for (const s of storages()) {
-    try { s.removeItem(KEY); } catch { /* ignore */ }
-  }
+  current = { ...current, ...patch };
+  emit();
 }
 
 export function clearSession() {
-  clearStored();
-  cache = null;
-  listeners.forEach((l) => l());
+  setDomainIdentity(null);
 }
 
 export function subscribeSession(listener: () => void) {
@@ -83,10 +58,14 @@ export function subscribeSession(listener: () => void) {
   return () => listeners.delete(listener);
 }
 
-if (typeof window !== "undefined") {
-  window.addEventListener("storage", (e) => {
-    if (e.key !== KEY) return;
-    cache = undefined;
-    listeners.forEach((l) => l());
-  });
+/**
+ * Stage 1 kept a mock session (user id, role, expiry) in Web Storage under
+ * this key. Remove any leftover copy so no stale client-side "session" remains.
+ */
+const LEGACY_SESSION_KEY = `${STORAGE_NAMESPACE}-session`;
+export function purgeLegacySessionStorage() {
+  if (typeof window === "undefined") return;
+  for (const get of [() => window.localStorage, () => window.sessionStorage]) {
+    try { get().removeItem(LEGACY_SESSION_KEY); } catch { /* storage unavailable */ }
+  }
 }

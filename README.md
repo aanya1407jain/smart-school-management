@@ -40,6 +40,9 @@ Requires Node 20+. Fonts are self-hosted (`@fontsource`), so no external font ca
 
 ## Demo accounts (Aster Academy)
 
+Sign-in is real **Convex Auth** (email + password). These accounts exist once a Convex deployment has
+been seeded with `npm run seed:demo` (see *Backend* below); without a configured backend nobody can sign in.
+
 | Role on login screen | Account | Email | Password |
 |---|---|---|---|
 | Admin / Principal | Aanya Jain, Principal | `admin@asteracademy.edu` | `Admin@123` |
@@ -49,11 +52,14 @@ Requires Node 20+. Fonts are self-hosted (`@fontsource`), so no external font ca
 | Student (guardian) | Priya Sharma — guardian of Aarav (10-A) and Ananya (8-B) | `guardian@asteracademy.edu` | `Guardian@123` |
 | Student | Amaira Desai, Class 10-B (useful for audience tests) | `amaira.desai@students.asteracademy.edu` | `Welcome@123` |
 
-Every seeded teacher and student also has a login (`firstname.lastname@…`, password `Welcome@123`).
-Students and teachers you create get a login automatically — the credentials are shown after saving.
+All ten seeded teachers also have a login (`firstname.lastname@asteracademy.edu`, password `Welcome@123`).
+Students and teachers you create in the (still mock) admin screens do **not** get a password: sign-in
+access is issued by school invitation (`memberships.invite`), which the admin UI does not expose yet.
 
-**The role selector never grants access.** Selecting *Admin* with a teacher account is rejected;
-the account's own role decides where the user can go.
+**The role selector never grants access.** The role, school and linked students come from the server
+(`users.session`); selecting *Admin* with a teacher account signs the attempt out again with an error, and the
+account's own role decides which portal opens. Signed-out requests to `/admin`, `/teacher` and `/student`
+are redirected to `/login` by the server (`src/proxy.ts`) before any page code is sent.
 
 The login page has a collapsible *Development demo accounts* helper that fills these in.
 To start over, sign in as admin → **Settings → Demo data → Reset**.
@@ -181,7 +187,10 @@ npx @convex-dev/auth                # once per deployment: JWT keys + SITE_URL
 npx convex env set ALLOW_DEMO_SEED true && npm run seed:demo   # dev only: Aster Academy demo school
 ```
 
-Without `NEXT_PUBLIC_CONVEX_URL` the app runs exactly as the Stage 1 mock build. See
+Without `NEXT_PUBLIC_CONVEX_URL` the app builds and shows the login page, but sign-in is unavailable and
+the protected portals stay closed. Business modules (attendance, fees, exams, …) still read the mock
+store in the browser; the signed-in Convex identity is bound to its demo-data record in memory
+(`src/lib/services/session-store.ts`). See
 [docs/BACKEND.md](docs/BACKEND.md) for the schema, tenancy, auth, permissions, attendance rules and the
 conventions for writing new Convex functions.
 
@@ -189,7 +198,8 @@ conventions for writing new Convex functions.
 
 - Data lives in the browser (localStorage); each browser has its own copy.
 - File uploads (documents, logos, homework attachments) store names only.
-- Password reset, email/SMS notifications and online payments are simulated.
+- Password reset (the "Forgot password?" link), email/SMS notifications and online payments are simulated.
+  Changing a password from the profile page is real (Convex Auth).
 - The mock store holds one school (the Convex backend is multi-school, with per-school timezone/locale/currency). The UI locale is fixed to India (`en-IN` dates, INR currency, `+91` phone
   placeholders) and grading follows the CBSE 8-point scale — these are product defaults to make configurable
   per school in a later stage.

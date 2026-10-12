@@ -326,8 +326,14 @@ await signIn("password", { email, password, flow: "signIn" });
 `me.memberships` for a school/role switcher.
 
 **Migration path (module by module, one source of truth at a time):**
-1. Auth/session first: switch the login screen to `useAuthActions`, replace `SessionProvider`'s mock session
-   with `api.users.viewer`, and add redirects in `src/proxy.ts`.
+1. ✅ Auth/session (done): the login screen uses `useAuthActions().signIn("password", …)`; `SessionProvider`
+   reads `api.users.session` (signedOut / noSchool / signedIn + viewer); `src/proxy.ts` redirects signed-out
+   requests for `/admin|teacher|student/*` to `/login`; guardian child switching is verified with
+   `api.users.studentContext`; password changes use `api.account.changePassword`. Until each module
+   migrates, the server identity is bound in memory to its demo-data record (by login email; linked students
+   by name, and only if linked on both sides) so the mock services know the caller — no session, role or
+   password is kept in Web Storage by the app. (The Convex Auth client caches its 1-hour access JWT in
+   localStorage; its `inMemory` mode is broken in 0.0.96. The refresh token stays in the httpOnly cookie.)
 2. Then per module: rewrite the screen's data calls to `useSchoolQuery`/`useSchoolMutation` and **delete** the
    corresponding mock service + its seed slice in the same PR.
 3. When the last module moves, delete `src/lib/mock-data`, `src/lib/store`, and the mock services.
@@ -340,7 +346,8 @@ await signIn("password", { email, password, flow: "signIn" });
 |---|---|
 | `npm run test:convex` | In-process Convex tests (`convex-test` + Vitest): tenant isolation, auth resolution, attendance ownership, permission catalogue, source guard |
 | `npm run test:convex:integration` | Against a real seeded deployment (`CONVEX_URL=…`): real Convex Auth sign-in, invitations, suspension, attendance rules, notifications, audit |
-| `npm run test:authz` / `npm run test:e2e` | Stage 1 UI + mock service suites (unchanged) |
+| `npm run test:authz` | Mock-service attendance ownership, acting as server-shaped identities (no passwords) + identity-bridge rules |
+| `npm run test:e2e` | Browser suite. Needs a seeded Convex deployment and a build with `NEXT_PUBLIC_CONVEX_URL`: real sign-in, server-side route protection, role routing, workflows |
 
 ---
 

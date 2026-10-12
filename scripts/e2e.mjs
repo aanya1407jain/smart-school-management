@@ -1,6 +1,8 @@
 // Smart School Management System — end-to-end checks (demo tenant: Aster Academy) for auth, route guards and the six cross-module workflows.
-// Usage: npm run build && npm start   (in another terminal)  then  npx playwright install chromium && npm run test:e2e
-// Each scenario uses a fresh browser context, i.e. a freshly seeded demo dataset.
+// Sign-in is real Convex Auth, so this needs a Convex deployment seeded with the demo accounts
+// (`npm run seed:demo`) and a build with NEXT_PUBLIC_CONVEX_URL pointing at it:
+//   npm run build && npm start   (in another terminal)  then  npx playwright install chromium && npm run test:e2e
+// Each scenario uses a fresh browser context, i.e. a freshly seeded (mock) domain dataset.
 import { chromium } from "playwright";
 
 const BASE = process.env.BASE_URL ?? "http://localhost:3000";
@@ -32,9 +34,21 @@ async function logout(page) {
 const text = async (page) => (await page.locator("main").innerText().catch(() => page.locator("body").innerText()));
 const waitText = async (page, re, timeout = 10000) => { try { await page.getByText(re).first().waitFor({ timeout }); return true; } catch { return false; } };
 
+/** Server-side guard: what the proxy answers for a full page request, before any client code runs. */
+async function serverAnswer(ctx, path) {
+  const res = await ctx.request.get(BASE + path, { maxRedirects: 0 });
+  return { status: res.status(), location: res.headers()["location"] ?? "" };
+}
+
 // ------------------------------------------------------------------ AUTH
 {
   const { ctx, page } = await newPage();
+  for (const path of ["/admin/dashboard", "/teacher/attendance", "/student/fees"]) {
+    const r = await serverAnswer(ctx, path);
+    check(`Signed out: server redirects ${path} to login`, r.status >= 300 && r.status < 400 && r.location.includes(`/login?next=${encodeURIComponent(path)}`), `${r.status} ${r.location}`);
+  }
+  const loginPage = await serverAnswer(ctx, "/login");
+  check("Login page stays public", loginPage.status === 200, String(loginPage.status));
   await page.goto(BASE + "/");
   check("Splash shows demo school (tenant) name", await waitText(page, /Aster Academy/i));
   check("Splash shows product name", await waitText(page, /Smart School Management System/i));
@@ -51,13 +65,44 @@ const waitText = async (page, re, timeout = 10000) => { try { await page.getByTe
 
   await login(page, "teacher@asteracademy.edu", "Teacher@123", "teacher");
   check("Teacher login creates session → teacher dashboard", page.url().includes("/teacher/dashboard"));
+  const cookies = await ctx.cookies();
+  const jwt = cookies.find((c) => c.name.includes("convexAuthJWT"));
+  check("Auth token is an httpOnly cookie (not readable by page scripts)", !!jwt && jwt.httpOnly === true);
+  // Allowed: the Convex Auth client's own cache (short-lived access JWT + a placeholder refresh token)
+  // and the mock domain dataset. Not allowed: an app session/role, a password, or the real refresh token.
+  const stored = await page.evaluate(() => [localStorage, sessionStorage].flatMap((s) => Object.keys(s).map((k) => [k, s.getItem(k) ?? ""])));
+  const appSessionKeys = stored.filter(([k]) => /session|role|membership/i.test(k) && !k.startsWith("__convexAuth")).map(([k]) => k);
+  const realRefresh = cookies.find((c) => c.name.includes("convexAuthRefreshToken"))?.value ?? "";
+  const leaksRefresh = !!realRefresh && stored.some(([, v]) => v.includes(realRefresh));
+  const hasPassword = stored.some(([, v]) => /Teacher@123|"password"/.test(v));
+  check("No app session/role, password or refresh token in Web Storage", appSessionKeys.length === 0 && !hasPassword && !leaksRefresh, `${appSessionKeys.join(",")} ${hasPassword ? "password" : ""} ${leaksRefresh ? "refresh" : ""}`.trim());
+  const signedIn = await serverAnswer(ctx, "/teacher/attendance");
+  check("Signed in: server lets the protected page through", signedIn.status === 200, String(signedIn.status));
   await logout(page);
+  const afterLogout = await serverAnswer(ctx, "/teacher/dashboard");
+  check("After logout: server redirects protected page to login", afterLogout.status >= 300 && afterLogout.status < 400 && afterLogout.location.includes("/login"), `${afterLogout.status}`);
   await page.goto(BASE + "/teacher/dashboard");
   await page.waitForURL(/\/login/);
   check("After logout protected route redirects to login", page.url().includes("/login"));
   await page.goBack().catch(() => {});
   await page.waitForTimeout(800);
   check("Browser back after logout does not expose protected page", !(await page.getByRole("navigation", { name: /main navigation/i }).count()));
+
+  // Role routing comes from the server: each account lands in its own portal.
+  for (const [email, password, role, home] of [["admin@asteracademy.edu", "Admin@123", "admin", "/admin/dashboard"], ["student@asteracademy.edu", "Student@123", "student", "/student/dashboard"], ["guardian@asteracademy.edu", "Guardian@123", "student", "/student/dashboard"]]) {
+    await login(page, email, password, role);
+    check(`${email} is routed to ${home}`, new URL(page.url()).pathname === home, page.url());
+    await logout(page);
+  }
+  // A ?next= pointing into another portal does not override the server role.
+  await page.goto(BASE + "/login?next=" + encodeURIComponent("/admin/fees"));
+  await page.getByRole("radio", { name: /student/i }).first().click();
+  await page.getByLabel(/email or username/i).fill("student@asteracademy.edu");
+  await page.getByLabel(/^password/i).fill("Student@123");
+  await page.getByRole("button", { name: /^sign in/i }).click();
+  await page.waitForURL(/dashboard/);
+  check("?next= into another portal is ignored (student stays in student portal)", new URL(page.url()).pathname === "/student/dashboard", page.url());
+  await logout(page);
   await ctx.close();
 }
 
@@ -114,8 +159,11 @@ const waitText = async (page, re, timeout = 10000) => { try { await page.getByTe
   await page.getByRole("button", { name: /^add student$/i }).click();
   check("W1 Admin adds student", await waitText(page, /Student enrolled/i));
   const loginEmail = (await page.getByRole("dialog").getByText(/@students\.asteracademy\.edu/).first().innerText()).trim();
+  const dialogText = await page.getByRole("dialog").innerText();
+  check("W1 No password is generated or shown for the new student (access is by invitation)", /issued by school invitation/i.test(dialogText) && !/Welcome@123/.test(dialogText));
   await page.getByRole("button", { name: /open profile/i }).click();
   await page.waitForURL(/\/admin\/students\/stu_/);
+  const newStudentPath = new URL(page.url()).pathname;
   check("W1 New student profile opens with class 10-A", await waitText(page, /Class 10 · Section A/));
   await page.goto(BASE + "/admin/students?q=Ishita Menon");
   check("W1 Student appears in Students list", await waitText(page, /Ishita Menon/));
@@ -133,11 +181,14 @@ const waitText = async (page, re, timeout = 10000) => { try { await page.getByTe
   check("W3 Teacher saves attendance (Aarav + Ishita absent)", await waitText(page, /Attendance (saved|updated)/i));
   await logout(page);
 
-  await login(page, loginEmail, "Welcome@123", "student");
-  await waitText(page, /Good (morning|afternoon|evening)/);
-  const t = await text(page);
-  check("W1 New student can log in and sees own dashboard", /Ishita/.test(t), loginEmail);
-  check("W1 Student dashboard reflects attendance (0% after 1 absence)", /0%/.test(t) && /Below 85%/.test(t));
+  // The new record has no Convex Auth account yet, so the old demo password must not open anything.
+  await login(page, loginEmail, "Welcome@123", "student", false);
+  check("W1 New student cannot sign in before an account is provisioned", await waitText(page, /incorrect/i) && page.url().includes("/login"), loginEmail);
+  await login(page, "admin@asteracademy.edu", "Admin@123", "admin");
+  await page.goto(BASE + newStudentPath);
+  const attendanceMetric = page.locator("dt", { hasText: /^Attendance$/i }).first().locator("xpath=following-sibling::dd");
+  const metric = await attendanceMetric.innerText().catch(() => "");
+  check("W1 New student's profile reflects attendance (0% after 1 absence)", /^0(\.0)?%$/.test(metric.trim()), metric);
   await logout(page);
 
   await login(page, "student@asteracademy.edu", "Student@123", "student");
