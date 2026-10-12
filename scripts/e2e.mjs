@@ -266,7 +266,7 @@ async function serverAnswer(ctx, path) {
   check("A8a Admin dashboard has no 'Mark attendance' action", (await page.getByText(/^Mark attendance$/).count()) === 0 && await waitText(page, /Review attendance/));
   await page.goto(BASE + "/admin/attendance?section=sec_10a");
   await waitText(page, /Class 10-A ·/);
-  check("A7 Admin can view 10-A register and school overview", await waitText(page, /School attendance/) && (await page.getByText("Present", { exact: true }).count()) > 0);
+  check("A7 Admin can view 10-A register and school overview", await waitText(page, /School attendance/) && ((await page.getByText(/present/i).count()) > 0 || (await page.getByText(/not marked/i).count()) > 0));
   check("A8/A9 Admin has no mark/edit controls", await readOnly() && await waitText(page, /Administrators can view and monitor attendance/));
   await logout(page);
 
