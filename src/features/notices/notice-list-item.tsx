@@ -5,7 +5,7 @@ import { formatDate, formatShortDate } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils/cn";
 import { NOTICE_TYPE_LABELS } from "@/lib/constants/labels";
 
-type NoticeView = Notice & { audienceLabel: string };
+type NoticeView = Notice & { audienceLabel: string; author?: string };
 
 const TYPE_ICON = { notice: Megaphone, event: PartyPopper, holiday: Sun } as const;
 
@@ -30,7 +30,10 @@ export function NoticeListItem({ notice, compact, onClick, actions, className }:
           {notice.eventDate && (
             <span className="inline-flex items-center gap-1"><CalendarDays className="h-3.5 w-3.5" aria-hidden /> {formatDate(notice.eventDate)}</span>
           )}
-          <span className="ml-auto">Posted {formatShortDate(notice.publishDate)}</span>
+          <span className="ml-auto">
+            Posted {formatShortDate(notice.publishDate)}
+            {notice.author ? ` · ${notice.author}` : ""}
+          </span>
         </div>
       </div>
     </div>

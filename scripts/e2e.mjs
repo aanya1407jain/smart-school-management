@@ -4,9 +4,20 @@
 //   npm run build && npm start   (in another terminal)  then  npx playwright install chromium && npm run test:e2e
 // Each scenario uses a fresh browser context, i.e. a freshly seeded (mock) domain dataset.
 import { chromium } from "playwright";
+import fs from "node:fs";
 
 const BASE = process.env.BASE_URL ?? "http://localhost:3000";
-const browser = await chromium.launch(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {});
+const CHROME_CANDIDATES = [
+  process.env.CHROME_PATH,
+  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+  "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+  "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+  "/usr/bin/google-chrome",
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+].filter(Boolean);
+const chromePath = CHROME_CANDIDATES.find((p) => { try { return fs.existsSync(p); } catch { return false; } });
+const browser = await chromium.launch(chromePath ? { executablePath: chromePath } : {});
 const results = [];
 const errors = [];
 const check = (name, ok, detail = "") => { results.push({ name, ok, detail }); console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? ` — ${detail}` : ""}`); };
@@ -226,6 +237,9 @@ async function serverAnswer(ctx, path) {
   await page.goto(BASE + "/teacher/attendance?section=sec_10a");
   await waitText(page, /Class 10-A ·/);
   check("A1/A2 Rahul (class teacher) gets mark/edit controls for 10-A", await editable());
+  await page.getByRole("button", { name: /mark all present/i }).click();
+  await page.getByRole("button", { name: /update attendance|save attendance/i }).click();
+  await waitText(page, /Attendance (saved|updated)/i);
   await page.goto(BASE + "/teacher/attendance?section=sec_10b");
   await waitText(page, /Class 10-B ·/);
   check("A3/A4 Rahul sees 10-B read-only (subject teacher, not class teacher)", await readOnly() && await waitText(page, /Only the class teacher of 10-B \(Ms\. Meera Iyer\)/));
@@ -360,7 +374,7 @@ async function serverAnswer(ctx, path) {
   // (URL + its inputs) before counting rows — count() does not auto-wait.
   await page.waitForURL(/\/teacher\/examinations\/marks\?/);
   const inputs = page.getByRole("textbox", { name: /Marks for/ });
-  await inputs.first().waitFor();
+  await inputs.first().waitFor({ state: "visible", timeout: 10000 });
   const n = await inputs.count();
   const marks = [72, 67.5, 58, 61, 70, 49, 75, 66, 55];
   for (let i = 0; i < n; i++) await inputs.nth(i).fill(String(marks[i % marks.length]));
@@ -377,8 +391,9 @@ async function serverAnswer(ctx, path) {
   await page.goto(BASE + "/admin/examinations/marks?paper=ep_ex_hy_12_hin&section=sec_12c");
   await waitText(page, /Hindi · Class 12-C/);
   const in2 = page.getByRole("textbox", { name: /Marks for/ });
-  await in2.first().waitFor();
-  for (let i = 0; i < (await in2.count()); i++) await in2.nth(i).fill(String(50 + i));
+  await in2.first().waitFor({ state: "visible", timeout: 10000 });
+  const n2 = await in2.count();
+  for (let i = 0; i < n2; i++) await in2.nth(i).fill(String(50 + i));
   await page.getByRole("button", { name: /save marks/i }).click();
   check("W5 Admin completes the last pending sheet", await waitText(page, /Marks saved/) && await waitText(page, /All students entered/));
   await page.goto(BASE + "/admin/examinations/ex_hy");
