@@ -29,10 +29,10 @@ async function newPage(width = 1440) {
   page.setDefaultTimeout(15000);
   return { ctx, page };
 }
-async function login(page, email, password, role, expectOk = true) {
+/** Sign in with a Login ID. The portal (role) is decided by the server, never chosen on the form. */
+async function login(page, loginId, password, expectOk = true) {
   await page.goto(BASE + "/login");
-  await page.getByRole("radio", { name: new RegExp(role, "i") }).first().click();
-  await page.getByLabel(/email or username/i).fill(email);
+  await page.getByLabel(/^login id/i).fill(loginId);
   await page.getByLabel(/^password/i).fill(password);
   await page.getByRole("button", { name: /^sign in/i }).click();
   if (expectOk) await page.waitForURL(/dashboard/);
@@ -69,12 +69,16 @@ async function serverAnswer(ctx, path) {
   await page.waitForURL(/\/login/, { timeout: 8000 });
   check("Login appears after splash", page.url().endsWith("/login"));
 
-  await login(page, "teacher@asteracademy.edu", "Teacher@123", "admin", false);
-  check("Role selection cannot escalate (teacher account + Admin role rejected)", await waitText(page, /does not have Administrator access/i) && page.url().includes("/login"));
-  await login(page, "admin@asteracademy.edu", "wrong-pass", "admin", false);
+  await page.getByLabel(/^login id/i).waitFor();
+  check("Login form has no role selector (the server decides the portal)", (await page.getByRole("radio").count()) === 0 && (await page.getByLabel(/^login id/i).count()) === 1);
+  await login(page, "admin@asteracademy.edu", "Admin@123", false);
+  check("An email address is not accepted as a Login ID", await waitText(page, /Login ID given by your school/i) && page.url().includes("/login"));
+  await login(page, "NOBODY-404", "Admin@123", false);
+  check("Unknown Login ID rejected with a generic message", await waitText(page, /Login ID or password you entered is incorrect/i));
+  await login(page, "ADMIN-001", "wrong-pass", false);
   check("Wrong password rejected", await waitText(page, /incorrect/i));
 
-  await login(page, "teacher@asteracademy.edu", "Teacher@123", "teacher");
+  await login(page, "TCH-00001", "Teacher@123");
   check("Teacher login creates session → teacher dashboard", page.url().includes("/teacher/dashboard"));
   const cookies = await ctx.cookies();
   const jwt = cookies.find((c) => c.name.includes("convexAuthJWT"));
@@ -100,15 +104,14 @@ async function serverAnswer(ctx, path) {
   check("Browser back after logout does not expose protected page", !(await page.getByRole("navigation", { name: /main navigation/i }).count()));
 
   // Role routing comes from the server: each account lands in its own portal.
-  for (const [email, password, role, home] of [["admin@asteracademy.edu", "Admin@123", "admin", "/admin/dashboard"], ["student@asteracademy.edu", "Student@123", "student", "/student/dashboard"], ["guardian@asteracademy.edu", "Guardian@123", "student", "/student/dashboard"]]) {
-    await login(page, email, password, role);
-    check(`${email} is routed to ${home}`, new URL(page.url()).pathname === home, page.url());
+  for (const [loginId, password, home] of [["admin-001", "Admin@123", "/admin/dashboard"], ["STU-2026-00001", "Student@123", "/student/dashboard"], [" GRD-00001 ", "Guardian@123", "/student/dashboard"]]) {
+    await login(page, loginId, password);
+    check(`${loginId.trim()} is routed to ${home} (Login ID normalised)`, new URL(page.url()).pathname === home, page.url());
     await logout(page);
   }
   // A ?next= pointing into another portal does not override the server role.
   await page.goto(BASE + "/login?next=" + encodeURIComponent("/admin/fees"));
-  await page.getByRole("radio", { name: /student/i }).first().click();
-  await page.getByLabel(/email or username/i).fill("student@asteracademy.edu");
+  await page.getByLabel(/^login id/i).fill("STU-2026-00001");
   await page.getByLabel(/^password/i).fill("Student@123");
   await page.getByRole("button", { name: /^sign in/i }).click();
   await page.waitForURL(/dashboard/);
@@ -120,7 +123,7 @@ async function serverAnswer(ctx, path) {
 // ------------------------------------------------------------------ ROLE SEPARATION & ROUTE GUARDS
 {
   const { ctx, page } = await newPage();
-  await login(page, "teacher@asteracademy.edu", "Teacher@123", "teacher");
+  await login(page, "TCH-00001", "Teacher@123");
   const nav = await page.getByRole("navigation", { name: /main navigation/i }).innerText();
   check("Teacher nav has no admin items", !/Fees|Settings|Reports|Teachers & Staff|Academics/.test(nav) && /My Classes/.test(nav), nav.replace(/\n/g, " | "));
   check("Teacher dashboard is teacher-specific", await waitText(page, /Mr\. Verma/) && !(await page.getByText(/Pending fees/).count()));
@@ -142,7 +145,7 @@ async function serverAnswer(ctx, path) {
 }
 {
   const { ctx, page } = await newPage();
-  await login(page, "student@asteracademy.edu", "Student@123", "student");
+  await login(page, "STU-2026-00001", "Student@123");
   const nav = await page.getByRole("navigation", { name: /main navigation/i }).innerText();
   check("Student nav has only student items", /My Attendance/.test(nav) && !/Students|Settings|Reports|Attendance\n/.test(nav.replace("My Attendance", "")), nav.replace(/\n/g, " | "));
   for (const route of ["/admin/students", "/admin/students/stu_045", "/teacher/attendance", "/teacher/students/stu_045", "/admin/reports"]) {
@@ -157,7 +160,7 @@ async function serverAnswer(ctx, path) {
 // ------------------------------------------------------------------ WORKFLOW 1 + 3: add student → teacher sees → attendance → student dashboard
 {
   const { ctx, page } = await newPage();
-  await login(page, "admin@asteracademy.edu", "Admin@123", "admin");
+  await login(page, "ADMIN-001", "Admin@123");
   await page.goto(BASE + "/admin/students/new");
   await page.getByLabel(/^first name/i).fill("Ishita");
   await page.getByLabel(/^last name/i).fill("Menon");
@@ -169,9 +172,8 @@ async function serverAnswer(ctx, path) {
   await page.getByLabel(/guardian phone/i).fill("+91 98450 77777");
   await page.getByRole("button", { name: /^add student$/i }).click();
   check("W1 Admin adds student", await waitText(page, /Student enrolled/i));
-  const loginEmail = (await page.getByRole("dialog").getByText(/@students\.asteracademy\.edu/).first().innerText()).trim();
   const dialogText = await page.getByRole("dialog").innerText();
-  check("W1 No password is generated or shown for the new student (access is by invitation)", /issued by school invitation/i.test(dialogText) && !/Welcome@123/.test(dialogText));
+  check("W1 No password is generated or shown here (accounts are created in Accounts & Import)", /Accounts & Import/i.test(dialogText) && !/Welcome@123/.test(dialogText));
   await page.getByRole("button", { name: /open profile/i }).click();
   await page.waitForURL(/\/admin\/students\/stu_/);
   const newStudentPath = new URL(page.url()).pathname;
@@ -180,7 +182,7 @@ async function serverAnswer(ctx, path) {
   check("W1 Student appears in Students list", await waitText(page, /Ishita Menon/));
   await logout(page);
 
-  await login(page, "teacher@asteracademy.edu", "Teacher@123", "teacher");
+  await login(page, "TCH-00001", "Teacher@123");
   await page.goto(BASE + "/teacher/classes/sec_10a");
   check("W1 Teacher assigned to 10-A sees the new student", await waitText(page, /Ishita Menon/));
   await page.goto(BASE + "/teacher/attendance?section=sec_10a");
@@ -192,17 +194,14 @@ async function serverAnswer(ctx, path) {
   check("W3 Teacher saves attendance (Aarav + Ishita absent)", await waitText(page, /Attendance (saved|updated)/i));
   await logout(page);
 
-  // The new record has no Convex Auth account yet, so the old demo password must not open anything.
-  await login(page, loginEmail, "Welcome@123", "student", false);
-  check("W1 New student cannot sign in before an account is provisioned", await waitText(page, /incorrect/i) && page.url().includes("/login"), loginEmail);
-  await login(page, "admin@asteracademy.edu", "Admin@123", "admin");
+  await login(page, "ADMIN-001", "Admin@123");
   await page.goto(BASE + newStudentPath);
   const attendanceMetric = page.locator("dt", { hasText: /^Attendance$/i }).first().locator("xpath=following-sibling::dd");
   const metric = await attendanceMetric.innerText().catch(() => "");
   check("W1 New student's profile reflects attendance (0% after 1 absence)", /^0(\.0)?%$/.test(metric.trim()), metric);
   await logout(page);
 
-  await login(page, "student@asteracademy.edu", "Student@123", "student");
+  await login(page, "STU-2026-00001", "Student@123");
   await waitText(page, /Good (morning|afternoon|evening)/);
   const t2 = await text(page);
   check("W3 Aarav's attendance dropped after being marked absent (92% → 90%)", /90%/.test(t2), (t2.match(/\d+%/g) || []).slice(0, 3).join(","));
@@ -211,14 +210,14 @@ async function serverAnswer(ctx, path) {
   await logout(page);
 
   // Class teacher CORRECTS the record (absent → present); the change propagates back.
-  await login(page, "teacher@asteracademy.edu", "Teacher@123", "teacher");
+  await login(page, "TCH-00001", "Teacher@123");
   await page.goto(BASE + "/teacher/attendance?section=sec_10a");
   await waitText(page, /Class 10-A ·/);
   await page.getByRole("radiogroup", { name: /Attendance for Aarav Sharma/ }).getByRole("radio", { name: "Present" }).click();
   await page.getByRole("button", { name: /update attendance/i }).click();
   check("A16a Class teacher corrects Aarav absent → present", await waitText(page, /Attendance updated/i));
   await logout(page);
-  await login(page, "guardian@asteracademy.edu", "Guardian@123", "student");
+  await login(page, "GRD-00001", "Guardian@123");
   await waitText(page, /Viewing Aarav Sharma/);
   const t3 = await text(page);
   check("A16b Correction propagates to guardian dashboard (back to 92%)", /92%/.test(t3), (t3.match(/\d+%/g) || []).slice(0, 3).join(","));
@@ -233,7 +232,7 @@ async function serverAnswer(ctx, path) {
     && (await page.getByRole("button", { name: /mark all present|update attendance|save attendance/i }).count()) === 0;
 
   // Rahul — class teacher of 10-A; teaches Maths in 10-B (class teacher: Meera Iyer)
-  await login(page, "teacher@asteracademy.edu", "Teacher@123", "teacher");
+  await login(page, "TCH-00001", "Teacher@123");
   await page.goto(BASE + "/teacher/attendance?section=sec_10a");
   await waitText(page, /Class 10-A ·/);
   check("A1/A2 Rahul (class teacher) gets mark/edit controls for 10-A", await editable());
@@ -255,7 +254,7 @@ async function serverAnswer(ctx, path) {
   await logout(page);
 
   // Sunita Rao — teaches English in 10-A, class teacher of 10-C
-  await login(page, "sunita.rao@asteracademy.edu", "Welcome@123", "teacher");
+  await login(page, "TCH-00003", "Welcome@123");
   await page.goto(BASE + "/teacher/attendance?section=sec_10a");
   await waitText(page, /Class 10-A ·/);
   check("A5/A6 Subject teacher of 10-A cannot mark or edit 10-A", await readOnly());
@@ -265,7 +264,7 @@ async function serverAnswer(ctx, path) {
   await logout(page);
 
   // Admin — view only
-  await login(page, "admin@asteracademy.edu", "Admin@123", "admin");
+  await login(page, "ADMIN-001", "Admin@123");
   check("A8a Admin dashboard has no 'Mark attendance' action", (await page.getByText(/^Mark attendance$/).count()) === 0 && await waitText(page, /Review attendance/));
   await page.goto(BASE + "/admin/attendance?section=sec_10a");
   await waitText(page, /Class 10-A ·/);
@@ -274,14 +273,14 @@ async function serverAnswer(ctx, path) {
   await logout(page);
 
   // Student & guardian — view only
-  await login(page, "student@asteracademy.edu", "Student@123", "student");
+  await login(page, "STU-2026-00001", "Student@123");
   await page.goto(BASE + "/student/attendance");
   check("A10 Student can view own attendance", await waitText(page, /Attendance calendar/));
   check("A11 Student has no attendance edit controls", (await page.getByRole("radiogroup", { name: /^Attendance for / }).count()) === 0 && (await page.getByRole("button", { name: /save attendance|update attendance|mark all/i }).count()) === 0);
   await page.goto(BASE + "/teacher/attendance?section=sec_10a");
   check("A11b Student blocked from the register route", await waitText(page, /don't have access/i));
   await logout(page);
-  await login(page, "guardian@asteracademy.edu", "Guardian@123", "student");
+  await login(page, "GRD-00001", "Guardian@123");
   await page.goto(BASE + "/student/attendance");
   await waitText(page, /Attendance calendar/);
   await page.getByRole("button", { name: /switch student/i }).click();
@@ -297,12 +296,12 @@ async function serverAnswer(ctx, path) {
 // ------------------------------------------------------------------ WORKFLOW 2: fees → payment → receipt → student
 {
   const { ctx, page } = await newPage();
-  await login(page, "student@asteracademy.edu", "Student@123", "student");
+  await login(page, "STU-2026-00001", "Student@123");
   await page.goto(BASE + "/student/fees");
   check("W2 Student sees pending ₹6,000", await waitText(page, /₹6,000/));
   await logout(page);
 
-  await login(page, "admin@asteracademy.edu", "Admin@123", "admin");
+  await login(page, "ADMIN-001", "Admin@123");
   // New fee structure assigned to Class 10
   await page.goto(BASE + "/admin/fees?tab=structures");
   await page.getByRole("button", { name: /new fee structure/i }).click();
@@ -324,7 +323,7 @@ async function serverAnswer(ctx, path) {
   check("W2 Outstanding balance decreased to ₹0", await waitText(page, /Fully|Paid|₹0/));
   await logout(page);
 
-  await login(page, "student@asteracademy.edu", "Student@123", "student");
+  await login(page, "STU-2026-00001", "Student@123");
   await page.goto(BASE + "/student/fees");
   check("W2 Student sees fees fully paid", await waitText(page, /All fees paid/));
   check("W2 Student sees the new receipt", await waitText(page, new RegExp(receiptNo.replace(/\//g, "\\/"))), receiptNo);
@@ -334,7 +333,7 @@ async function serverAnswer(ctx, path) {
 // ------------------------------------------------------------------ WORKFLOW 4: homework only for 10-A
 {
   const { ctx, page } = await newPage();
-  await login(page, "teacher@asteracademy.edu", "Teacher@123", "teacher");
+  await login(page, "TCH-00001", "Teacher@123");
   await page.goto(BASE + "/teacher/homework?action=new");
   const dlg = page.getByRole("dialog");
   await dlg.getByLabel(/^title/i).fill("Probability — practice set A");
@@ -343,7 +342,7 @@ async function serverAnswer(ctx, path) {
   await page.getByRole("button", { name: /assign homework/i }).click();
   check("W4 Teacher creates homework for 10-A", await waitText(page, /Visible to Class 10-A only/));
   await logout(page);
-  await login(page, "student@asteracademy.edu", "Student@123", "student");
+  await login(page, "STU-2026-00001", "Student@123");
   await page.goto(BASE + "/student/homework");
   check("W4 10-A student sees the homework", await waitText(page, /Probability — practice set A/));
   await page.getByRole("listitem").filter({ hasText: "Probability — practice set A" }).getByRole("button", { name: /^submit$/i }).click();
@@ -351,7 +350,7 @@ async function serverAnswer(ctx, path) {
   await page.getByRole("dialog").getByRole("button", { name: /^submit$/i }).click();
   check("W4 Student submits homework", await waitText(page, /Homework submitted/));
   await logout(page);
-  await login(page, "amaira.desai@students.asteracademy.edu", "Welcome@123", "student");
+  await login(page, "STU-2026-00002", "Welcome@123");
   await page.goto(BASE + "/student/homework");
   await page.waitForTimeout(1500);
   check("W4 10-B student does NOT see 10-A homework", !(await page.getByText(/Probability — practice set A/).count()));
@@ -361,13 +360,13 @@ async function serverAnswer(ctx, path) {
 // ------------------------------------------------------------------ WORKFLOW 5: marks → publish → student
 {
   const { ctx, page } = await newPage();
-  await login(page, "student@asteracademy.edu", "Student@123", "student");
+  await login(page, "STU-2026-00001", "Student@123");
   await page.goto(BASE + "/student/results");
   await waitText(page, /Unit Test 1/);
   check("W5 Unpublished Half-Yearly hidden from student", !(await page.getByRole("heading", { name: /Half-Yearly/ }).count()));
   await logout(page);
 
-  await login(page, "teacher@asteracademy.edu", "Teacher@123", "teacher");
+  await login(page, "TCH-00001", "Teacher@123");
   await page.goto(BASE + "/teacher/examinations");
   await page.getByRole("link", { name: /Mathematics · Class 10-A/ }).first().click();
   // The link text also matches the list page, so wait for the marks sheet itself
@@ -384,7 +383,7 @@ async function serverAnswer(ctx, path) {
   check("W5 Teacher cannot enter marks for unassigned class", await waitText(page, /not assigned|don't have access/i));
   await logout(page);
 
-  await login(page, "admin@asteracademy.edu", "Admin@123", "admin");
+  await login(page, "ADMIN-001", "Admin@123");
   await page.goto(BASE + "/admin/examinations/ex_hy");
   await waitText(page, /Marks entry progress/);
   // remaining pending sheet (12-C Hindi) — admin enters it
@@ -403,7 +402,7 @@ async function serverAnswer(ctx, path) {
   check("W5 Admin publishes results", await waitText(page, /Results published/));
   await logout(page);
 
-  await login(page, "student@asteracademy.edu", "Student@123", "student");
+  await login(page, "STU-2026-00001", "Student@123");
   await page.goto(BASE + "/student/results");
   check("W5 Student sees published Half-Yearly result with grade", await waitText(page, /Half-Yearly Examination/) && await waitText(page, /Grade [A-E]/));
   check("W5 Aarav's Maths mark (67.5/80) reflected", await waitText(page, /67\.5\/80/));
@@ -413,7 +412,7 @@ async function serverAnswer(ctx, path) {
 // ------------------------------------------------------------------ WORKFLOW 6: class-specific notice + guardian
 {
   const { ctx, page } = await newPage();
-  await login(page, "admin@asteracademy.edu", "Admin@123", "admin");
+  await login(page, "ADMIN-001", "Admin@123");
   await page.goto(BASE + "/admin/notices?action=new");
   const dlg = page.getByRole("dialog");
   await dlg.getByLabel(/^title/i).fill("10-B: Lab coats required on Monday");
@@ -423,17 +422,17 @@ async function serverAnswer(ctx, path) {
   await page.getByRole("button", { name: /^publish$/i }).click();
   check("W6 Admin publishes 10-B notice", await waitText(page, /Notice published/));
   await logout(page);
-  await login(page, "amaira.desai@students.asteracademy.edu", "Welcome@123", "student");
+  await login(page, "STU-2026-00002", "Welcome@123");
   await page.goto(BASE + "/student/notices");
   check("W6 10-B student sees the notice", await waitText(page, /Lab coats required/));
   await logout(page);
-  await login(page, "student@asteracademy.edu", "Student@123", "student");
+  await login(page, "STU-2026-00001", "Student@123");
   await page.goto(BASE + "/student/notices");
   await page.waitForTimeout(1500);
   check("W6 10-A student does NOT see the 10-B notice", !(await page.getByText(/Lab coats required/).count()));
   await logout(page);
 
-  await login(page, "guardian@asteracademy.edu", "Guardian@123", "student");
+  await login(page, "GRD-00001", "Guardian@123");
   check("Guardian sees linked student (Aarav) by default", await waitText(page, /Viewing Aarav Sharma/));
   await page.getByRole("button", { name: /switch student/i }).click();
   await page.getByRole("menuitem", { name: /Ananya Sharma/ }).click();
@@ -443,10 +442,168 @@ async function serverAnswer(ctx, path) {
   await ctx.close();
 }
 
+// ------------------------------------------------------------------ ACCOUNTS & IMPORT (Convex-backed admin onboarding)
+{
+  const { ctx, page } = await newPage();
+  await login(page, "ADMIN-001", "Admin@123");
+  const nav = await page.getByRole("navigation", { name: /main navigation/i }).innerText();
+  check("ACC Admin nav has Accounts & Import", /Accounts & Import/.test(nav));
+  await page.goto(BASE + "/admin/accounts");
+  await page.getByRole("heading", { name: "Accounts & Import" }).waitFor();
+  const row = page.locator("tr", { has: page.getByRole("button", { name: /create account/i }) }).first();
+  await row.waitFor();
+  const personName = (await row.locator("td").nth(1).locator("p").first().innerText()).trim();
+  await row.getByRole("button", { name: /create account/i }).click();
+  await page.getByRole("dialog").getByRole("button", { name: /^create account$/i }).click();
+  await page.getByTestId("issued-login-id").first().waitFor();
+  const newId = (await page.getByTestId("issued-login-id").first().innerText()).trim();
+  const tempPw = (await page.getByTestId("issued-password").first().innerText()).trim();
+  check("ACC Admin creates an account: Login ID + one-time temporary password shown", /^STU-\d{4}-\d{5}$/.test(newId) && /^[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}$/.test(tempPw), `${personName} ${newId}`);
+  await page.getByRole("button", { name: /^done$/i }).click();
+  const personRow = page.locator("tr", { hasText: personName });
+  check("ACC Account shows as Active with its Login ID", await personRow.getByText("Active").first().waitFor().then(() => true, () => false) && (await personRow.innerText()).includes(newId));
+  await logout(page);
+
+  await login(page, newId.toLowerCase(), tempPw, false);
+  await page.waitForURL(/\/account/);
+  check("ACC New account signs in and must change the temporary password", await waitText(page, /temporary password/i) && await waitText(page, new RegExp(newId)));
+  await page.goto(BASE + "/student/dashboard");
+  await page.waitForURL(/\/account/);
+  check("ACC Portal pages send a temporary-password account back to /account", page.url().includes("/account") && !(await page.getByRole("link", { name: /go to my portal/i }).count()));
+  await page.getByLabel(/^current password/i).fill(tempPw);
+  await page.getByLabel(/^new password/i).fill("Chosen#2026");
+  await page.getByLabel(/^confirm new password/i).fill("Chosen#2026");
+  await page.getByRole("button", { name: /^change password$/i }).click();
+  check("ACC Password changed", await waitText(page, /Password changed/));
+  check("ACC Temporary-password notice disappears", await page.getByText(/You signed in with a temporary password/).waitFor({ state: "detached" }).then(() => true, () => false));
+  // LIVE student portal: the school-created account opens ITS OWN record from Convex (no "preview" dead end).
+  check("LIVE After the password change the student lands on the student dashboard", await page.waitForURL(/\/student\/dashboard/).then(() => true, () => false), page.url());
+  await page.getByTestId("live-student-dashboard").waitFor();
+  check("LIVE No 'records aren't available in this preview' message", !(await text(page)).includes("aren't available in this preview"));
+  check("LIVE Dashboard shows the student's own name, admission no., class-section and year",
+    (await page.getByTestId("dash-name").innerText()).trim() === personName && (await page.getByTestId("dash-admission").innerText()).trim().length > 0 &&
+    /^\d+-[A-Z]$/.test((await page.getByTestId("dash-class").innerText()).trim()) && /^\d{4}-\d{2}$/.test((await page.getByTestId("dash-year").innerText()).trim()),
+    `${await page.getByTestId("dash-class").innerText()} ${await page.getByTestId("dash-year").innerText()}`);
+  check("LIVE No demo persona data is shown to a real account", !/Aarav Sharma|Priya Sharma/.test(await page.locator("body").innerText()));
+  const liveNav = await page.getByRole("navigation", { name: /main navigation/i }).innerText();
+  check("LIVE Navigation lists only modules backed by school records", /My Attendance/.test(liveNav) && /Profile/.test(liveNav) && !/My Fees|My Timetable|My Homework|My Results/.test(liveNav), liveNav.replace(/\s+/g, " "));
+  await page.goto(BASE + "/student/profile");
+  await page.getByTestId("live-student-profile").waitFor();
+  check("LIVE Profile shows the Login ID and class/section/year", (await page.getByTestId("profile-login-id").innerText()).trim() === newId && (await page.getByTestId("profile-section").innerText()).trim().length === 1 && /^\d{4}-\d{2}$/.test((await page.getByTestId("profile-year").innerText()).trim()));
+  await page.goto(BASE + "/student/attendance");
+  check("LIVE Attendance page reads the student's own attendance", await page.getByTestId("live-attendance").waitFor().then(() => true, () => false));
+  await page.goto(BASE + "/student/fees");
+  check("LIVE Unconnected modules say so instead of showing demo data", await page.getByTestId("module-not-connected").waitFor().then(() => true, () => false) && !(await text(page)).includes("₹"));
+  await page.goto(BASE + "/admin/accounts");
+  check("LIVE Student cannot open admin pages", await waitText(page, /can't open|don't have access/i));
+  await logout(page);
+  await login(page, newId, tempPw, false);
+  check("ACC Temporary password no longer works", await waitText(page, /incorrect/i) && page.url().includes("/login"));
+  await login(page, newId, "Chosen#2026", false);
+  check("ACC New password works and opens the student portal", await page.waitForURL(/\/student\/dashboard/).then(() => true, () => false));
+  await logout(page);
+
+  await login(page, "ADMIN-001", "Admin@123");
+  await page.goto(BASE + "/admin/accounts");
+  await page.locator("tr", { hasText: personName }).getByRole("button", { name: /account actions/i }).click();
+  await page.getByRole("menuitem", { name: /disable account/i }).click();
+  await page.getByRole("dialog").getByRole("button", { name: /^disable$/i }).click();
+  check("ACC Admin disables the account", await waitText(page, /Account disabled/) && await page.locator("tr", { hasText: personName }).getByText("Disabled").waitFor().then(() => true, () => false));
+
+  // Bulk import: one bad row blocks the whole file; the corrected file imports.
+  await page.getByRole("tab", { name: /^import$/i }).click();
+  const csv = (rows) => ({ name: "students.csv", mimeType: "text/csv", buffer: Buffer.from(rows.join("\r\n"), "utf8") });
+  const header = "Full name,Class,Section,Date of birth,Gender,Guardian name,Guardian phone";
+  // A unique surname per run, so repeated runs against the same deployment stay unambiguous.
+  const IRA = `Ira Kulkarni${Array.from({ length: 5 }, () => String.fromCharCode(97 + Math.floor(Math.random() * 26))).join("")}`;
+  const good = `${IRA},10,C,03/09/2011,F,Meena Kulkarni,98450 66001`;
+  await page.getByLabel(/upload students file/i).setInputFiles(csv([header, good, "Bad Section,10,Z,03/09/2011,F,,"]));
+  check("ACC Import explains that roll numbers are system-assigned", await waitText(page, /Roll numbers are assigned automatically based on the complete class roster/));
+  await page.getByRole("button", { name: /validate 2 row/i }).click();
+  check("ACC Import preview reports the invalid row (row 3) and blocks import",
+    await waitText(page, /1 row\(s\) have errors/) && await waitText(page, /Section "?Z"?|section/i) && await page.getByRole("button", { name: /^import 2 student/i }).isDisabled());
+  await page.getByRole("button", { name: /upload corrected file/i }).click();
+  await page.getByLabel(/upload students file/i).setInputFiles(csv([header, good]));
+  await page.getByRole("button", { name: /validate 1 row/i }).click();
+  await page.getByRole("button", { name: /^import 1 student/i }).click();
+  check("ACC Corrected file imports", await waitText(page, /Imported 1 student\(s\) from students\.csv/));
+
+  // Roll numbers: 10-C is numbered 1..n after the import (Ira included); bulk account creation for selected students.
+  await page.getByRole("tab", { name: /^students$/i }).click();
+  await page.getByLabel(/filter students by section/i).selectOption({ label: "10-C" });
+  await page.locator("tr", { hasText: IRA }).waitFor();
+  const rollCells = await page.locator("tbody tr").evaluateAll((trs) => trs.map((tr) => Number(tr.children[3]?.textContent)));
+  check("ROLL Section roster is numbered 1..n (system-assigned)", [...rollCells].sort((a, b) => a - b).every((n, i) => n === i + 1), rollCells.join(","));
+  const eligibleBoxes = page.locator("tbody").getByRole("checkbox");
+  const nEligible = await eligibleBoxes.count();
+  await page.locator("tr", { hasText: IRA }).getByRole("checkbox").check();
+  const other = page.locator("tbody tr", { hasNot: page.getByText(IRA) }).filter({ has: page.getByRole("checkbox") }).first();
+  const otherName = (await other.locator("td").nth(1).locator("p").first().innerText()).trim();
+  await other.getByRole("checkbox").check();
+  check("BULK Toolbar shows the selection", (await page.getByTestId("selection-summary").innerText()).startsWith("2 students selected"));
+  await page.getByRole("checkbox", { name: /select all students without an account on this page/i }).check();
+  check("BULK Header checkbox selects every eligible student on the page", (await page.getByTestId("selection-summary").innerText()).startsWith(`${nEligible} student`), String(nEligible));
+  await page.getByRole("checkbox", { name: /select all students without an account on this page/i }).uncheck();
+  check("BULK Header checkbox clears the page selection", (await page.getByRole("region", { name: "Selection" }).count()) === 0);
+  await page.locator("tr", { hasText: IRA }).getByRole("checkbox").check();
+  await page.locator("tr", { hasText: otherName }).getByRole("checkbox").check();
+  await page.getByRole("region", { name: "Selection" }).getByRole("button", { name: /create accounts/i }).click();
+  const confirmBox = page.getByTestId("bulk-confirm");
+  await confirmBox.waitFor();
+  check("BULK Confirmation shows what will happen", /Selected\s*2/.test(await confirmBox.innerText()) && /Will get an account\s*2/.test(await confirmBox.innerText()) && /change it at first sign-in/.test(await confirmBox.innerText()));
+  await page.getByRole("button", { name: /^create 2 accounts$/i }).click();
+  await page.getByTestId("bulk-summary").waitFor({ timeout: 60000 });
+  check("BULK Run completes with an accurate summary", /2 accounts created · 0 skipped · 0 failed/.test(await page.getByTestId("bulk-summary").innerText()));
+  const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: /download 2 credentials/i }).click()]);
+  const csvText = await (await download.createReadStream()).toArray().then((chunks) => Buffer.concat(chunks).toString("utf8"));
+  check("BULK Credential CSV lists exactly the new accounts", csvText.split(/\r?\n/).length === 3 && csvText.includes(IRA) && /STU-\d{4}-\d{5}/.test(csvText));
+  await page.getByRole("dialog").getByRole("button", { name: /^close$/i }).click();
+  check("BULK Selected students now show Active accounts", await page.locator("tr", { hasText: IRA }).getByText("Active").waitFor().then(() => true, () => false));
+  // Cross-page selection: "select all matching" covers every student without an account (server-side), and a filter change clears it.
+  await page.getByLabel(/filter students by section/i).selectOption({ label: "All sections" });
+  await page.getByTestId("scope-counts").waitFor();
+  const without = Number((await page.getByTestId("scope-counts").innerText()).match(/·\s*([\d,]+) without/)[1].replace(/,/g, ""));
+  await page.getByRole("checkbox", { name: /select all students without an account on this page/i }).check();
+  const pageCount = Number((await page.getByTestId("selection-summary").innerText()).match(/^([\d,]+)/)[1].replace(/,/g, ""));
+  const allLink = page.getByRole("button", { name: /^select all [\d,]+ students without an account$/i });
+  if (without > pageCount) {
+    await allLink.click();
+    check("BULK “Select all matching” selects every student without an account across pages", (await page.getByTestId("selection-summary").innerText()).startsWith(`${without.toLocaleString()} students selected`), `${pageCount} on page, ${without} matching`);
+  } else {
+    check("BULK “Select all matching” not offered when the page already holds every match", (await allLink.count()) === 0);
+  }
+  await page.getByLabel(/filter students by section/i).selectOption({ label: "10-C" });
+  check("BULK Changing the filter clears the selection", await page.getByRole("region", { name: "Selection" }).waitFor({ state: "detached" }).then(() => true, () => false));
+  await logout(page);
+  await login(page, newId, "Chosen#2026", false);
+  check("ACC Disabled account cannot sign in", await waitText(page, /active access|incorrect/i) && page.url().includes("/login"));
+  // LIVE: a BULK-created account (credentials from the CSV) signs in, changes the password and sees its own record.
+  {
+    const line = csvText.split(/\r?\n/).find((l) => l.includes(IRA)).split(",");
+    const [, admission, cls, loginId, temp] = line.map((c) => c.replace(/^"|"$/g, ""));
+    await login(page, loginId, temp, false);
+    await page.waitForURL(/\/account/);
+    await page.getByLabel(/^current password/i).fill(temp);
+    await page.getByLabel(/^new password/i).fill("IraChosen#2026");
+    await page.getByLabel(/^confirm new password/i).fill("IraChosen#2026");
+    await page.getByRole("button", { name: /^change password$/i }).click();
+    await page.waitForURL(/\/student\/dashboard/);
+    await page.getByTestId("live-student-dashboard").waitFor();
+    check("LIVE Bulk-created account resolves its own record (name, admission no., 10-C)",
+      (await page.getByTestId("dash-name").innerText()).trim() === IRA && (await page.getByTestId("dash-admission").innerText()).trim() === admission &&
+      (await page.getByTestId("dash-class").innerText()).trim() === "10-C" && cls.includes("10-C"), `${loginId} ${cls}`);
+    await logout(page);
+  }
+  await login(page, "TCH-00001", "Teacher@123");
+  await page.goto(BASE + "/admin/accounts");
+  check("ACC Teacher blocked from Accounts & Import", await waitText(page, /don't have access/i));
+  await ctx.close();
+}
+
 // ------------------------------------------------------------------ Responsive smoke
 {
   const { ctx, page } = await newPage(390);
-  await login(page, "admin@asteracademy.edu", "Admin@123", "admin");
+  await login(page, "ADMIN-001", "Admin@123");
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   check("Mobile (390px): no horizontal scroll on dashboard", overflow <= 1, `overflow ${overflow}px`);
   await page.getByRole("button", { name: /open navigation menu/i }).click();

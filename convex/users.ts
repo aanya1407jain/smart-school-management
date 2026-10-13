@@ -24,6 +24,7 @@ import { activeMembershipsOf, getCurrentUser, requireActor, type Actor } from ".
 import { linkedStudentIds, requireGuardianStudentAccess } from "./core/authorization";
 import { AppError } from "./core/errors";
 import { fullName, teacherDisplayName } from "./model/academics";
+import { temporaryPasswordExpiresAt } from "./model/accounts";
 
 async function membershipsOf(ctx: QueryCtx, userId: Id<"users">) {
   const memberships = await activeMembershipsOf(ctx, userId);
@@ -41,6 +42,7 @@ async function membershipsOf(ctx: QueryCtx, userId: Id<"users">) {
 /** The viewer object for a resolved actor (shared by `viewer` and `session`). */
 async function buildViewer(ctx: QueryCtx, actor: Actor) {
   const school = (await ctx.db.get(actor.schoolId))!;
+  const user = await ctx.db.get(actor.userId);
   const teacher = actor.teacherId ? await ctx.db.get(actor.teacherId) : null;
   const guardian = actor.guardianId ? await ctx.db.get(actor.guardianId) : null;
   const studentIds = await linkedStudentIds(ctx, actor);
@@ -54,7 +56,16 @@ async function buildViewer(ctx: QueryCtx, actor: Actor) {
     membershipId: actor.membershipId,
     role: actor.role,
     displayName: actor.displayName,
+    loginId: actor.loginId,
     email: actor.email,
+    /**
+     * The account still uses an administrator-issued temporary password. While
+     * true the server refuses every school function (PASSWORD_CHANGE_REQUIRED)
+     * until account.changePassword succeeds.
+     */
+    mustChangePassword: user?.mustChangePassword === true,
+    /** When the temporary password stops working (server time, ms), or null. */
+    temporaryPasswordExpiresAt: user ? temporaryPasswordExpiresAt(user) : null,
     permissions: [...actor.permissions].sort(),
     permissionSets: [...actor.permissionSets],
     isGuardian: !!actor.guardianId,
@@ -77,7 +88,7 @@ export const me = query({
   handler: async (ctx) => {
     const user = await getCurrentUser(ctx);
     if (!user) return null;
-    return { userId: user._id, email: user.email ?? null, name: user.name ?? null, memberships: await membershipsOf(ctx, user._id) };
+    return { userId: user._id, loginId: user.loginId ?? null, email: user.email ?? null, name: user.name ?? null, memberships: await membershipsOf(ctx, user._id) };
   },
 });
 
@@ -97,7 +108,9 @@ export const session = query({
     if (!user) return { status: "signedOut" as const };
     const memberships = await membershipsOf(ctx, user._id);
     try {
-      const actor = await requireActor(ctx, membershipId);
+      // The only school-scoped read allowed during a forced password change:
+      // the UI needs it to send the person to /account.
+      const actor = await requireActor(ctx, membershipId, { allowPendingPasswordChange: true });
       return { status: "signedIn" as const, viewer: await buildViewer(ctx, actor), memberships };
     } catch (e) {
       if (e instanceof AppError && (e.data.code === "NO_SCHOOL_ACCESS" || e.data.code === "SCHOOL_SELECTION_REQUIRED")) {

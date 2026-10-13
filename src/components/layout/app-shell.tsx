@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState, type ReactNode } from "react";
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { useSession } from "@/features/auth/session-provider";
@@ -21,10 +22,11 @@ const COLLAPSE_KEY = `${STORAGE_NAMESPACE}-sidebar-collapsed`;
  *  - not signed in      → redirect to /login (with ?next=)
  *  - signed in, nothing to open (no school access) → explanation + sign out
  *  - signed in, no access → Unauthorized page inside the user's OWN shell
+ *  - temporary password → /account (the server blocks school functions until it is changed)
  *  - allowed            → page content
  */
 export function AppShell({ children }: { children: ReactNode }) {
-  const { status, user, notice, logout } = useSession();
+  const { status, user, viewer, notice, mustChangePassword, logout } = useSession();
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -48,19 +50,28 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   useEffect(() => setMobileOpen(false), [pathname]);
 
+  // Temporary password: the server refuses every school function
+  // (PASSWORD_CHANGE_REQUIRED) until it is changed, so go straight to /account.
+  useEffect(() => {
+    if (mustChangePassword) router.replace("/account");
+  }, [mustChangePassword, router]);
+
   if (status === "unavailable") {
     return (
       <div className="grid min-h-screen place-items-center bg-bg px-4" role="alert">
         <div className="solid-card flex max-w-md flex-col items-center gap-4 p-8 text-center">
           <LogoMark size={44} />
           <p className="text-sm text-ink-soft">{notice}</p>
-          <Button variant="outline" onClick={async () => { await logout(); router.replace("/login"); }}>Sign out</Button>
+          <div className="flex flex-wrap justify-center gap-2">
+            {viewer && <Link href="/account" className="inline-flex h-10 items-center rounded-xl bg-sapphire px-4 text-sm font-semibold text-white hover:bg-lagoon">My account</Link>}
+            <Button variant="outline" onClick={async () => { await logout(); router.replace("/login"); }}>Sign out</Button>
+          </div>
         </div>
       </div>
     );
   }
 
-  if (status === "loading" || access === null || access === "unauthenticated" || !user) {
+  if (status === "loading" || access === null || access === "unauthenticated" || !user || mustChangePassword) {
     return (
       <div className="grid min-h-screen place-items-center bg-bg" role="status" aria-label="Checking your session">
         <div className="flex flex-col items-center gap-3">

@@ -24,6 +24,7 @@ const g = globalThis as unknown as Record<string, unknown>;
 g.window = { sessionStorage: new MemoryStorage(), localStorage: new MemoryStorage(), addEventListener: () => {} };
 
 type Result = { name: string; ok: boolean; detail?: string };
+const DEMO = { slug: "aster-academy" };
 const results: Result[] = [];
 const check = (name: string, ok: boolean, detail = "") => {
   results.push({ name, ok, detail });
@@ -49,8 +50,14 @@ async function main() {
     "student@asteracademy.edu": [{ studentId: "cvx_aarav", name: "Aarav Sharma" }],
     "guardian@asteracademy.edu": [{ studentId: "cvx_aarav", name: "Aarav Sharma" }, { studentId: "cvx_ananya", name: "Ananya Sharma" }],
   };
+  /** Demo Login IDs (convex/seedData/asterAcademy.ts) — the key the bridge binds by. */
+  const LOGIN_IDS: Record<string, string> = {
+    "admin@asteracademy.edu": "ADMIN-001", "teacher@asteracademy.edu": "TCH-00001", "meera.iyer@asteracademy.edu": "TCH-00002",
+    "sunita.rao@asteracademy.edu": "TCH-00003", "student@asteracademy.edu": "STU-2026-00001", "guardian@asteracademy.edu": "GRD-00001",
+  };
+  const idOf = (email: string) => LOGIN_IDS[email] ?? email.split("@")[0].toUpperCase();
   const login = (email: string, role: "admin" | "teacher" | "student") => {
-    const bound = services.auth.bindIdentity({ email, role, displayName: email, permissionSets: [], students: SERVER_STUDENTS[email] ?? [] });
+    const bound = services.auth.bindIdentity({ loginId: idOf(email), email, role, displayName: email, permissionSets: [], school: DEMO, students: SERVER_STUDENTS[email] ?? [] });
     if (!bound.ok) throw new Error(`could not bind ${email}`);
     return bound.user;
   };
@@ -145,20 +152,24 @@ async function main() {
   const storage = (g.window as { localStorage: MemoryStorage; sessionStorage: MemoryStorage });
   const noSessionInStorage = [storage.localStorage, storage.sessionStorage].every((st) => st.getItem("ssms-session") === null);
   check("16. No session / role / password is written to Web Storage", noSessionInStorage && !JSON.stringify(readDb().users).includes("password"));
-  const b1 = services.auth.bindIdentity({ email: "nobody@asteracademy.edu", role: "admin", displayName: "x", permissionSets: [], students: [] });
+  const b1 = services.auth.bindIdentity({ loginId: idOf("nobody@asteracademy.edu"), email: "nobody@asteracademy.edu", role: "admin", displayName: "x", permissionSets: [], school: DEMO, students: [] });
   const r17 = await rejects(() => services.attendance.getDailyOverview(DAY));
   check("17. Unknown server identity binds nothing (no actor)", !b1.ok && r17.rejected && r17.code === "UNAUTHENTICATED", r17.code);
-  const b2 = services.auth.bindIdentity({ email: "teacher@asteracademy.edu", role: "admin", displayName: "x", permissionSets: [], students: [] });
+  const b2 = services.auth.bindIdentity({ loginId: idOf("teacher@asteracademy.edu"), email: "teacher@asteracademy.edu", role: "admin", displayName: "x", permissionSets: [], school: DEMO, students: [] });
   check("18. Role disagreeing with the account's record is not bound", !b2.ok && services.auth.getSessionSnapshot().user === null);
   // Server lists only Aarav for this guardian → Ananya must stay out of reach even though demo data links her.
-  const b3 = services.auth.bindIdentity({ email: "guardian@asteracademy.edu", role: "student", displayName: "Priya Sharma", permissionSets: [], students: [{ studentId: "cvx_aarav", name: "Aarav Sharma" }] });
+  const b3 = services.auth.bindIdentity({ loginId: idOf("guardian@asteracademy.edu"), email: "guardian@asteracademy.edu", role: "student", displayName: "Priya Sharma", permissionSets: [], school: DEMO, students: [{ studentId: "cvx_aarav", name: "Aarav Sharma" }] });
   const r19 = await rejects(() => services.attendance.getStudentAttendance("stu_ananya"));
   let switchRejected = false;
   try { services.auth.setActiveStudent("stu_ananya"); } catch { switchRejected = true; }
   check("19. Guardian children come only from the server list (unlisted child rejected)", b3.ok && r19.rejected && switchRejected, r19.code);
   // A server-listed name with no demo-data link is ignored, never added.
-  const b4 = services.auth.bindIdentity({ email: "student@asteracademy.edu", role: "student", displayName: "Aarav Sharma", permissionSets: [], students: [{ studentId: "cvx_aarav", name: "Aarav Sharma" }, { studentId: "cvx_x", name: db.students.find((x) => x.id === "stu_045")!.firstName + " " + db.students.find((x) => x.id === "stu_045")!.lastName }] });
+  const b4 = services.auth.bindIdentity({ loginId: idOf("student@asteracademy.edu"), email: "student@asteracademy.edu", role: "student", displayName: "Aarav Sharma", permissionSets: [], school: DEMO, students: [{ studentId: "cvx_aarav", name: "Aarav Sharma" }, { studentId: "cvx_x", name: db.students.find((x) => x.id === "stu_045")!.firstName + " " + db.students.find((x) => x.id === "stu_045")!.lastName }] });
   check("20. A student can never be bound to another student's records", b4.ok && JSON.stringify(b4.ok && b4.user.studentIds) === JSON.stringify(["stu_aarav"]));
+  // The same demo Login ID / role / name from ANY other school never binds to a demo persona.
+  const b5 = services.auth.bindIdentity({ loginId: idOf("student@asteracademy.edu"), email: "student@asteracademy.edu", role: "student", displayName: "Aarav Sharma", permissionSets: [], school: { slug: "another-school" }, students: [{ studentId: "cvx_aarav", name: "Aarav Sharma" }] });
+  const b6 = services.auth.bindIdentity({ loginId: idOf("admin@asteracademy.edu"), email: "admin@asteracademy.edu", role: "admin", displayName: "x", permissionSets: [], school: { slug: "another-school" }, students: [] });
+  check("21. Accounts of a non-demo school are never bound to demo personas", !b5.ok && !b6.ok && services.auth.getSessionSnapshot().user === null);
   services.auth.clearIdentity();
 
   const passed = results.filter((r) => r.ok).length;

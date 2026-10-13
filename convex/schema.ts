@@ -47,9 +47,19 @@ export default defineSchema({
     isAnonymous: v.optional(v.boolean()),
     /** Platform-level kill switch; a disabled user cannot start a session. */
     disabled: v.optional(v.boolean()),
+    /**
+     * Canonical Login ID ("TCH-00124") — what the person types to sign in.
+     * Also the Convex Auth account id of the "password" provider. Unique.
+     */
+    loginId: v.optional(v.string()),
+    /** Set when an administrator issued a temporary password; cleared by account.changePassword. */
+    mustChangePassword: v.optional(v.boolean()),
+    /** Server time the current temporary password was issued (expiry: model/accounts.ts). */
+    temporaryPasswordIssuedAt: v.optional(v.number()),
   })
     .index("email", ["email"])
-    .index("phone", ["phone"]),
+    .index("phone", ["phone"])
+    .index("by_login_id", ["loginId"]),
 
   // ============================================================ tenancy
   schools: defineTable({
@@ -102,13 +112,18 @@ export default defineSchema({
    *  - student role → studentId (the student) OR guardianId (a guardian using
    *    the student portal for their linked children). Exactly one of the two.
    *  - admin role   → optionally teacherId if the principal also teaches.
-   * Invitations are memberships with status "invited" and no userId yet.
+   * Accounts are created by the school, never self-registered: an admin (or
+   * the deployment setup / import) creates the membership with status
+   * "invited" and a reserved `loginId`; creating the Convex Auth account for
+   * that Login ID activates it (see convex/model/accounts.ts).
    */
   schoolMemberships: defineTable({
     schoolId: v.id("schools"),
     userId: v.optional(v.id("users")),
-    /** Normalised login email; used to match an invitation at activation. */
-    email: v.string(),
+    /** Optional contact email (never used to sign in). */
+    email: v.optional(v.string()),
+    /** Canonical Login ID reserved for this membership's account. */
+    loginId: v.optional(v.string()),
     displayName: v.string(),
     role: vRole,
     status: vMembershipStatus,
@@ -116,14 +131,21 @@ export default defineSchema({
     teacherId: v.optional(v.id("teachers")),
     studentId: v.optional(v.id("students")),
     guardianId: v.optional(v.id("guardians")),
-    /** SHA-256 of the one-time invitation code (the code itself is never stored). */
+    /** Administrator who created the account (absent for setup/seed). */
+    createdByUserId: v.optional(v.id("users")),
+    /**
+     * DEPRECATED — invitation-code fields of the previous auth design. Kept
+     * optional ONLY so deployments seeded before the Login ID migration still
+     * pass schema validation; nothing reads them and seed:upgradeDemoLoginIds
+     * clears them. Remove once no deployment has them.
+     */
     inviteCodeHash: v.optional(v.string()),
     inviteExpiresAt: v.optional(v.number()),
     invitedByUserId: v.optional(v.id("users")),
     activatedAt: v.optional(v.number()),
   })
     .index("by_user", ["userId"])
-    .index("by_email_status", ["email", "status"])
+    .index("by_login_id", ["loginId"])
     .index("by_school_email", ["schoolId", "email"])
     .index("by_school_role", ["schoolId", "role"])
     .index("by_teacher", ["teacherId"])
@@ -600,6 +622,56 @@ export default defineSchema({
     value: v.number(), // last number handed out
   }).index("by_school_key", ["schoolId", "key"]),
 
+
+  /**
+   * A bulk student-account run (Admin → Accounts & Import). The scope is
+   * snapshotted into bulkAccountJobItems before anything is created, so a
+   * changing student list can never widen what the administrator confirmed.
+   * Counters are updated in the same transactions as the items they count.
+   * Temporary passwords are NEVER stored: each batch returns them once to
+   * the initiating administrator (see convex/bulkAccounts.ts).
+   */
+  bulkAccountJobs: defineTable({
+    schoolId: v.id("schools"),
+    createdByUserId: v.id("users"),
+    createdByMembershipId: v.id("schoolMemberships"),
+    /** How the scope was chosen (for display only — the items ARE the scope). */
+    scope: v.union(
+      v.object({ type: v.literal("selected") }),
+      v.object({ type: v.literal("all"), sectionId: v.optional(v.id("sections")) }),
+    ),
+    status: v.union(v.literal("preparing"), v.literal("ready"), v.literal("running"), v.literal("completed"), v.literal("cancelled")),
+    /** Pagination cursor while snapshotting an "all matching" scope. */
+    prepareCursor: v.optional(v.string()),
+    total: v.number(),
+    queued: v.number(),
+    processing: v.number(),
+    created: v.number(),
+    skipped: v.number(),
+    failed: v.number(),
+    cancelled: v.number(),
+    /** Created accounts whose temporary password was confirmed received by the initiator. */
+    delivered: v.number(),
+    startedAt: v.optional(v.number()),
+    finishedAt: v.optional(v.number()),
+  }).index("by_school_creator", ["schoolId", "createdByUserId"]),
+
+  bulkAccountJobItems: defineTable({
+    schoolId: v.id("schools"),
+    jobId: v.id("bulkAccountJobs"),
+    studentId: v.id("students"),
+    status: v.union(v.literal("queued"), v.literal("processing"), v.literal("created"), v.literal("skipped"), v.literal("failed"), v.literal("cancelled")),
+    /** Non-sensitive reason for skipped / failed items. */
+    reason: v.optional(v.string()),
+    /** Membership reserved/used for this student by this job (for idempotent retries). */
+    membershipId: v.optional(v.id("schoolMemberships")),
+    loginId: v.optional(v.string()),
+    attempts: v.number(),
+    claimedAt: v.optional(v.number()),
+    delivered: v.boolean(),
+  })
+    .index("by_job_status", ["jobId", "status"])
+    .index("by_job_student", ["jobId", "studentId"]),
 
   /** Append-only trail of important actions. Written via convex/audit/log.ts. */
   auditLogs: defineTable({

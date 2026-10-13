@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { MyHomework } from "@/features/homework/my-homework";
+import { PortalPage, ModuleNotConnected } from "@/features/student-portal/live-portal";
 
 export const metadata: Metadata = { title: "My Homework" };
 export default function Page() {
-  return <MyHomework />;
+  return <PortalPage demo={<MyHomework />} live={<ModuleNotConnected module="Homework" />} />;
 }

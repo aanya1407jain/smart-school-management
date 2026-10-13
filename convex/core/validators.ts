@@ -7,6 +7,7 @@
 import { v, type Infer } from "convex/values";
 import { ROLES, PERMISSION_SET_NAMES } from "./permissions";
 import { invalid } from "./errors";
+import { canonicalLoginId, LOGIN_ID_RULES_TEXT } from "../model/loginIds";
 
 // ---------------------------------------------------------------- enums
 export const vRole = v.union(v.literal("admin"), v.literal("teacher"), v.literal("student"));
@@ -120,6 +121,13 @@ export function normalizeEmail(value: string): string {
   const e = value.normalize("NFKC").trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) throw invalid("Enter a valid email address", { email: "Invalid email" });
   return e;
+}
+
+/** Canonical Login ID (see convex/model/loginIds.ts) or INVALID_ARGUMENT. */
+export function normalizeLoginId(value: string, field = "loginId"): string {
+  const id = canonicalLoginId(value);
+  if (!id) throw invalid(`Login ID must be ${LOGIN_ID_RULES_TEXT}`, { [field]: "Invalid Login ID" });
+  return id;
 }
 
 /** Day of week for an ISO date: 0 = Sunday … 6 = Saturday (UTC calendar). */

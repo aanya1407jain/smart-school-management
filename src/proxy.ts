@@ -4,8 +4,8 @@
  *  1. Convex Auth: proxies sign-in/sign-out (POST /api/auth) to the Convex
  *     deployment and keeps the httpOnly auth cookies in sync (incl. refresh).
  *  2. Route protection (server-side, before any page code is sent): a visitor
- *     without a valid Convex Auth session cannot load /admin/*, /teacher/* or
- *     /student/* — they are redirected to /login?next=<path>.
+ *     without a valid Convex Auth session cannot load /admin/*, /teacher/*,
+ *     /student/* or /account — they are redirected to /login?next=<path>.
  *
  * Which PORTAL a signed-in user may open is decided by the server-derived role
  * (users.session) in AppShell, and every Convex function re-checks the caller
@@ -15,7 +15,7 @@
 import { NextResponse, type NextRequest, type NextFetchEvent } from "next/server";
 import { convexAuthNextjsMiddleware, createRouteMatcher } from "@convex-dev/auth/nextjs/server";
 
-const isProtectedRoute = createRouteMatcher(["/admin", "/admin/(.*)", "/teacher", "/teacher/(.*)", "/student", "/student/(.*)"]);
+const isProtectedRoute = createRouteMatcher(["/admin", "/admin/(.*)", "/teacher", "/teacher/(.*)", "/student", "/student/(.*)", "/account"]);
 
 function redirectToLogin(request: NextRequest) {
   const url = request.nextUrl.clone();

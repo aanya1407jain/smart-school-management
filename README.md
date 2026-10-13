@@ -4,7 +4,7 @@ A reusable, role-based school management platform built around connected workflo
 students, academics, attendance, fees, examinations, timetable, homework, notices and reports.
 
 **Status:** the Stage 1 frontend is complete and still runs on its mock service layer. The **production
-backend foundation is in place on Convex** (`convex/`): multi-school tenancy, Convex Auth (invite-only),
+backend foundation is in place on Convex** (`convex/`): multi-school tenancy, Convex Auth (Login ID + password, admin-created accounts),
 centralised RBAC, the academic structure, server-enforced attendance ownership, audit, notifications,
 storage and a dataset-driven seed. UI modules migrate to Convex one at a time.
 **Backend contract for the team: [docs/BACKEND.md](docs/BACKEND.md).**
@@ -40,26 +40,33 @@ Requires Node 20+. Fonts are self-hosted (`@fontsource`), so no external font ca
 
 ## Demo accounts (Aster Academy)
 
-Sign-in is real **Convex Auth** (email + password). These accounts exist once a Convex deployment has
-been seeded with `npm run seed:demo` (see *Backend* below); without a configured backend nobody can sign in.
+Sign-in is real **Convex Auth** with a **Login ID + password** (email is only a contact field). These
+accounts exist once a Convex deployment has been seeded with `npm run seed:demo` (see *Backend* below);
+without a configured backend nobody can sign in. Aster Academy is demo data only.
 
-| Role on login screen | Account | Email | Password |
+| Portal | Account | Login ID | Password |
 |---|---|---|---|
-| Admin / Principal | Aanya Jain, Principal | `admin@asteracademy.edu` | `Admin@123` |
-| Teacher | Rahul Verma — Maths 10-A, 10-B, 9-A · Science 10-A · class teacher 10-A | `teacher@asteracademy.edu` | `Teacher@123` |
-| Teacher | Meera Iyer — Science · class teacher 10-B | `meera.iyer@asteracademy.edu` | `Welcome@123` |
-| Student | Aarav Sharma, Class 10-A | `student@asteracademy.edu` | `Student@123` |
-| Student (guardian) | Priya Sharma — guardian of Aarav (10-A) and Ananya (8-B) | `guardian@asteracademy.edu` | `Guardian@123` |
-| Student | Amaira Desai, Class 10-B (useful for audience tests) | `amaira.desai@students.asteracademy.edu` | `Welcome@123` |
+| Admin | Aanya Jain, Principal | `ADMIN-001` | `Admin@123` |
+| Teacher | Rahul Verma — Maths 10-A, 10-B, 9-A · Science 10-A · class teacher 10-A | `TCH-00001` | `Teacher@123` |
+| Teacher | Meera Iyer — Science · class teacher 10-B | `TCH-00002` | `Welcome@123` |
+| Teacher | Sunita Rao — English 10-A/B/C · class teacher 10-C | `TCH-00003` | `Welcome@123` |
+| Student | Aarav Sharma, Class 10-A | `STU-2026-00001` | `Student@123` |
+| Student (guardian) | Priya Sharma — guardian of Aarav (10-A) and Ananya (8-B) | `GRD-00001` | `Guardian@123` |
+| Student | Amaira Desai, Class 10-B (useful for audience tests) | `STU-2026-00002` | `Welcome@123` |
 
-All ten seeded teachers also have a login (`firstname.lastname@asteracademy.edu`, password `Welcome@123`).
-Students and teachers you create in the (still mock) admin screens do **not** get a password: sign-in
-access is issued by school invitation (`memberships.invite`), which the admin UI does not expose yet.
+All ten seeded teachers have a login: `TCH-00001` … `TCH-00010` (Verma, Iyer, Rao, Khan, Nair, Mishra,
+Kapoor, Singh, Joshi, Desai), password `Welcome@123` except Rahul Verma. Login IDs are case-insensitive.
 
-**The role selector never grants access.** The role, school and linked students come from the server
-(`users.session`); selecting *Admin* with a teacher account signs the attempt out again with an error, and the
-account's own role decides which portal opens. Signed-out requests to `/admin`, `/teacher` and `/student`
-are redirected to `/login` by the server (`src/proxy.ts`) before any page code is sent.
+**Accounts are created by the school, never by self-registration.** An administrator opens
+**Accounts & Import** (Convex-backed) to add students/teachers one by one or import them from CSV/XLSX, create
+sign-in accounts (Login ID generated as `STU-<year>-00001` / `TCH-00001`, or entered), issue or reset a
+one-time temporary password, and disable/enable accounts. The person must change the temporary password after
+signing in (`/account`). Students and teachers created in the older mock screens (*Students*, *Teachers &
+Staff*) live only in the browser's demo store and get no account.
+
+**The login form has no role selector.** The role, school and linked students come from the server
+(`users.session`), so each account opens its own portal. Signed-out requests to `/admin`, `/teacher`, `/student`
+and `/account` are redirected to `/login` by the server (`src/proxy.ts`) before any page code is sent.
 
 The login page has a collapsible *Development demo accounts* helper that fills these in.
 To start over, sign in as admin → **Settings → Demo data → Reset**.
@@ -147,7 +154,7 @@ rejected with `FORBIDDEN`. Changing a section's class teacher in Academics moves
 attendance delete action. (Staff attendance under Teachers & Staff is a separate admin function.)
 
 Demo: Mr. Verma owns 10-A and sees 10-B (where he teaches Maths; class teacher Ms. Meera Iyer) read-only.
-Mrs. Sunita Rao (`sunita.rao@asteracademy.edu` / `Welcome@123`) teaches English in 10-A and owns 10-C.
+Mrs. Sunita Rao (`TCH-00003` / `Welcome@123`) teaches English in 10-A and owns 10-C.
 
 ### Permissions
 
@@ -186,6 +193,40 @@ npx convex dev                      # link/create a deployment; writes NEXT_PUBL
 npx @convex-dev/auth                # once per deployment: JWT keys + SITE_URL
 npx convex env set ALLOW_DEMO_SEED true && npm run seed:demo   # dev only: Aster Academy demo school
 ```
+
+**Onboarding a real school** (never via the demo seed): once per deployment, run the internal setup action,
+which refuses to run if a school already exists, and hand the printed Login ID + temporary password to the
+first administrator:
+
+```bash
+npx convex run setup:initSchool '{"school":{"name":"Green Valley School","shortName":"Green Valley","code":"GVS","slug":"green-valley","timezone":"Asia/Kolkata","locale":"en-IN","currency":"INR"},"academicYear":{"name":"2026-27","startDate":"2026-04-01","endDate":"2027-03-31"},"admin":{"displayName":"Principal"}}'
+```
+
+The administrator then signs in, changes the password, sets up Academics (classes, sections, subjects) and
+uses **Accounts & Import** for students and teachers. `setup:addAdministrator` and
+`setup:issueTemporaryPassword` are CLI-only break-glass helpers. Exact arguments: `convex/setup.ts`.
+
+The command prints the temporary password **once** to your terminal — hand it over through a private channel,
+never paste it into tickets, chat or commits. Run setup from a trusted machine; nothing is stored in the repo.
+
+**Temporary passwords** (first admin, accounts created or reset by an admin) are enforced on the server: until the
+person changes it on `/account`, every school function answers `PASSWORD_CHANGE_REQUIRED` (only the session check
+and the password change work), and it expires after **7 days** (`TEMPORARY_PASSWORD_TTL_MS` in
+`convex/model/accounts.ts`) — then sign-in fails with *"This temporary password has expired"*. There is no public
+password reset. Recovery: an administrator uses **Accounts & Import → Reset password**; if the only administrator is
+locked out, the developer runs `npx convex run setup:issueTemporaryPassword '{"loginId":"ADMIN-001"}'` and hands the
+new temporary password over privately (this signs the account out everywhere).
+
+**Upgrading a demo deployment seeded before Login IDs** (demo accounts keyed by email — every displayed demo login
+is rejected there): deploy the current code, then
+
+```bash
+npx convex run seed:upgradeDemoLoginIds                    # dry run: shows what would change
+npx convex run seed:upgradeDemoLoginIds '{"apply":true}'   # re-keys the demo accounts to their Login IDs
+```
+
+It deletes nothing: existing users, password hashes, sessions and school data are kept; demo passwords keep working
+under the Login IDs. Demo deployments only (`ALLOW_DEMO_SEED=true`).
 
 Without `NEXT_PUBLIC_CONVEX_URL` the app builds and shows the login page, but sign-in is unavailable and
 the protected portals stay closed. Business modules (attendance, fees, exams, …) still read the mock

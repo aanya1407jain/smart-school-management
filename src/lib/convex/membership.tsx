@@ -9,8 +9,8 @@
  * automatically. The backend verifies it belongs to the caller.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { useMutation, useQuery } from "convex/react";
-import type { FunctionArgs, FunctionReference, FunctionReturnType } from "convex/server";
+import { useAction, useConvex, useMutation, usePaginatedQuery, useQuery } from "convex/react";
+import type { FunctionArgs, FunctionReference, FunctionReturnType, PaginationOptions, PaginationResult } from "convex/server";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { STORAGE_NAMESPACE } from "@/lib/constants/product";
@@ -98,4 +98,45 @@ export function useSchoolMutation<F extends FunctionReference<"mutation", "publi
       mutate({ ...args, ...(activeMembershipId ? { membershipId: activeMembershipId } : {}) } as never),
     [mutate, activeMembershipId],
   );
+}
+
+/**
+ * `useAction` for school-scoped actions (schoolAction): adds the active
+ * membershipId; the server verifies it belongs to the caller.
+ */
+export function useSchoolAction<F extends FunctionReference<"action", "public", WithMembership & Record<string, unknown>>>(fn: F) {
+  const { activeMembershipId } = useMembership();
+  const run = useAction(fn);
+  return useCallback(
+    (args: Omit<FunctionArgs<F>, "membershipId">): Promise<FunctionReturnType<F>> =>
+      run({ ...args, ...(activeMembershipId ? { membershipId: activeMembershipId } : {}) } as never),
+    [run, activeMembershipId],
+  );
+}
+
+/**
+ * One-shot (non-reactive) run of a school-scoped query, e.g. validating an
+ * import preview on demand:  const preview = useSchoolQueryRunner(api.imports.previewStudents);
+ */
+export function useSchoolQueryRunner<F extends FunctionReference<"query", "public", WithMembership & Record<string, unknown>>>(fn: F) {
+  const { activeMembershipId } = useMembership();
+  const client = useConvex();
+  return useCallback(
+    (args: SchoolArgs<F>): Promise<FunctionReturnType<F>> =>
+      client.query(fn, { ...args, ...(activeMembershipId ? { membershipId: activeMembershipId } : {}) } as never),
+    [client, fn, activeMembershipId],
+  );
+}
+
+type PaginatedSchoolQuery = FunctionReference<"query", "public", WithMembership & { paginationOpts: PaginationOptions } & Record<string, unknown>, PaginationResult<unknown>>;
+
+/** `usePaginatedQuery` for school-scoped paginated queries. */
+export function useSchoolPaginatedQuery<F extends PaginatedSchoolQuery>(
+  fn: F,
+  args: Omit<FunctionArgs<F>, "membershipId" | "paginationOpts"> | "skip",
+  options: { initialNumItems: number },
+) {
+  const { activeMembershipId } = useMembership();
+  const full = args === "skip" ? "skip" : { ...args, ...(activeMembershipId ? { membershipId: activeMembershipId } : {}) };
+  return usePaginatedQuery(fn, full as never, options);
 }

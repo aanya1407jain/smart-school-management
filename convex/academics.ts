@@ -22,6 +22,7 @@ import { conflict, invalid, invalidRelationship } from "./core/errors";
 import { assertIsoDate, assertNonEmpty, vAcademicYearStatus } from "./core/validators";
 import { activeRoster, fullName, teacherDisplayName } from "./model/academics";
 import { writeAudit } from "./model/audit";
+import { renumberSections } from "./model/rollNumbers";
 import { notifyUsers } from "./model/notifications";
 
 const byLabel = (a: { displayName: string }, b: { displayName: string }) => a.displayName.localeCompare(b.displayName, undefined, { numeric: true });
@@ -353,10 +354,12 @@ export const removeTeacherAssignment = schoolMutation({
 /**
  * Place a student in a section for that section's academic year. A student has
  * at most one ACTIVE enrollment per year; moving sections closes the old one
- * (history is kept, never overwritten).
+ * (history is kept, never overwritten). Roll numbers are system-assigned: the
+ * destination section — and, for a transfer, the source section — is
+ * renumbered alphabetically in this same transaction (model/rollNumbers.ts).
  */
 export const enrollStudent = schoolMutation({
-  args: { studentId: v.id("students"), sectionId: v.id("sections"), rollNo: v.optional(v.number()), startDate: v.string() },
+  args: { studentId: v.id("students"), sectionId: v.id("sections"), startDate: v.string() },
   handler: async (ctx, a) => {
     requirePermission(ctx.actor, "students:write");
     assertIsoDate(a.startDate, "startDate");
@@ -370,12 +373,41 @@ export const enrollStudent = schoolMutation({
     if (active) await ctx.db.patch(active._id, { status: "transferred", endDate: a.startDate });
     const id = await ctx.db.insert("enrollments", {
       schoolId: ctx.actor.schoolId, studentId: student._id, academicYearId: year._id, classId: section.classId, sectionId: section._id,
-      status: "active", startDate: a.startDate, ...(a.rollNo !== undefined ? { rollNo: a.rollNo } : {}),
+      status: "active", startDate: a.startDate,
     });
+    await renumberSections(ctx, [section._id, ...(active ? [active.sectionId] : [])]);
     await writeAudit(ctx, {
       schoolId: ctx.actor.schoolId, actor: ctx.actor, action: active ? "enrollment.transferred" : "enrollment.created", entity: { table: "enrollments", id },
       summary: `${fullName(student)} enrolled in ${section.displayName} (${year.name})`, metadata: { previousSectionId: active?.sectionId ?? null },
     });
     return id;
+  },
+});
+
+/**
+ * End a student's active enrollment (left the school, withdrawn, completed).
+ * The enrollment is kept as history; the section is renumbered in the same
+ * transaction so the remaining roster stays 1..n.
+ */
+export const endEnrollment = schoolMutation({
+  args: {
+    enrollmentId: v.id("enrollments"),
+    status: v.union(v.literal("withdrawn"), v.literal("completed")),
+    endDate: v.string(),
+  },
+  handler: async (ctx, { enrollmentId, status, endDate }) => {
+    requirePermission(ctx.actor, "students:write");
+    assertIsoDate(endDate, "endDate");
+    const enrollment = await getInSchool(ctx, "enrollments", enrollmentId, "Enrollment");
+    if (enrollment.status !== "active") throw conflict("This enrollment is not active.");
+    if (endDate < enrollment.startDate) throw invalidRelationship("The end date is before the enrollment started.");
+    await ctx.db.patch(enrollment._id, { status, endDate }); // its last roll number stays as history
+    await renumberSections(ctx, [enrollment.sectionId]);
+    const student = await ctx.db.get(enrollment.studentId);
+    await writeAudit(ctx, {
+      schoolId: ctx.actor.schoolId, actor: ctx.actor, action: "enrollment.ended", entity: { table: "enrollments", id: enrollment._id },
+      summary: `${student ? fullName(student) : "Student"} left the section (${status})`, metadata: { sectionId: enrollment.sectionId, status },
+    });
+    return { ok: true as const };
   },
 });
