@@ -9,10 +9,10 @@
  * parent with children at two schools). It is verified to belong to the
  * signed-in user; it can never grant access.
  */
-import { getAuthUserId } from "@convex-dev/auth/server";
+import { getAuthSessionId, getAuthUserId } from "@convex-dev/auth/server";
 import type { QueryCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
-import { noSchoolAccess, schoolSelectionRequired, unauthenticated } from "./errors";
+import { noSchoolAccess, passwordChangeRequired, schoolSelectionRequired, unauthenticated } from "./errors";
 import { resolvePermissions, type Permission, type Role } from "./permissions";
 
 export type Actor = {
@@ -23,7 +23,10 @@ export type Actor = {
   permissions: ReadonlySet<Permission>;
   permissionSets: readonly string[];
   displayName: string;
-  email: string;
+  /** Canonical Login ID of the signed-in identity. */
+  loginId: string | null;
+  /** Optional contact email (never used for authorization). */
+  email: string | null;
   /** Set for teacher memberships (and admins who also teach). */
   teacherId?: Id<"teachers">;
   /** Set when the member IS a student. */
@@ -32,10 +35,17 @@ export type Actor = {
   guardianId?: Id<"guardians">;
 };
 
-/** The signed-in user row, or null. Does not require a membership. */
+/**
+ * The signed-in user row, or null. Does not require a membership.
+ * The session behind the token must still exist: sign-out everywhere
+ * (password reset, password change, disabling) takes effect immediately
+ * instead of when the short-lived access token expires.
+ */
 export async function getCurrentUser(ctx: QueryCtx): Promise<Doc<"users"> | null> {
   const userId = await getAuthUserId(ctx);
   if (!userId) return null;
+  const sessionId = await getAuthSessionId(ctx);
+  if (!sessionId || !(await ctx.db.get(sessionId))) return null;
   const user = await ctx.db.get(userId);
   if (!user || user.disabled) return null;
   return user;
@@ -68,7 +78,8 @@ export function actorFromMembership(user: Doc<"users">, m: Doc<"schoolMembership
     permissions: resolvePermissions(m.role, m.permissionSets),
     permissionSets: m.permissionSets,
     displayName: m.displayName,
-    email: m.email,
+    loginId: user.loginId ?? m.loginId ?? null,
+    email: m.email ?? user.email ?? null,
     teacherId: m.teacherId,
     studentId: m.studentId,
     guardianId: m.guardianId,
@@ -77,9 +88,16 @@ export function actorFromMembership(user: Doc<"users">, m: Doc<"schoolMembership
 
 /**
  * Resolve the actor for a school-scoped function.
- * Throws UNAUTHENTICATED / NO_SCHOOL_ACCESS / SCHOOL_SELECTION_REQUIRED.
+ * Throws UNAUTHENTICATED / NO_SCHOOL_ACCESS / SCHOOL_SELECTION_REQUIRED, and
+ * PASSWORD_CHANGE_REQUIRED while the account still uses a temporary password
+ * (only `users.session` opts out, so the UI can send the person to the
+ * password change; `account.changePassword` does not use an actor).
  */
-export async function requireActor(ctx: QueryCtx, membershipId?: Id<"schoolMemberships">): Promise<Actor> {
+export async function requireActor(
+  ctx: QueryCtx,
+  membershipId?: Id<"schoolMemberships">,
+  options: { allowPendingPasswordChange?: boolean } = {},
+): Promise<Actor> {
   const user = await requireAuthenticatedUser(ctx);
   const memberships = await activeMembershipsOf(ctx, user._id);
   if (memberships.length === 0) throw noSchoolAccess();
@@ -94,5 +112,6 @@ export async function requireActor(ctx: QueryCtx, membershipId?: Id<"schoolMembe
   } else {
     throw schoolSelectionRequired();
   }
+  if (user.mustChangePassword && !options.allowPendingPasswordChange) throw passwordChangeRequired();
   return actorFromMembership(user, chosen.membership);
 }

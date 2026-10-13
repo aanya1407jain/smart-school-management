@@ -11,6 +11,10 @@
     "typecheck": "tsc --noEmit",
     "test:e2e": "node scripts/e2e.mjs",
     "test:authz": "tsx --tsconfig tsconfig.json scripts/attendance-authz.test.ts",
+    "test:fees-reports": "tsx --tsconfig tsconfig.json scripts/fees-reports.test.ts",
+    "test:notices-notifications": "tsx --tsconfig tsconfig.json scripts/notices-notifications.test.ts",
+    "test:dashboard-settings": "tsx --tsconfig tsconfig.json scripts/dashboard-settings.test.ts",
+    "test:e2e:comms-finance": "node scripts/e2e-communications-finance.mjs",
     "convex:dev": "convex dev",
     "convex:deploy": "convex deploy",
     "seed:demo": "convex run seed:demo",
@@ -35,6 +39,7 @@
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-hook-form": "7.54.2",
+    "read-excel-file": "9.3.10",
     "recharts": "2.15.1",
     "tailwind-merge": "2.6.0",
     "zod": "3.25.76"

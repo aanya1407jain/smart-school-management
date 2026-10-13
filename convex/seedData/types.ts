@@ -4,7 +4,8 @@
  * Keys (teacher `key`, student `key`, section labels like "10-A") are only
  * used to wire relationships inside the dataset.
  */
-export type SeedLogin = { password: string };
+/** A demo sign-in: Login ID + password. Development/demo only. */
+export type SeedLogin = { loginId: string; password: string };
 
 export type SeedDataset = {
   school: {

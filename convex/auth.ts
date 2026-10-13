@@ -1,51 +1,60 @@
 /**
- * Authentication — Convex Auth with the Password provider.
+ * Authentication — Convex Auth, password accounts identified by LOGIN ID.
  *
- * Identity model:
- *  - `users` = global login identity. `schoolMemberships` = access to a school.
- *  - There is NO open self-registration. An account can only be created
- *    ("signUp" flow) with a valid, unexpired invitation code issued for that
- *    email by a school (see convex/memberships.ts → invite), or by the seed.
- *  - A session is only created for a non-disabled user with at least one
- *    ACTIVE membership in an ACTIVE school.
+ * People sign in with a Login ID issued by their school ("TCH-00124") and a
+ * password. Email is optional contact information and is never a sign-in
+ * identifier.
  *
- * Client usage (Next.js): `useAuthActions().signIn("password", { email, password, flow: "signIn" })`
- * or `{ flow: "signUp", inviteCode }` to activate an invitation.
+ * How this maps onto Convex Auth's Password provider (0.0.96):
+ *  - The provider's account identifier (its `email` param/profile field) is
+ *    only the `authAccounts.providerAccountId` key; nothing is emailed and no
+ *    email format is required while verify/reset are not configured. We set it
+ *    to the CANONICAL Login ID (convex/model/loginIds.ts). Hashing (Scrypt),
+ *    session issuance and the built-in failed-sign-in rate limit are unchanged.
+ *  - There is NO self-registration. `validatePasswordRequirements` is only
+ *    invoked for client flows that would set a password (signUp,
+ *    reset-verification); it always refuses. Accounts are created exclusively
+ *    server-side (convex/model/accounts.ts → createAccount) by an authorized
+ *    admin action, a data import, the deployment setup or the demo seed, and
+ *    `createOrUpdateUser` additionally requires a reserved membership.
+ *  - A session is only created for an enabled user with at least one ACTIVE
+ *    membership in an ACTIVE school, and never with an expired temporary
+ *    password (model/accounts.ts TEMPORARY_PASSWORD_TTL_MS).
+ *
+ * Client usage: `useAuthActions().signIn("password", { loginId, password, flow: "signIn" })`.
  */
 import { Password } from "@convex-dev/auth/providers/Password";
 import { convexAuth } from "@convex-dev/auth/server";
 import type { MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
-import { normalizeEmail } from "./core/validators";
 import { AppError, invalid } from "./core/errors";
-import { activateInvitationsForNewUser, hasActiveAccess } from "./model/memberships";
+import { canonicalLoginId } from "./model/loginIds";
+import { activatePendingAccount, assertSessionAllowed } from "./model/accounts";
 
-/** Password policy for school accounts. */
-function validatePassword(password: string) {
+/** Password policy for school accounts (used by account.changePassword and temporary passwords). */
+export function validatePassword(password: string) {
   if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
     throw invalid("Use at least 8 characters, including a letter and a number.", { password: "Too weak" });
   }
 }
 
-const SchoolPassword = Password({
-  // Called for every flow. Normalising here makes "Admin@School.edu " and
-  // "admin@school.edu" the same account id.
+const LoginIdPassword = Password({
+  // Account identifier = canonical Login ID. Unknown/malformed IDs map to ""
+  // which matches no account (sign-in fails like a wrong password).
   profile(params) {
-    const email = normalizeEmail(String(params.email ?? ""));
-    const inviteCode = typeof params.inviteCode === "string" ? params.inviteCode.trim() : undefined;
-    // `inviteCode` is not stored on the user; it is consumed by createOrUpdateUser below.
-    return { email, ...(inviteCode ? { inviteCode } : {}) } as { email: string };
+    return { email: canonicalLoginId(params.loginId) ?? "" };
   },
-  validatePasswordRequirements: validatePassword,
+  validatePasswordRequirements() {
+    throw new AppError("FORBIDDEN", "Accounts are created by your school. Contact the school office for your Login ID.");
+  },
 });
 
 export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
-  providers: [SchoolPassword],
+  providers: [LoginIdPassword],
   callbacks: {
     /**
-     * Runs only when a NEW account is created (signUp). Existing accounts
-     * signing in return early. We create the user ourselves so we can enforce
-     * invitation-only registration.
+     * Runs only when a NEW account is created (server-side createAccount).
+     * Existing accounts signing in return early.
      */
     async createOrUpdateUser(rawCtx, args) {
       const ctx = rawCtx as unknown as MutationCtx;
@@ -53,17 +62,19 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
       if (args.type !== "credentials") {
         throw new AppError("FORBIDDEN", "This sign-in method is not enabled.");
       }
-      const email = String(args.profile.email ?? "");
-      const inviteCode = typeof args.profile.inviteCode === "string" ? args.profile.inviteCode : "";
-      return await activateInvitationsForNewUser(ctx, { email, inviteCode });
+      const loginId = canonicalLoginId(args.profile.loginId);
+      if (!loginId) throw new AppError("FORBIDDEN", "Accounts are created by your school.");
+      return await activatePendingAccount(ctx, { loginId, mustChangePassword: args.profile.mustChangePassword === true });
     },
 
-    /** Gate every new session (sign-in, refresh-less new sessions). */
+    /**
+     * Gate every new session (runs after the password was verified):
+     * disabled users, users without an active membership in an active school,
+     * and expired temporary passwords get no session.
+     */
     async beforeSessionCreation(rawCtx, { userId }) {
       const ctx = rawCtx as unknown as MutationCtx;
-      if (!(await hasActiveAccess(ctx, userId as Id<"users">))) {
-        throw new AppError("NO_SCHOOL_ACCESS", "Your account does not have active access to any school.");
-      }
+      await assertSessionAllowed(ctx, userId as Id<"users">, Date.now());
     },
   },
 });

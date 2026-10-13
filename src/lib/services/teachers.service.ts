@@ -2,7 +2,6 @@ import type { ID, LeaveStatus, LeaveType, StaffAttendanceStatus, Teacher } from 
 import { readDb, writeDb } from "@/lib/store/db";
 import { newId } from "@/lib/utils/ids";
 import { todayISO, previousSchoolDay, daysBetween } from "@/lib/utils/dates";
-import { DEMO_PASSWORDS } from "@/lib/mock-data/seed";
 import { forbidden, handle, invalid, notFound, requireActor, requirePermission } from "./core";
 import { schoolCode, sectionInfo, teacherName } from "./derive";
 import { notify } from "./notify";
@@ -131,9 +130,9 @@ export const mockTeacherService = {
           specializationIds: input.specializationIds, joiningDate: input.joiningDate, status: input.status, address: input.address.trim(),
         };
         db.teachers.push(teacher);
-        db.users.push({ id: `u_${id}`, email, password: DEMO_PASSWORDS.default, role: "teacher", displayName: `${teacher.firstName} ${teacher.lastName}`, phone: teacher.phone, teacherId: id });
+        db.users.push({ id: `u_${id}`, email, role: "teacher", displayName: `${teacher.firstName} ${teacher.lastName}`, phone: teacher.phone, teacherId: id });
         notify(db, [`u_${id}`], { category: "general", title: `Welcome to ${db.school.name}`, message: "Your classes will appear here once the office assigns them.", href: "/teacher/dashboard" });
-        return { id, email, password: DEMO_PASSWORDS.default };
+        return { id, email };
       });
     });
   },

@@ -18,11 +18,14 @@ const WORKSPACE: Record<string, string> = { admin: "Administration", teacher: "T
  * permissions — unauthorized items are never rendered.
  */
 export function SidebarContent({ collapsed = false, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
-  const { user } = useSession();
+  const { user, viewer, dataSource } = useSession();
   const pathname = usePathname();
-  const groups = getNavigationForUser(user);
+  const live = dataSource === "live";
+  const groups = getNavigationForUser(user, { liveOnly: live });
   const unread = useUnreadCount();
-  const school = useSchoolProfile();
+  const demoSchool = useSchoolProfile();
+  // Live accounts show THEIR school (server-derived), never the demo tenant.
+  const school = live ? viewer?.school : demoSchool;
   if (!user) return null;
 
   return (
@@ -87,7 +90,7 @@ export function SidebarContent({ collapsed = false, onNavigate }: { collapsed?: 
         <div className="relative m-3 rounded-2xl border border-white/10 bg-white/[0.06] p-3.5 backdrop-blur">
           <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/45">Signed in as</p>
           <p className="mt-1 truncate text-sm font-semibold">{user.displayName}</p>
-          <p className="text-[12px] text-white/60">{user.guardianId ? "Guardian" : user.title ?? ROLE_LABELS[user.role]} · 2026–27</p>
+          <p className="text-[12px] text-white/60">{user.guardianId ? "Guardian" : user.title ?? ROLE_LABELS[user.role]}{live ? "" : " · 2026–27"}</p>
         </div>
       )}
     </div>

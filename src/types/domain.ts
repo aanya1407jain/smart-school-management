@@ -380,11 +380,18 @@ export interface AppNotification {
 // ---------------------------------------------------------------- Accounts
 export type Role = "admin" | "teacher" | "student";
 
-/** Login account. `password` exists only because this is a mock auth layer. */
+/**
+ * Demo-data counterpart of a login account. Credentials are NOT here: sign-in
+ * is handled by Convex Auth, which stores only password hashes server-side.
+ */
 export interface UserAccount {
   id: ID;
+  /**
+   * Login ID of the matching Convex account (demo personas only). The session
+   * bridge binds the signed-in identity to this record by Login ID.
+   */
+  loginId?: string;
   email: string;
-  password: string;
   role: Role;
   displayName: string;
   phone: string;

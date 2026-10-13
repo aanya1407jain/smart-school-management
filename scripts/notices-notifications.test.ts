@@ -28,8 +28,16 @@ async function run() {
   const { readDb, writeDb } = await import("../src/lib/store/db");
   const { todayISO } = await import("../src/lib/utils/dates");
 
-  const login = (email: string, password: string, role: "admin" | "teacher" | "student") =>
-    services.auth.login({ email, password, role, remember: false });
+  const SERVER_STUDENTS: Record<string, { studentId: string; name: string }[]> = {
+    "student@asteracademy.edu": [{ studentId: "cvx_aarav", name: "Aarav Sharma" }],
+    "guardian@asteracademy.edu": [{ studentId: "cvx_aarav", name: "Aarav Sharma" }, { studentId: "cvx_ananya", name: "Ananya Sharma" }],
+  };
+  const login = (email: string, roleOrPassword: "admin" | "teacher" | "student" | string, roleArg?: "admin" | "teacher" | "student") => {
+    const role = (roleArg ?? roleOrPassword) as "admin" | "teacher" | "student";
+    const bound = services.auth.bindIdentity({ email, role, displayName: email, permissionSets: [], students: SERVER_STUDENTS[email] ?? [] });
+    if (!bound.ok) throw new Error(`could not bind ${email}`);
+    return bound.user;
+  };
   const rejects = async (fn: () => Promise<unknown>) => {
     try {
       await fn();
@@ -112,9 +120,53 @@ async function run() {
     priority: "normal",
     status: "published",
   });
-  const updatedNoticeList = await services.notices.list();
+  let updatedNoticeList = await services.notices.list();
   const publishedDraft = updatedNoticeList.find((n) => n.id === draftNotice.id);
   check("Draft notice successfully transitioned to published", publishedDraft?.status === "published");
+
+  // Updating notice accepts only editable fields and ignores computed / read-only fields
+  const originalCreatedBy = readDb().notices.find((n) => n.id === draftNotice.id)?.createdBy;
+  await services.notices.update(draftNotice.id, {
+    ...publishedDraft!,
+    title: "Revised Policy on Summer Uniform",
+    body: "Updated guidelines for summer uniform without sending computed fields.",
+    // Extra computed / read-only properties that must not pollute the record
+    audienceLabel: "Computed Label",
+    author: "Spoofed Author",
+    isUpcoming: true,
+    createdBy: "spoofed_user",
+  } as never);
+  const reloadedNotice = readDb().notices.find((n) => n.id === draftNotice.id)!;
+  check("Notice update succeeds and preserves immutable createdBy", reloadedNotice.createdBy === originalCreatedBy);
+  check("Notice title was updated", reloadedNotice.title === "Revised Policy on Summer Uniform");
+
+  // Archive notice
+  await services.notices.archive(draftNotice.id);
+  const archivedNotice = readDb().notices.find((n) => n.id === draftNotice.id);
+  check("Notice is archived", archivedNotice?.status === "archived");
+
+  // Restore archived notice via services.notices.restore — does not resend notifications
+  const notifCountBeforeRestore = readDb().notifications.length;
+  await services.notices.restore(draftNotice.id);
+  const restoredNotice = readDb().notices.find((n) => n.id === draftNotice.id);
+  check("Notice is restored to published", restoredNotice?.status === "published");
+  const notifCountAfterRestore = readDb().notifications.length;
+  check("Restoring archived notice via restore() does not resend notifications", notifCountAfterRestore === notifCountBeforeRestore);
+
+  // Archive again and restore via services.notices.update — does not resend notifications
+  await services.notices.archive(draftNotice.id);
+  await services.notices.update(draftNotice.id, {
+    title: restoredNotice!.title,
+    body: restoredNotice!.body,
+    type: restoredNotice!.type,
+    audience: restoredNotice!.audience,
+    publishDate: restoredNotice!.publishDate,
+    eventDate: restoredNotice!.eventDate,
+    priority: restoredNotice!.priority,
+    status: "published",
+  });
+  const notifCountAfterUpdateRestore = readDb().notifications.length;
+  check("Restoring archived notice via update() does not resend notifications", notifCountAfterUpdateRestore === notifCountBeforeRestore);
 
   console.log("\n--- 2. Notice Audience Privacy & Role Separation Tests ---");
 

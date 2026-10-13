@@ -71,7 +71,7 @@ describe("cross-school ids are NOT_FOUND", () => {
     const sections = await admin.query(api.academics.listSections, {});
     expect(sections.map((s) => s._id).sort()).toEqual([A.sectionA, A.sectionB].sort());
     expect(await errorCode(admin.query(api.academics.sectionRoster, { sectionId: B.sectionA }))).toBe("NOT_FOUND");
-    expect(await errorCode(admin.query(api.attendance.getByDate, { sectionId: B.sectionA, date: pastMonday() }))).toBe("NOT_FOUND");
+    expect(await errorCode(admin.query(api.attendance.getByDate, { sectionId: B.sectionA, date: pastMonday(), today: pastMonday() }))).toBe("NOT_FOUND");
     expect(await errorCode(admin.query(api.attendance.studentHistory, { studentId: B.studentA }))).toBe("NOT_FOUND");
     expect(await errorCode(admin.query(api.academics.listSections, { academicYearId: B.yearId }))).toBe("NOT_FOUND");
   });

@@ -21,9 +21,9 @@ import { authTables } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import {
   vAcademicYearStatus, vAttendanceStatus, vAudience, vConcessionKind, vEnrollmentStatus, vEntityRef, vEventKind,
-  vExamStatus, vFileKind, vFileOwnerType, vGender, vHomeworkStatus, vMembershipStatus, vNoticeStatus, vNoticeType,
-  vNotificationType, vPaymentMethod, vPaymentStatus, vPermissionSet, vPersonStatus, vPriority, vRole, vSchoolStatus,
-  vStaffStatus, vSubmissionStatus,
+  vExamStatus, vFileKind, vFileOwnerType, vGender, vHomeworkStatus, vLeaveStatus, vLeaveType, vMembershipStatus, vNoticeStatus,
+  vNoticeType, vNotificationType, vPaymentMethod, vPaymentStatus, vPermissionSet, vPersonStatus, vPriority, vRole, vSchoolStatus,
+  vStaffAttendanceStatus, vStaffStatus, vSubmissionStatus,
 } from "./core/validators";
 
 export default defineSchema({
@@ -47,9 +47,19 @@ export default defineSchema({
     isAnonymous: v.optional(v.boolean()),
     /** Platform-level kill switch; a disabled user cannot start a session. */
     disabled: v.optional(v.boolean()),
+    /**
+     * Canonical Login ID ("TCH-00124") — what the person types to sign in.
+     * Also the Convex Auth account id of the "password" provider. Unique.
+     */
+    loginId: v.optional(v.string()),
+    /** Set when an administrator issued a temporary password; cleared by account.changePassword. */
+    mustChangePassword: v.optional(v.boolean()),
+    /** Server time the current temporary password was issued (expiry: model/accounts.ts). */
+    temporaryPasswordIssuedAt: v.optional(v.number()),
   })
     .index("email", ["email"])
-    .index("phone", ["phone"]),
+    .index("phone", ["phone"])
+    .index("by_login_id", ["loginId"]),
 
   // ============================================================ tenancy
   schools: defineTable({
@@ -102,13 +112,18 @@ export default defineSchema({
    *  - student role → studentId (the student) OR guardianId (a guardian using
    *    the student portal for their linked children). Exactly one of the two.
    *  - admin role   → optionally teacherId if the principal also teaches.
-   * Invitations are memberships with status "invited" and no userId yet.
+   * Accounts are created by the school, never self-registered: an admin (or
+   * the deployment setup / import) creates the membership with status
+   * "invited" and a reserved `loginId`; creating the Convex Auth account for
+   * that Login ID activates it (see convex/model/accounts.ts).
    */
   schoolMemberships: defineTable({
     schoolId: v.id("schools"),
     userId: v.optional(v.id("users")),
-    /** Normalised login email; used to match an invitation at activation. */
-    email: v.string(),
+    /** Optional contact email (never used to sign in). */
+    email: v.optional(v.string()),
+    /** Canonical Login ID reserved for this membership's account. */
+    loginId: v.optional(v.string()),
     displayName: v.string(),
     role: vRole,
     status: vMembershipStatus,
@@ -116,14 +131,21 @@ export default defineSchema({
     teacherId: v.optional(v.id("teachers")),
     studentId: v.optional(v.id("students")),
     guardianId: v.optional(v.id("guardians")),
-    /** SHA-256 of the one-time invitation code (the code itself is never stored). */
+    /** Administrator who created the account (absent for setup/seed). */
+    createdByUserId: v.optional(v.id("users")),
+    /**
+     * DEPRECATED — invitation-code fields of the previous auth design. Kept
+     * optional ONLY so deployments seeded before the Login ID migration still
+     * pass schema validation; nothing reads them and seed:upgradeDemoLoginIds
+     * clears them. Remove once no deployment has them.
+     */
     inviteCodeHash: v.optional(v.string()),
     inviteExpiresAt: v.optional(v.number()),
     invitedByUserId: v.optional(v.id("users")),
     activatedAt: v.optional(v.number()),
   })
     .index("by_user", ["userId"])
-    .index("by_email_status", ["email", "status"])
+    .index("by_login_id", ["loginId"])
     .index("by_school_email", ["schoolId", "email"])
     .index("by_school_role", ["schoolId", "role"])
     .index("by_teacher", ["teacherId"])
@@ -173,6 +195,22 @@ export default defineSchema({
     active: v.boolean(),
   }).index("by_school_code", ["schoolId", "code"]),
 
+  /**
+   * CURRICULUM: which subjects a class studies in an academic year.
+   *   classSubjects       = what is taught to the class (curriculum)
+   *   teacherAssignments  = who teaches a curriculum subject to one section
+   *   sections.classTeacherId = who owns the section (ATTENDANCE OWNER)
+   * A subject assignment must be for a subject in the class's curriculum.
+   */
+  classSubjects: defineTable({
+    schoolId: v.id("schools"),
+    academicYearId: v.id("academicYears"),
+    classId: v.id("classes"),
+    subjectId: v.id("subjects"),
+  })
+    .index("by_class_year_subject", ["classId", "academicYearId", "subjectId"])
+    .index("by_school_year", ["schoolId", "academicYearId"]),
+
   // ============================================================ people
   teachers: defineTable({
     schoolId: v.id("schools"),
@@ -193,6 +231,36 @@ export default defineSchema({
   })
     .index("by_school_employee", ["schoolId", "employeeId"])
     .index("by_school_status", ["schoolId", "status"]),
+
+  /** One row per teacher per date (present / absent / on_leave). Marked by staff managers. */
+  staffAttendance: defineTable({
+    schoolId: v.id("schools"),
+    teacherId: v.id("teachers"),
+    date: v.string(),
+    status: vStaffAttendanceStatus,
+    leaveRequestId: v.optional(v.id("leaveRequests")),
+    markedByUserId: v.id("users"),
+    note: v.optional(v.string()),
+  })
+    .index("by_school_date", ["schoolId", "date"])
+    .index("by_teacher_date", ["teacherId", "date"]),
+
+  /** A teacher's leave application. Applied-at time is `_creationTime`. */
+  leaveRequests: defineTable({
+    schoolId: v.id("schools"),
+    teacherId: v.id("teachers"),
+    type: vLeaveType,
+    fromDate: v.string(),
+    toDate: v.string(),
+    reason: v.string(),
+    status: vLeaveStatus,
+    requestedByUserId: v.id("users"),
+    decidedByUserId: v.optional(v.id("users")),
+    decidedAt: v.optional(v.number()),
+    decisionNote: v.optional(v.string()),
+  })
+    .index("by_school_status_from", ["schoolId", "status", "fromDate"])
+    .index("by_teacher_from", ["teacherId", "fromDate"]),
 
   students: defineTable({
     schoolId: v.id("schools"),
@@ -437,20 +505,37 @@ export default defineSchema({
     .index("by_exam_section", ["examId", "sectionId"]),
 
   // ============================================================ timetable
+  /**
+   * The school's bell schedule (periods and breaks). Timetable entries point at
+   * a period, so changing a period's times updates every timetable that uses it.
+   */
+  periods: defineTable({
+    schoolId: v.id("schools"),
+    /** Display/order position within the school day (1, 2, 3 …), unique per school. */
+    index: v.number(),
+    label: v.string(), // "Period 1", "Lunch"
+    startTime: v.string(), // HH:MM
+    endTime: v.string(), // HH:MM
+    isBreak: v.boolean(),
+  }).index("by_school_index", ["schoolId", "index"]),
+
+  /**
+   * One lesson slot: section × weekday × period → subject + teacher.
+   * Uniqueness (one lesson per section per slot; one section per teacher per
+   * slot) is checked by the timetable mutations using the two slot indexes.
+   */
   timetableEntries: defineTable({
     schoolId: v.id("schools"),
     academicYearId: v.id("academicYears"),
     sectionId: v.id("sections"),
     dayOfWeek: v.number(), // 0 = Sunday … 6 = Saturday
-    periodNo: v.number(),
-    startTime: v.string(),
-    endTime: v.string(),
+    periodId: v.id("periods"),
     subjectId: v.id("subjects"),
     teacherId: v.id("teachers"),
     room: v.optional(v.string()),
   })
-    .index("by_section_day", ["sectionId", "dayOfWeek", "periodNo"])
-    .index("by_teacher_day", ["teacherId", "dayOfWeek", "periodNo"]),
+    .index("by_section_day_period", ["sectionId", "dayOfWeek", "periodId"])
+    .index("by_teacher_day_period", ["teacherId", "dayOfWeek", "periodId"]),
 
   // ============================================================ homework
   homework: defineTable({
@@ -524,6 +609,70 @@ export default defineSchema({
     .index("by_user_school_read", ["userId", "schoolId", "isRead"]),
 
   // ============================================================ platform
+  /**
+   * Per-school sequence counters for human-readable document numbers
+   * (admission numbers, employee ids, receipt numbers). Only ever read and
+   * incremented inside a mutation via `allocateNumber` (convex/model/counters.ts);
+   * Convex's serializable transactions make each allocation unique.
+   * Keys: "admission:<YYYY>", "employee", "receipt:<academicYearId>".
+   */
+  counters: defineTable({
+    schoolId: v.id("schools"),
+    key: v.string(),
+    value: v.number(), // last number handed out
+  }).index("by_school_key", ["schoolId", "key"]),
+
+
+  /**
+   * A bulk student-account run (Admin → Accounts & Import). The scope is
+   * snapshotted into bulkAccountJobItems before anything is created, so a
+   * changing student list can never widen what the administrator confirmed.
+   * Counters are updated in the same transactions as the items they count.
+   * Temporary passwords are NEVER stored: each batch returns them once to
+   * the initiating administrator (see convex/bulkAccounts.ts).
+   */
+  bulkAccountJobs: defineTable({
+    schoolId: v.id("schools"),
+    createdByUserId: v.id("users"),
+    createdByMembershipId: v.id("schoolMemberships"),
+    /** How the scope was chosen (for display only — the items ARE the scope). */
+    scope: v.union(
+      v.object({ type: v.literal("selected") }),
+      v.object({ type: v.literal("all"), sectionId: v.optional(v.id("sections")) }),
+    ),
+    status: v.union(v.literal("preparing"), v.literal("ready"), v.literal("running"), v.literal("completed"), v.literal("cancelled")),
+    /** Pagination cursor while snapshotting an "all matching" scope. */
+    prepareCursor: v.optional(v.string()),
+    total: v.number(),
+    queued: v.number(),
+    processing: v.number(),
+    created: v.number(),
+    skipped: v.number(),
+    failed: v.number(),
+    cancelled: v.number(),
+    /** Created accounts whose temporary password was confirmed received by the initiator. */
+    delivered: v.number(),
+    startedAt: v.optional(v.number()),
+    finishedAt: v.optional(v.number()),
+  }).index("by_school_creator", ["schoolId", "createdByUserId"]),
+
+  bulkAccountJobItems: defineTable({
+    schoolId: v.id("schools"),
+    jobId: v.id("bulkAccountJobs"),
+    studentId: v.id("students"),
+    status: v.union(v.literal("queued"), v.literal("processing"), v.literal("created"), v.literal("skipped"), v.literal("failed"), v.literal("cancelled")),
+    /** Non-sensitive reason for skipped / failed items. */
+    reason: v.optional(v.string()),
+    /** Membership reserved/used for this student by this job (for idempotent retries). */
+    membershipId: v.optional(v.id("schoolMemberships")),
+    loginId: v.optional(v.string()),
+    attempts: v.number(),
+    claimedAt: v.optional(v.number()),
+    delivered: v.boolean(),
+  })
+    .index("by_job_status", ["jobId", "status"])
+    .index("by_job_student", ["jobId", "studentId"]),
+
   /** Append-only trail of important actions. Written via convex/audit/log.ts. */
   auditLogs: defineTable({
     schoolId: v.id("schools"),

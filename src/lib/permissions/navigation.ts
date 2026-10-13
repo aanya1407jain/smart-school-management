@@ -7,13 +7,19 @@ import { hasAnyPermission, type Permission } from "./permissions";
  */
 export type NavIcon =
   | "dashboard" | "students" | "academics" | "teachers" | "attendance" | "fees" | "exams" | "timetable"
-  | "homework" | "notices" | "notifications" | "reports" | "settings" | "classes" | "results" | "profile";
+  | "homework" | "notices" | "notifications" | "reports" | "settings" | "classes" | "results" | "profile" | "accounts";
 
 export interface NavItem {
   label: string;
   href: string;
   icon: NavIcon;
   anyOf: Permission[];
+  /**
+   * Student portal only: the page is backed by real (Convex) school records.
+   * Live-portal accounts (see session-provider `dataSource`) only see these;
+   * the other pages still run on demo data.
+   */
+  live?: true;
 }
 export interface NavGroup {
   label: string;
@@ -28,6 +34,7 @@ const ADMIN_NAV: NavGroup[] = [
       { label: "Students", href: "/admin/students", icon: "students", anyOf: ["students:read:all"] },
       { label: "Academics", href: "/admin/academics", icon: "academics", anyOf: ["academics:manage"] },
       { label: "Teachers & Staff", href: "/admin/teachers", icon: "teachers", anyOf: ["staff:manage"] },
+      { label: "Accounts & Import", href: "/admin/accounts", icon: "accounts", anyOf: ["users:manage", "students:write", "staff:manage"] },
     ],
   },
   {
@@ -74,11 +81,11 @@ const TEACHER_NAV: NavGroup[] = [
 ];
 
 const STUDENT_NAV: NavGroup[] = [
-  { label: "Overview", items: [{ label: "Dashboard", href: "/student/dashboard", icon: "dashboard", anyOf: ["area:student"] }] },
+  { label: "Overview", items: [{ label: "Dashboard", href: "/student/dashboard", icon: "dashboard", anyOf: ["area:student"], live: true }] },
   {
     label: "My school",
     items: [
-      { label: "My Attendance", href: "/student/attendance", icon: "attendance", anyOf: ["attendance:read:own"] },
+      { label: "My Attendance", href: "/student/attendance", icon: "attendance", anyOf: ["attendance:read:own"], live: true },
       { label: "My Timetable", href: "/student/timetable", icon: "timetable", anyOf: ["timetable:read:own"] },
       { label: "My Homework", href: "/student/homework", icon: "homework", anyOf: ["homework:read:own"] },
       { label: "My Results", href: "/student/results", icon: "results", anyOf: ["results:read:own"] },
@@ -89,17 +96,20 @@ const STUDENT_NAV: NavGroup[] = [
     label: "Updates",
     items: [
       { label: "Notices", href: "/student/notices", icon: "notices", anyOf: ["notices:read"] },
-      { label: "Notifications", href: "/student/notifications", icon: "notifications", anyOf: ["notifications:read"] },
-      { label: "Profile", href: "/student/profile", icon: "profile", anyOf: ["profile:read:own"] },
+      { label: "Notifications", href: "/student/notifications", icon: "notifications", anyOf: ["notifications:read"], live: true },
+      { label: "Profile", href: "/student/profile", icon: "profile", anyOf: ["profile:read:own"], live: true },
     ],
   },
 ];
 
-export function getNavigationForUser(user: Pick<UserAccount, "role" | "permissionSets"> | null | undefined): NavGroup[] {
+export function getNavigationForUser(
+  user: Pick<UserAccount, "role" | "permissionSets"> | null | undefined,
+  options: { liveOnly?: boolean } = {},
+): NavGroup[] {
   if (!user) return [];
   const source = user.role === "admin" ? ADMIN_NAV : user.role === "teacher" ? TEACHER_NAV : STUDENT_NAV;
   return source
-    .map((g) => ({ ...g, items: g.items.filter((i) => hasAnyPermission(user, i.anyOf)) }))
+    .map((g) => ({ ...g, items: g.items.filter((i) => hasAnyPermission(user, i.anyOf) && (!options.liveOnly || i.live)) }))
     .filter((g) => g.items.length > 0);
 }
 

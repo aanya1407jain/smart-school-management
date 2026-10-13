@@ -24,7 +24,7 @@ import type { Actor } from "./core/actor";
 import { conflict, invalid, invalidRelationship, notFound } from "./core/errors";
 import { assertIsoDate, vAttendanceStatus, type AttendanceStatusValue } from "./core/validators";
 import { activeRoster, classTeacherOf, fullName, teacherDisplayName } from "./model/academics";
-import { isSchoolDay, todayIn } from "./model/calendar";
+import { addDays, daysBetween, isSchoolDay, MAX_RANGE_DAYS, todayIn } from "./model/calendar";
 import { writeAudit } from "./model/audit";
 import { notifyUsers, userIdsForStudent } from "./model/notifications";
 
@@ -47,6 +47,13 @@ async function sessionFor(ctx: QueryCtx, sectionId: Id<"sections">, date: string
     .unique();
 }
 
+function assertRange(from: string, to: string) {
+  if (from > to) throw invalid("`from` must not be after `to`", { from: "After to" });
+  if (daysBetween(from, to) + 1 > MAX_RANGE_DAYS) {
+    throw invalid(`Date ranges are limited to ${MAX_RANGE_DAYS} days. Request one academic year at a time.`, { to: "Range too long" });
+  }
+}
+
 function summarize(statuses: AttendanceStatusValue[]) {
   return {
     presentCount: statuses.filter((s) => s === "present").length,
@@ -61,11 +68,18 @@ function summarize(statuses: AttendanceStatusValue[]) {
  * The register for one section on one date (marked or not), plus what the
  * caller may do with it. Readable by admins (all sections) and by teachers
  * whose scope includes the section (class teacher or subject teacher).
+ *
+ * `today` is the client's current date in the SCHOOL's timezone
+ * (`users.viewer().school.timezone`). Queries must not read the clock, so the
+ * caller supplies it; it only affects the `canMark` hint for future dates.
+ * `mark` re-checks the real date on the server, so a wrong `today` can never
+ * allow marking a future date.
  */
 export const getByDate = schoolQuery({
-  args: { sectionId: v.id("sections"), date: v.string() },
-  handler: async (ctx, { sectionId, date }) => {
+  args: { sectionId: v.id("sections"), date: v.string(), today: v.string() },
+  handler: async (ctx, { sectionId, date, today }) => {
     assertIsoDate(date);
+    assertIsoDate(today, "today");
     const section = await requireSectionRead(ctx, sectionId, READ);
     const school = (await ctx.db.get(ctx.actor.schoolId))!;
     const settings = await getSchoolSettings(ctx, school._id);
@@ -80,7 +94,6 @@ export const getByDate = schoolQuery({
     }
 
     const owner = isClassTeacherOf(ctx.actor, section);
-    const today = todayIn(school.timezone);
     const schoolDay = await isSchoolDay(ctx, school, settings, date);
     const writableDate = schoolDay && date <= today;
 
@@ -107,18 +120,22 @@ export const getByDate = schoolQuery({
   },
 });
 
-/** Register summaries for a section over a date range (max ~1 term). */
+/**
+ * Register summaries for a section over a date range of at most
+ * MAX_RANGE_DAYS. One register per school day, so the result is bounded by the
+ * range (≤ 366 rows) and is never silently truncated.
+ */
 export const listBySection = schoolQuery({
   args: { sectionId: v.id("sections"), from: v.string(), to: v.string() },
   handler: async (ctx, { sectionId, from, to }) => {
     assertIsoDate(from, "from");
     assertIsoDate(to, "to");
-    if (from > to) throw invalid("`from` must not be after `to`");
+    assertRange(from, to);
     const section = await requireSectionRead(ctx, sectionId, READ);
     const sessions = await ctx.db
       .query("attendanceSessions")
       .withIndex("by_section_date", (q) => q.eq("sectionId", section._id).gte("date", from).lte("date", to))
-      .take(200);
+      .collect();
     return sessions.map((s) => ({
       _id: s._id, date: s.date, presentCount: s.presentCount, absentCount: s.absentCount, lateCount: s.lateCount,
       excusedCount: s.excusedCount, markedAt: s.markedAt, lastEditedAt: s.lastEditedAt ?? null,
@@ -126,29 +143,40 @@ export const listBySection = schoolQuery({
   },
 });
 
-/** One student's attendance history. Admin: any; teacher: students in scope; student/guardian: own/linked. */
+/**
+ * One student's attendance history. Admin: any; teacher: students in scope;
+ * student/guardian: own/linked.
+ *
+ * Range: defaults to the current academic year. With only `from` or only `to`
+ * the other end is MAX_RANGE_DAYS away. Ranges longer than MAX_RANGE_DAYS are
+ * rejected (request one academic year at a time) — never silently truncated.
+ */
 export const studentHistory = schoolQuery({
   args: { studentId: v.id("students"), from: v.optional(v.string()), to: v.optional(v.string()) },
-  handler: async (ctx, { studentId, from, to }) => {
-    if (from) assertIsoDate(from, "from");
-    if (to) assertIsoDate(to, "to");
-    const student = await requireStudentAccess(ctx, studentId, { all: "attendance:read:all", assigned: "attendance:read:assigned", own: "attendance:read:own" });
+  handler: async (ctx, args) => {
+    if (args.from) assertIsoDate(args.from, "from");
+    if (args.to) assertIsoDate(args.to, "to");
+    const student = await requireStudentAccess(ctx, args.studentId, { all: "attendance:read:all", assigned: "attendance:read:assigned", own: "attendance:read:own" });
     const settings = await getSchoolSettings(ctx, ctx.actor.schoolId);
+    let from = args.from;
+    let to = args.to;
+    if (!from && !to) {
+      const year = await ctx.db.get(await getCurrentAcademicYearId(ctx, ctx.actor.schoolId));
+      from = year!.startDate;
+      to = year!.endDate;
+    } else if (!to) to = addDays(from!, MAX_RANGE_DAYS - 1);
+    else if (!from) from = addDays(to, -(MAX_RANGE_DAYS - 1));
+    assertRange(from!, to);
     const records = await ctx.db
       .query("attendanceRecords")
-      .withIndex("by_student_date", (q) => {
-        const base = q.eq("studentId", student._id);
-        if (from && to) return base.gte("date", from).lte("date", to);
-        if (from) return base.gte("date", from);
-        if (to) return base.lte("date", to);
-        return base;
-      })
+      .withIndex("by_student_date", (q) => q.eq("studentId", student._id).gte("date", from!).lte("date", to!))
       .collect();
     const counted = records.filter((r) => r.status !== "excused");
     const attended = counted.filter((r) => r.status === "present" || (r.status === "late" && settings.attendance.lateCountsAsPresent)).length;
     return {
       studentId: student._id,
       name: fullName(student),
+      range: { from: from!, to: to! },
       percentage: counted.length ? Math.round((attended / counted.length) * 1000) / 10 : null,
       lowAttendanceThreshold: settings.attendance.lowAttendanceThreshold,
       totals: summarize(records.map((r) => r.status)),

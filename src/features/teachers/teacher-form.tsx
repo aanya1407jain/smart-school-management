@@ -36,7 +36,7 @@ export function TeacherForm({ teacherId }: { teacherId?: string }) {
   const opts = useAcademicOptions();
   const existing = useQuery(() => services.teachers.getProfile(teacherId!), [teacherId], { enabled: !!teacherId });
   const [serverError, setServerError] = useState<Error | null>(null);
-  const [created, setCreated] = useState<{ id: string; email: string; password: string } | null>(null);
+  const [created, setCreated] = useState<{ id: string; email: string } | null>(null);
   const { register, handleSubmit, control, reset, setError, formState: { errors, isSubmitting } } = useForm<Values>({
     resolver: zodResolver(schema),
     defaultValues: { title: "Ms.", firstName: "", lastName: "", gender: "female", email: "", phone: "", designation: "Teacher (TGT)", qualification: "", specializationIds: [], joiningDate: todayISO(), address: "", status: "active" },
@@ -113,11 +113,11 @@ export function TeacherForm({ teacherId }: { teacherId?: string }) {
         footer={<><Button variant="outline" onClick={() => router.push("/admin/academics?tab=assignments")}>Assign classes</Button><Button onClick={() => created && router.push(`/admin/teachers/${created.id}`)}>Open profile</Button></>}>
         {created && (
           <div className="space-y-3 text-sm text-ink-soft">
-            <p>The teacher can sign in now. Their dashboard stays empty until you assign classes.</p>
+            <p>Their dashboard stays empty until you assign classes.</p>
             <div className="rounded-2xl border border-line bg-alabaster p-4">
-              <p className="flex items-center gap-2 text-[12px] font-semibold uppercase tracking-wide text-ink-muted"><KeyRound className="h-3.5 w-3.5" /> Portal login (demo)</p>
+              <p className="flex items-center gap-2 text-[12px] font-semibold uppercase tracking-wide text-ink-muted"><KeyRound className="h-3.5 w-3.5" /> Contact email</p>
               <p className="mt-2 font-mono text-[13px] text-ink">{created.email}</p>
-              <p className="font-mono text-[13px] text-ink">{created.password}</p>
+              <p className="mt-1 text-[12.5px] text-ink-muted">Sign-in accounts (Login ID + temporary password) are created by an administrator in Accounts &amp; Import — no password is generated here.</p>
             </div>
           </div>
         )}

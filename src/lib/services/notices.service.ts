@@ -14,7 +14,7 @@ export interface NoticeInput {
   publishDate: string;
   eventDate: string | null;
   priority: NoticePriority;
-  status: "draft" | "published";
+  status: "draft" | "published" | "archived";
 }
 
 export interface NoticeFilters {
@@ -88,14 +88,34 @@ export const mockNoticeService = {
   async update(noticeId: ID, input: NoticeInput) {
     return handle(() => {
       requirePermission(requireActor(), "notices:manage");
-      validate(input);
+      const editable: NoticeInput = {
+        title: input.title,
+        body: input.body,
+        type: input.type,
+        audience: input.audience,
+        publishDate: input.publishDate,
+        eventDate: input.eventDate,
+        priority: input.priority,
+        status: input.status,
+      };
+      validate(editable);
       return writeDb((db) => {
         const n = db.notices.find((x) => x.id === noticeId);
         if (!n) throw notFound("Notice");
-        const wasPublished = n.status === "published";
-        Object.assign(n, { ...input, title: input.title.trim(), body: input.body.trim() });
-        if (!wasPublished && n.status === "published") {
-          for (const u of noticeRecipients(db, n)) notify(db, [u.id], { category: "notice", title: n.title, message: n.body.slice(0, 90), href: `/${u.role}/notices` });
+        const prevStatus = n.status;
+        n.title = editable.title.trim();
+        n.body = editable.body.trim();
+        n.type = editable.type;
+        n.audience = editable.audience;
+        n.publishDate = editable.publishDate;
+        n.eventDate = editable.eventDate;
+        n.priority = editable.priority;
+        n.status = editable.status;
+        // Only send notifications when transitioning a draft to published (not when restoring an archived notice)
+        if (prevStatus === "draft" && n.status === "published" && n.publishDate <= todayISO()) {
+          for (const u of noticeRecipients(db, n)) {
+            notify(db, [u.id], { category: "notice", title: n.title, message: n.body.slice(0, 90), href: `/${u.role}/notices` });
+          }
         }
         return { id: noticeId };
       });
@@ -109,6 +129,18 @@ export const mockNoticeService = {
         const n = db.notices.find((x) => x.id === noticeId);
         if (!n) throw notFound("Notice");
         n.status = "archived";
+        return { ok: true };
+      });
+    });
+  },
+
+  async restore(noticeId: ID) {
+    return handle(() => {
+      requirePermission(requireActor(), "notices:manage");
+      return writeDb((db) => {
+        const n = db.notices.find((x) => x.id === noticeId);
+        if (!n) throw notFound("Notice");
+        n.status = "published";
         return { ok: true };
       });
     });

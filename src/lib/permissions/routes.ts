@@ -19,6 +19,7 @@ export const ROUTE_RULES: RouteRule[] = [
   { pattern: r("/admin/students"), anyOf: ["students:read:all"] },
   { pattern: r("/admin/academics"), anyOf: ["academics:manage"] },
   { pattern: r("/admin/teachers"), anyOf: ["staff:manage"] },
+  { pattern: r("/admin/accounts"), anyOf: ["users:manage", "students:write", "staff:manage"] },
   { pattern: r("/admin/attendance"), anyOf: ["attendance:read:all"] },
   { pattern: r("/admin/fees"), anyOf: ["fees:manage"] },
   { pattern: r("/admin/examinations"), anyOf: ["exams:manage"] },

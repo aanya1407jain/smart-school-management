@@ -14,7 +14,7 @@ Convex is the backend and database. This document is the **shared contract** for
 ```
 convex/
 ├── schema.ts              All tables + indexes (single schema for the whole team)
-├── auth.ts                Convex Auth (Password provider, invite-only sign-up, session gate)
+├── auth.ts                Convex Auth (Login ID + password, no self sign-up, session gate)
 ├── auth.config.ts         JWT issuer config (generated, do not edit)
 ├── http.ts                Auth HTTP routes (JWKS / OpenID discovery)
 │
@@ -29,16 +29,25 @@ convex/
 │
 ├── model/                 Server-only domain helpers (not callable from clients)
 │   ├── academics.ts       roster / name helpers
-│   ├── memberships.ts     invitations, activation, access checks
+│   ├── memberships.ts     membership shape + access checks
+│   ├── accounts.ts        reserve / provision accounts, Login ID generation, temporary passwords
+│   ├── loginIds.ts        Login ID canonical form + generated formats (shared with the frontend)
+│   ├── importSpecs.ts     import field specs, column mapping, date parsing (shared with the frontend)
+│   ├── importers.ts       import analysers (preview) + committers (all-or-nothing)
 │   ├── calendar.ts        today-in-school-timezone, school-day rules (working days − holidays)
 │   ├── grading.ts         grading schemes (per school setting)
+│   ├── counters.ts        atomic per-school document numbers (admission, employee, receipt)
 │   ├── audit.ts           writeAudit()
 │   └── notifications.ts   notifyUsers(), userIdsForStudent()
 │
-├── users.ts               me, viewer
-├── memberships.ts         invite, acceptInvitation, list, updateAccess
+├── users.ts               me, viewer, session, studentContext
+├── account.ts             changePassword (own account)
+├── accounts.ts            admin: create, issueTemporaryPassword, issuePendingCredentials, setStatus, listPeople
+├── imports.ts             previewStudents / commitStudentRows, previewTeachers / commitTeacherRows
+├── setup.ts               internal only: initSchool, addAdministrator, issueTemporaryPassword (operator CLI)
+├── memberships.ts         list (paginated), updateAccess
 ├── schools.ts             publicProfile, current, updateProfile, updateSettings
-├── academics.ts           years/classes/subjects/sections, roster, assignments, class teacher, enrollment
+├── academics.ts           years/classes/subjects/sections, curriculum, roster, assignments, class teacher, enrollment
 ├── attendance.ts          getByDate, listBySection, studentHistory, dailyOverview, mark, update
 ├── notifications.ts       list, unreadCount, markRead, markAllRead
 ├── files.ts               generateUploadUrl, register, getUrl, listForOwner, remove
@@ -66,10 +75,15 @@ npm run seed:demo           # seeds the Aster Academy demo school + demo logins
 npm run dev                 # Next.js
 ```
 
-Demo logins (same as Stage 1): `admin@asteracademy.edu / Admin@123`, `teacher@asteracademy.edu / Teacher@123`
-(Rahul Verma, class teacher 10-A), `meera.iyer@… / Welcome@123` (class teacher 10-B), `sunita.rao@… / Welcome@123`
-(English 10-A/B/C, class teacher 10-C), `student@asteracademy.edu / Student@123` (Aarav, 10-A),
-`guardian@asteracademy.edu / Guardian@123` (Priya Sharma → Aarav 10-A + Ananya 8-B).
+Demo logins (Login ID / password): `ADMIN-001 / Admin@123`, `TCH-00001 / Teacher@123` (Rahul Verma, class
+teacher 10-A), `TCH-00002 / Welcome@123` (Meera Iyer, class teacher 10-B), `TCH-00003 / Welcome@123` (Sunita Rao,
+English 10-A/B/C, class teacher 10-C), `STU-2026-00001 / Student@123` (Aarav, 10-A), `GRD-00001 / Guardian@123`
+(Priya Sharma → Aarav 10-A + Ananya 8-B). Teachers `TCH-00004`…`TCH-00010` and `STU-2026-00002` (Amaira) use
+`Welcome@123`.
+
+A **real school** is never created by the seed: run the internal `setup:initSchool` action once (see README),
+which creates the school, its current academic year, default settings and the first administrator
+(`ADMIN-001` + a temporary password).
 
 `NEXT_PUBLIC_CONVEX_URL` unset → the app runs exactly as Stage 1 (mock services, static pages).
 `NEXT_PUBLIC_CONVEX_URL` set → Convex + Convex Auth providers and `src/proxy.ts` are active.
@@ -96,13 +110,62 @@ Isolation is tested in `tests/convex/tenancy.test.ts` (two schools with identica
 
 ## 4. Rules: identity & authentication
 
-- **Convex Auth, Password provider.** Emails are normalised (trim, lowercase, NFKC). Password policy:
-  ≥ 8 chars with a letter and a digit.
-- **No open registration.** An admin calls `memberships.invite` → an *invited* membership + a one-time code
-  (returned once; only its SHA-256 is stored; 14-day expiry). The person signs up with
-  `signIn("password", { email, password, flow: "signUp", inviteCode })`. The `createOrUpdateUser` callback
-  activates matching invitations and creates the user. Without a valid code sign-up is refused.
-- Existing users accept further invitations (another school / role) with `memberships.acceptInvitation`.
+- **Convex Auth, Password provider, keyed by Login ID.** The provider's account id is the canonical Login ID
+  (`convex/model/loginIds.ts`: NFKC, trimmed, upper-case, `^[A-Z0-9][A-Z0-9._-]{2,39}$`). Email is an optional
+  contact field and never a sign-in identifier. Generated formats: `ADMIN-001`, `TCH-00001`, `STU-<year>-00001`,
+  `GRD-00001` (per-school counters; an explicit generated-shape ID advances the counter). Password policy:
+  ≥ 8 chars with a letter and a digit. Passwords are hashed by Convex Auth (Scrypt); hashes never leave the server.
+- **No self-registration.** `flow: "signUp"` always fails (`validatePasswordRequirements` throws FORBIDDEN);
+  password-reset flows are not configured. Accounts exist only because an administrator (or the operator CLI)
+  created them:
+  1. `reserveAccount` writes an *invited* (pending) membership carrying the Login ID and the person link
+     (student / teacher / guardian record). Import with "create accounts" stops here.
+  2. `provisionAccount` (action) calls Convex Auth `createAccount` with a server-generated temporary password
+     (12 chars, `crypto.getRandomValues`, rejection sampling). `createOrUpdateUser` creates the `users` row
+     (`loginId`, `mustChangePassword: true`) and activates the pending membership(s).
+  3. The temporary password is returned once to the admin UI and stored nowhere readable. After sign-in the
+     user is asked to change it (`account.changePassword`, which verifies the current password, clears the flag
+     and signs out other sessions).
+- **Admin API** (`convex/accounts.ts`, permission `users:manage`): `create`, `issueTemporaryPassword` (reset; signs
+  the account out everywhere), `issuePendingCredentials` (≤ 50 per call, per-item results), `setStatus`
+  (disable = membership `suspended` + `invalidateSessions`; enable), `listPeople`. Admins cannot disable or reset
+  themselves. Role, school and person link are derived server-side; extra arguments are rejected by validators.
+- **Temporary passwords** are server-enforced. Issuing one (account creation, admin reset, setup, break-glass)
+  sets `users.mustChangePassword` + `users.temporaryPasswordIssuedAt` (server clock). While set, `requireActor`
+  throws `PASSWORD_CHANGE_REQUIRED` for every school function; only `users.session` (opts in with
+  `allowPendingPasswordChange`) and `account.changePassword` (no actor) work. It expires after
+  `TEMPORARY_PASSWORD_TTL_MS` (7 days): `beforeSessionCreation` and `account.changePassword` refuse it with
+  `TEMPORARY_PASSWORD_EXPIRED`. A successful change clears both fields and signs the other sessions out.
+- **Sessions must exist.** `getCurrentUser` also checks that the token's `authSessions` row still exists, so
+  `invalidateSessions` (reset, password change, disable) takes effect immediately rather than when the access
+  token expires. `account.changePassword` additionally requires an active membership (disabled/suspended accounts
+  cannot use it).
+- **Older demo deployments** (accounts keyed by email) are upgraded in place with `seed:upgradeDemoLoginIds`
+  (dry run by default; `{"apply":true}` to apply). `schoolMemberships` keeps the old invitation fields as
+  deprecated optional fields only so such deployments pass schema validation.
+- **Roll numbers are system-assigned** (`convex/model/rollNumbers.ts`). They live on the year-specific
+  `enrollments` row. Whenever a section's active roster changes (import, `academics.enrollStudent` incl. transfers,
+  `academics.endEnrollment`, demo seed), the whole section is renumbered 1..n in the SAME mutation: first name, then
+  last name (case-, accent- and whitespace-insensitive), then student `_id`, then enrollment `_id`. Only that
+  section is touched; closed/historical enrollments keep their last number. Roll numbers in uploaded files are
+  ignored. Limit: 1,000 active students per section (`MAX_SECTION_ROSTER`). There is no student-name editing in
+  Convex yet; when it is added it must call `renumberSections` for the student's active section.
+- **Student portal** (`convex/studentPortal.ts`): `myProfile` resolves the caller's OWN student record purely
+  server-side (session → membership → `studentId` or guardian links → student → current-year enrollment). An
+  optional `studentId` only chooses among the students the server links to the caller; anything else is NOT_FOUND.
+  Staff get FORBIDDEN. Missing data is explicit (`no_student_record`, enrollment `missing`/`ended`/`no_current_year`).
+  `diagnoseStudentAccounts` (internal, read-only) checks every student account's links for one school.
+- **Bulk student accounts** (`convex/bulkAccounts.ts`, `users:manage`): a run snapshots its scope (selected ids, or
+  "all without an account" in a section/school, `prepareJob` in pages of 200), then the initiator's browser calls
+  `processBatch` repeatedly (25 accounts per call — measured ~350 ms per account on a local backend, far below the
+  10-minute action limit). Claims are exclusive mutations; stale claims (> 11 min) are re-queued; each student is
+  handled idempotently through `reserveAccount`/`provisionAccount`. Temporary passwords are returned once per batch
+  and never stored; accounts whose passwords were not acknowledged by the browser are listed and get NEW temporary
+  passwords through `accounts.issuePendingCredentials`. Audit: `accounts.bulk_started/completed/cancelled`.
+- **Imports** (`convex/imports.ts`): `preview*` (query) and `commit*Rows` (mutation) take mapped rows
+  `{ rowNumber, values }` (≤ 300). The commit re-runs the same analyser and throws if any row is invalid, so a
+  file imports completely or not at all. Students need `students:write`, teachers `staff:manage`, and
+  `users:manage` in addition when accounts are created.
 - **Session gate:** `beforeSessionCreation` refuses sign-in for disabled users and users with no active
   membership in an active school. Suspending a membership also cuts off existing sessions immediately
   (every call re-resolves the membership).
@@ -141,8 +204,12 @@ schools ─┬─ schoolSettings (currentAcademicYearId, workingDays, attendance
          ├─ academicYears (2026-27)
          ├─ classes (Grade 8, level 8)                       year-independent
          ├─ sections (8-A: classId + academicYearId + classTeacherId)   per year
-         ├─ subjects
-         ├─ teachers ──── teacherAssignments (teacher × subject × class × section × year)
+         ├─ subjects ──── classSubjects (class × subject × year)        ← CURRICULUM
+         ├─ teachers ─┬── teacherAssignments (teacher × curriculum subject × section × year)
+         │            ├── staffAttendance (teacher × date: present | absent | on_leave)
+         │            └── leaveRequests (casual | sick | earned | duty; pending | approved | rejected)
+         ├─ periods (bell schedule) ── timetableEntries (section × weekday × period → subject + teacher)
+         ├─ counters (per-school document number sequences)
          ├─ students ─┬── enrollments (student × year × class × section, status, rollNo)  ← placement + history
          │            └── guardianLinks ── guardians
          └─ schoolMemberships (user ↔ school, role, teacherId | studentId | guardianId)
@@ -153,7 +220,17 @@ schools ─┬─ schoolSettings (currentAcademicYearId, workingDays, attendance
   year's enrollment. History is never overwritten.
 - **Teacher scope** for a year = sections from `teacherAssignments` ∪ sections where they are class teacher
   (`teacherSectionIds`). "Assigned" read permissions are limited to that scope.
-- **SUBJECT ASSIGNMENT ≠ ATTENDANCE OWNERSHIP.** A teacher can own (be class teacher of) at most one
+- Three different relationships — never mix them up:
+
+  | Relationship | Table / field | Means | Grants |
+  |---|---|---|---|
+  | Curriculum | `classSubjects` | the class studies this subject this year | nothing |
+  | Subject assignment | `teacherAssignments` | this teacher teaches that curriculum subject to this section | read access to the section (teacher scope), marks entry later |
+  | Class teacher | `sections.classTeacherId` | this teacher owns the section | **attendance mark/edit** |
+
+  `academics.assignSubjectTeacher` rejects subjects that are not in the class's curriculum
+  (`INVALID_RELATIONSHIP`); `academics.setClassSubjects` refuses to remove a subject that still has a teacher
+  assigned. **SUBJECT ASSIGNMENT ≠ ATTENDANCE OWNERSHIP.** A teacher can own (be class teacher of) at most one
   section per academic year (enforced in `academics.setClassTeacher`).
 
 ---
@@ -181,6 +258,14 @@ the student's and linked guardians' accounts when the school enables attendance 
 
 Data: `attendanceSessions` (one per section/date, with counts) + `attendanceRecords` (one per student).
 
+Query contracts:
+- `getByDate({ sectionId, date, today })` — queries must not read the clock, so the client passes **today in the
+  school's timezone** (`users.viewer().school.timezone`). `today` only drives the `canMark` hint; `mark` re-checks
+  the real date server-side.
+- `listBySection({ sectionId, from, to })` and `studentHistory({ studentId, from?, to? })` accept ranges of at most
+  366 days (longer → `INVALID_ARGUMENT`, never silent truncation). `studentHistory` defaults to the current
+  academic year and returns the `range` it used.
+
 ---
 
 ## 8. Rules: student & guardian access
@@ -199,10 +284,23 @@ Anything else → `NOT_FOUND` (never confirms that a student exists).
   `feePayments` (append-only transactions with `allocations`; reversals are new rows) → `receipts`;
   `feeConcessions` (percent in basis points or fixed). Balance = obligations − completed allocations −
   concessions; **never store a mutable balance**. Money is integer minor units (paise).
-- **Exams:** `exams` → `examSubjects` (paper per class/subject with schedule + max/pass marks) → `marks`
+- **Exams:** status flow `draft → scheduled → in_progress → marks_entry → published` (same as the UI).
+  Marks entry is open in `in_progress` and `marks_entry`; publishing requires one of those states, at least one
+  paper and no pending paper–section sheets. `exams` → `examSubjects` (paper per class/subject with schedule + max/pass marks) → `marks`
   (per student per paper) → `results` (snapshot computed at publish, with per-subject breakdown and rank).
-- **Timetable:** `timetableEntries` by section/day/period and by teacher/day/period.
-- **Homework:** `homework` (per section/subject/teacher) → `homeworkSubmissions`.
+- **Timetable:** `periods` is the school's bell schedule (`index`, `label`, `startTime`, `endTime`, `isBreak`).
+  `timetableEntries` reference a `periodId` (times are read from the period, never copied). Clash checks use
+  `by_section_day_period` (one lesson per section per slot) and `by_teacher_day_period` (one section per teacher
+  per slot).
+- **Homework:** `homework` status is `active | closed` (no drafts) → `homeworkSubmissions`
+  (`submitted | late | reviewed`).
+- **Staff:** `staffAttendance` (one row per teacher per date; `on_leave` may point at the approved
+  `leaveRequests` row) and `leaveRequests` (applied-at = `_creationTime`). Workflows not built yet.
+- **Document numbers:** `counters` + `convex/model/counters.ts`. Allocate **inside the mutation that creates the
+  document**: `nextAdmissionNumber(ctx, school, "2026")` → `AA-2026-0001`, `nextEmployeeId(ctx, school)` →
+  `AA-EMP-001`, `nextReceiptNumber(ctx, school, year)` → `AA/26-27/0001`. Convex mutations are serializable, so
+  concurrent allocations from the same key cannot produce duplicates; there is no public "give me a number"
+  function. Use `ensureCounterAtLeast` when importing existing documents.
 - **Notices/events:** `notices` and `events` with a server-resolved `audience` (all / roles / classes / sections).
 
 ---
@@ -251,7 +349,7 @@ Checklist (enforced partly by `tests/convex/permissions.test.ts`):
 
 **Naming:** module files are plural nouns of the domain (`attendance`, `academics`, `notifications`);
 queries are `get…`, `list…`, nouns (`viewer`, `dailyOverview`); mutations are verbs (`mark`, `update`,
-`invite`, `setClassTeacher`). Audit actions are `"<entity>.<past_tense>"`. Indexes are `by_<field>_<field>`.
+`create`, `setClassTeacher`). Audit actions are `"<entity>.<past_tense>"`. Indexes are `by_<field>_<field>`.
 **Dates** `YYYY-MM-DD` strings, **times** `HH:MM`, **timestamps** epoch ms, **money** integer minor units.
 
 **Error codes** (`ConvexError.data.code`): `UNAUTHENTICATED`, `NO_SCHOOL_ACCESS`, `SCHOOL_SELECTION_REQUIRED`,
@@ -278,7 +376,7 @@ import { useSchoolQuery, useSchoolMutation, useMembership } from "@/lib/convex/m
 import { getAppError } from "@/lib/convex/errors";
 import { useAuthActions } from "@convex-dev/auth/react";
 
-const register = useSchoolQuery(api.attendance.getByDate, { sectionId, date }); // undefined while loading
+const register = useSchoolQuery(api.attendance.getByDate, { sectionId, date, today }); // undefined while loading
 const mark = useSchoolMutation(api.attendance.mark);
 try { await mark({ sectionId, date, entries }); } catch (e) { toast(getAppError(e)?.message ?? "Failed"); }
 
@@ -290,8 +388,14 @@ await signIn("password", { email, password, flow: "signIn" });
 `me.memberships` for a school/role switcher.
 
 **Migration path (module by module, one source of truth at a time):**
-1. Auth/session first: switch the login screen to `useAuthActions`, replace `SessionProvider`'s mock session
-   with `api.users.viewer`, and add redirects in `src/proxy.ts`.
+1. ✅ Auth/session (done): the login screen uses `useAuthActions().signIn("password", …)`; `SessionProvider`
+   reads `api.users.session` (signedOut / noSchool / signedIn + viewer); `src/proxy.ts` redirects signed-out
+   requests for `/admin|teacher|student/*` to `/login`; guardian child switching is verified with
+   `api.users.studentContext`; password changes use `api.account.changePassword`. Until each module
+   migrates, the server identity is bound in memory to its demo-data record (by Login ID; linked students
+   by name, and only if linked on both sides) so the mock services know the caller — no session, role or
+   password is kept in Web Storage by the app. (The Convex Auth client caches its 1-hour access JWT in
+   localStorage; its `inMemory` mode is broken in 0.0.96. The refresh token stays in the httpOnly cookie.)
 2. Then per module: rewrite the screen's data calls to `useSchoolQuery`/`useSchoolMutation` and **delete** the
    corresponding mock service + its seed slice in the same PR.
 3. When the last module moves, delete `src/lib/mock-data`, `src/lib/store`, and the mock services.
@@ -302,9 +406,10 @@ await signIn("password", { email, password, flow: "signIn" });
 
 | Command | What |
 |---|---|
-| `npm run test:convex` | In-process Convex tests (`convex-test` + Vitest): tenant isolation, auth resolution, attendance ownership, permission catalogue, source guard |
-| `npm run test:convex:integration` | Against a real seeded deployment (`CONVEX_URL=…`): real Convex Auth sign-in, invitations, suspension, attendance rules, notifications, audit |
-| `npm run test:authz` / `npm run test:e2e` | Stage 1 UI + mock service suites (unchanged) |
+| `npm run test:convex` | In-process Convex tests (`convex-test` + Vitest): tenant isolation, auth resolution, accounts, imports, setup, attendance ownership, permission catalogue, source guard |
+| `npm run test:convex:integration` | Against a real seeded deployment (`CONVEX_URL=…`): real Login ID sign-in, admin account creation, import, temporary password → change, disable/enable, attendance rules, guardian switching, notifications, audit |
+| `npm run test:authz` | Mock-service attendance ownership, acting as server-shaped identities (no passwords) + identity-bridge rules |
+| `npm run test:e2e` | Browser suite. Needs a seeded Convex deployment and a build with `NEXT_PUBLIC_CONVEX_URL`: real Login ID sign-in, server-side route protection, role routing, Accounts & Import flow, workflows |
 
 ---
 
@@ -313,7 +418,7 @@ await signIn("password", { email, password, flow: "signIn" });
 - Business logic for fees, exams/marks/results, timetable, homework, notices/events, students/teachers CRUD
   and reports: **schema only**. Build them in the module that owns them following §10.
 - Password reset and email verification (Password provider supports both; needs an email provider such as
-  Resend configured on the deployment).
+  Resend configured on the deployment). Today an administrator issues a new temporary password instead.
 - Delivery channels for notifications (push/email/SMS) — add by scheduling an action from `notifyUsers`.
 - Multi-school platform administration (creating a new school is currently done by a seed dataset or a
   future internal "provision school" mutation).

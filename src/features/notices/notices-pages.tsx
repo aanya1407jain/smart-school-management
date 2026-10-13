@@ -50,6 +50,30 @@ import { NoticeListItem } from "./notice-list-item";
 
 type NoticeView = Notice & { audienceLabel: string; author: string; isUpcoming: boolean };
 
+function toEditableNoticeInput(
+  n: {
+    title: string;
+    body: string;
+    type: NoticeType;
+    audience: Notice["audience"];
+    publishDate: string;
+    eventDate: string | null;
+    priority: NoticePriority;
+  },
+  status: "draft" | "published" | "archived"
+): NoticeInput {
+  return {
+    title: n.title,
+    body: n.body,
+    type: n.type,
+    audience: n.audience,
+    publishDate: n.publishDate,
+    eventDate: n.eventDate,
+    priority: n.priority,
+    status,
+  };
+}
+
 function useNoticeFilters(withAudience: boolean) {
   const [search, setSearch] = useState("");
   const [type, setType] = useState("");
@@ -242,7 +266,7 @@ export function NoticesManager() {
                           {n.status === "draft" && (
                             <DropdownItem
                               onSelect={async () => {
-                                await services.notices.update(n.id, { ...n, status: "published" });
+                                await services.notices.update(n.id, toEditableNoticeInput(n, "published"));
                                 toast({
                                   title: "Notice published",
                                   description: "Notice is now visible to its target audience.",
@@ -265,7 +289,7 @@ export function NoticesManager() {
                           {n.status === "archived" && (
                             <DropdownItem
                               onSelect={async () => {
-                                await services.notices.update(n.id, { ...n, status: "published" });
+                                await services.notices.restore(n.id);
                                 toast({ title: "Notice restored to published" });
                               }}
                             >
@@ -302,7 +326,7 @@ export function NoticesManager() {
           setView(null);
         }}
         onPublish={async (n) => {
-          await services.notices.update(n.id, { ...n, status: "published" });
+          await services.notices.update(n.id, toEditableNoticeInput(n, "published"));
           toast({ title: "Notice published", description: "Notice is now visible to its audience." });
           setView(null);
         }}
@@ -401,11 +425,12 @@ function ComposeModal({ existing, onClose }: { existing?: NoticeView; onClose: (
     setError(null);
     setErrors({});
     try {
+      const payload = toEditableNoticeInput(form, status);
       if (existing) {
-        await services.notices.update(existing.id, { ...form, status });
+        await services.notices.update(existing.id, payload);
         toast({ title: status === "draft" ? "Draft saved" : "Notice updated" });
       } else {
-        const r = await services.notices.create({ ...form, status });
+        const r = await services.notices.create(payload);
         toast({
           title: status === "draft" ? "Draft saved" : "Notice published",
           description: status === "published" ? `Delivered to ${r.reached} accounts.` : undefined,
