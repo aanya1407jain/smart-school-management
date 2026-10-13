@@ -3,19 +3,21 @@
  * demos and tests. Nothing in the backend depends on this school; it is just
  * one dataset passed to the generic seeder in convex/seed.ts.
  *
- * Demo logins mirror the Stage 1 demo so the team can reuse them:
- *   admin@asteracademy.edu / Admin@123          Principal (admin)
- *   teacher@asteracademy.edu / Teacher@123      Rahul Verma — class teacher 10-A, Maths 10-A/10-B/9-A, Science 10-A
- *   meera.iyer@asteracademy.edu / Welcome@123   Meera Iyer — class teacher 10-B
- *   sunita.rao@asteracademy.edu / Welcome@123   Sunita Rao — English 10-A/B/C, class teacher 10-C
- *   student@asteracademy.edu / Student@123      Aarav Sharma, 10-A
- *   amaira.desai@students.asteracademy.edu / Welcome@123   Amaira Desai, 10-B
- *   guardian@asteracademy.edu / Guardian@123    Priya Sharma — guardian of Aarav (10-A) and Ananya (8-B)
+ * Demo logins (Login ID / password). Development and demo use ONLY — real
+ * schools get their accounts from an administrator, never from this file:
+ *   ADMIN-001      / Admin@123     Aanya Jain, Principal (admin)
+ *   TCH-00001      / Teacher@123   Rahul Verma — class teacher 10-A, Maths 10-A/10-B/9-A, Science 10-A
+ *   TCH-00002      / Welcome@123   Meera Iyer — class teacher 10-B
+ *   TCH-00003      / Welcome@123   Sunita Rao — English 10-A/B/C, class teacher 10-C
+ *   TCH-00004…10   / Welcome@123   the other teachers, in the order listed below
+ *   STU-2026-00001 / Student@123   Aarav Sharma, 10-A
+ *   STU-2026-00002 / Welcome@123   Amaira Desai, 10-B
+ *   GRD-00001      / Guardian@123  Priya Sharma — guardian of Aarav (10-A) and Ananya (8-B)
  */
 import type { SeedDataset } from "./types";
 
 const DOMAIN = "asteracademy.edu";
-const WELCOME = { password: "Welcome@123" };
+const welcome = (loginId: string) => ({ loginId, password: "Welcome@123" });
 
 const SECTIONS = ["8-A", "8-B", "9-A", "9-B", "10-A", "10-B", "10-C"];
 
@@ -28,8 +30,8 @@ type Student = SeedDataset["students"][number];
 
 function generatedStudents(): Student[] {
   const named: Student[] = [
-    { key: "aarav", firstName: "Aarav", lastName: "Sharma", gender: "male", dateOfBirth: "2011-04-14", section: "10-A", rollNo: 1, email: `student@${DOMAIN}`, login: { password: "Student@123" } },
-    { key: "amaira", firstName: "Amaira", lastName: "Desai", gender: "female", dateOfBirth: "2011-08-02", section: "10-B", rollNo: 1, email: `amaira.desai@students.${DOMAIN}`, login: WELCOME },
+    { key: "aarav", firstName: "Aarav", lastName: "Sharma", gender: "male", dateOfBirth: "2011-04-14", section: "10-A", rollNo: 1, email: `student@${DOMAIN}`, login: { loginId: "STU-2026-00001", password: "Student@123" } },
+    { key: "amaira", firstName: "Amaira", lastName: "Desai", gender: "female", dateOfBirth: "2011-08-02", section: "10-B", rollNo: 1, email: `amaira.desai@students.${DOMAIN}`, login: welcome("STU-2026-00002") },
     { key: "ananya", firstName: "Ananya", lastName: "Sharma", gender: "female", dateOfBirth: "2013-11-21", section: "8-B", rollNo: 1, email: `ananya.sharma@students.${DOMAIN}` },
   ];
   const out = [...named];
@@ -75,18 +77,18 @@ export const asterAcademy: SeedDataset = {
     { name: "Mathematics", code: "MATH" }, { name: "Science", code: "SCI" }, { name: "English", code: "ENG" },
     { name: "Social Science", code: "SST" }, { name: "Hindi", code: "HIN" }, { name: "Computer Science", code: "CS" },
   ],
-  admin: { displayName: "Aanya Jain", email: `admin@${DOMAIN}`, login: { password: "Admin@123" } },
+  admin: { displayName: "Aanya Jain", email: `admin@${DOMAIN}`, login: { loginId: "ADMIN-001", password: "Admin@123" } },
   teachers: [
-    { key: "verma", title: "Mr.", firstName: "Rahul", lastName: "Verma", gender: "male", email: `teacher@${DOMAIN}`, designation: "Senior Teacher (PGT)", qualification: "M.Sc. Mathematics, B.Ed.", subjects: ["MATH", "SCI"], joiningDate: "2016-06-01", login: { password: "Teacher@123" } },
-    { key: "iyer", title: "Ms.", firstName: "Meera", lastName: "Iyer", gender: "female", email: `meera.iyer@${DOMAIN}`, designation: "Teacher (TGT)", qualification: "M.Sc. Chemistry, B.Ed.", subjects: ["SCI"], joiningDate: "2019-06-01", login: WELCOME },
-    { key: "rao", title: "Mrs.", firstName: "Sunita", lastName: "Rao", gender: "female", email: `sunita.rao@${DOMAIN}`, designation: "Head of English", qualification: "M.A. English Literature, B.Ed.", subjects: ["ENG"], joiningDate: "2012-06-01", login: WELCOME },
-    { key: "khan", title: "Ms.", firstName: "Farah", lastName: "Khan", gender: "female", email: `farah.khan@${DOMAIN}`, designation: "Head of Mathematics", qualification: "M.Sc. Mathematics, M.Ed.", subjects: ["MATH"], joiningDate: "2011-06-01", login: WELCOME },
-    { key: "nair", title: "Dr.", firstName: "Kavita", lastName: "Nair", gender: "female", email: `kavita.nair@${DOMAIN}`, designation: "Head of Humanities", qualification: "Ph.D. History", subjects: ["SST"], joiningDate: "2014-06-01", login: WELCOME },
-    { key: "mishra", title: "Mr.", firstName: "Deepak", lastName: "Mishra", gender: "male", email: `deepak.mishra@${DOMAIN}`, designation: "Teacher (TGT)", qualification: "M.A. Hindi, B.Ed.", subjects: ["HIN"], joiningDate: "2018-06-01", login: WELCOME },
-    { key: "kapoor", title: "Ms.", firstName: "Neha", lastName: "Kapoor", gender: "female", email: `neha.kapoor@${DOMAIN}`, designation: "Teacher (TGT)", qualification: "M.A. English, B.Ed.", subjects: ["ENG"], joiningDate: "2020-06-01", login: WELCOME },
-    { key: "singh", title: "Mr.", firstName: "Vikram", lastName: "Singh", gender: "male", email: `vikram.singh@${DOMAIN}`, designation: "Teacher (PGT)", qualification: "M.Sc. Physics, B.Ed.", subjects: ["SCI"], joiningDate: "2017-06-01", login: WELCOME },
-    { key: "joshi", title: "Mr.", firstName: "Sameer", lastName: "Joshi", gender: "male", email: `sameer.joshi@${DOMAIN}`, designation: "Teacher (TGT)", qualification: "MCA", subjects: ["CS"], joiningDate: "2021-06-01", login: WELCOME },
-    { key: "desai", title: "Mr.", firstName: "Rohan", lastName: "Desai", gender: "male", email: `rohan.desai@${DOMAIN}`, designation: "Teacher (TGT)", qualification: "M.A. Geography, B.Ed.", subjects: ["SST"], joiningDate: "2022-06-01", login: WELCOME },
+    { key: "verma", title: "Mr.", firstName: "Rahul", lastName: "Verma", gender: "male", email: `teacher@${DOMAIN}`, designation: "Senior Teacher (PGT)", qualification: "M.Sc. Mathematics, B.Ed.", subjects: ["MATH", "SCI"], joiningDate: "2016-06-01", login: { loginId: "TCH-00001", password: "Teacher@123" } },
+    { key: "iyer", title: "Ms.", firstName: "Meera", lastName: "Iyer", gender: "female", email: `meera.iyer@${DOMAIN}`, designation: "Teacher (TGT)", qualification: "M.Sc. Chemistry, B.Ed.", subjects: ["SCI"], joiningDate: "2019-06-01", login: welcome("TCH-00002") },
+    { key: "rao", title: "Mrs.", firstName: "Sunita", lastName: "Rao", gender: "female", email: `sunita.rao@${DOMAIN}`, designation: "Head of English", qualification: "M.A. English Literature, B.Ed.", subjects: ["ENG"], joiningDate: "2012-06-01", login: welcome("TCH-00003") },
+    { key: "khan", title: "Ms.", firstName: "Farah", lastName: "Khan", gender: "female", email: `farah.khan@${DOMAIN}`, designation: "Head of Mathematics", qualification: "M.Sc. Mathematics, M.Ed.", subjects: ["MATH"], joiningDate: "2011-06-01", login: welcome("TCH-00004") },
+    { key: "nair", title: "Dr.", firstName: "Kavita", lastName: "Nair", gender: "female", email: `kavita.nair@${DOMAIN}`, designation: "Head of Humanities", qualification: "Ph.D. History", subjects: ["SST"], joiningDate: "2014-06-01", login: welcome("TCH-00005") },
+    { key: "mishra", title: "Mr.", firstName: "Deepak", lastName: "Mishra", gender: "male", email: `deepak.mishra@${DOMAIN}`, designation: "Teacher (TGT)", qualification: "M.A. Hindi, B.Ed.", subjects: ["HIN"], joiningDate: "2018-06-01", login: welcome("TCH-00006") },
+    { key: "kapoor", title: "Ms.", firstName: "Neha", lastName: "Kapoor", gender: "female", email: `neha.kapoor@${DOMAIN}`, designation: "Teacher (TGT)", qualification: "M.A. English, B.Ed.", subjects: ["ENG"], joiningDate: "2020-06-01", login: welcome("TCH-00007") },
+    { key: "singh", title: "Mr.", firstName: "Vikram", lastName: "Singh", gender: "male", email: `vikram.singh@${DOMAIN}`, designation: "Teacher (PGT)", qualification: "M.Sc. Physics, B.Ed.", subjects: ["SCI"], joiningDate: "2017-06-01", login: welcome("TCH-00008") },
+    { key: "joshi", title: "Mr.", firstName: "Sameer", lastName: "Joshi", gender: "male", email: `sameer.joshi@${DOMAIN}`, designation: "Teacher (TGT)", qualification: "MCA", subjects: ["CS"], joiningDate: "2021-06-01", login: welcome("TCH-00009") },
+    { key: "desai", title: "Mr.", firstName: "Rohan", lastName: "Desai", gender: "male", email: `rohan.desai@${DOMAIN}`, designation: "Teacher (TGT)", qualification: "M.A. Geography, B.Ed.", subjects: ["SST"], joiningDate: "2022-06-01", login: welcome("TCH-00010") },
   ],
   classTeachers: { "10-A": "verma", "10-B": "iyer", "10-C": "rao", "9-A": "khan", "9-B": "nair", "8-A": "mishra", "8-B": "kapoor" },
   assignments: {
@@ -103,7 +105,7 @@ export const asterAcademy: SeedDataset = {
     {
       key: "priya", name: "Priya Sharma", phone: "+91 98450 22011", email: `guardian@${DOMAIN}`, occupation: "Architect",
       links: [{ student: "aarav", relationship: "Mother", isPrimary: true }, { student: "ananya", relationship: "Mother", isPrimary: true }],
-      login: { password: "Guardian@123" },
+      login: { loginId: "GRD-00001", password: "Guardian@123" },
     },
     { key: "nitin", name: "Nitin Desai", phone: "+91 98450 33102", email: `nitin.desai@example.com`, links: [{ student: "amaira", relationship: "Father", isPrimary: true }] },
   ],

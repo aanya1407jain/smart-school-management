@@ -115,9 +115,9 @@ export function TeacherForm({ teacherId }: { teacherId?: string }) {
           <div className="space-y-3 text-sm text-ink-soft">
             <p>Their dashboard stays empty until you assign classes.</p>
             <div className="rounded-2xl border border-line bg-alabaster p-4">
-              <p className="flex items-center gap-2 text-[12px] font-semibold uppercase tracking-wide text-ink-muted"><KeyRound className="h-3.5 w-3.5" /> Portal login email</p>
+              <p className="flex items-center gap-2 text-[12px] font-semibold uppercase tracking-wide text-ink-muted"><KeyRound className="h-3.5 w-3.5" /> Contact email</p>
               <p className="mt-2 font-mono text-[13px] text-ink">{created.email}</p>
-              <p className="mt-1 text-[12.5px] text-ink-muted">Sign-in access is issued by school invitation — no password is generated here.</p>
+              <p className="mt-1 text-[12.5px] text-ink-muted">Sign-in accounts (Login ID + temporary password) are created by an administrator in Accounts &amp; Import — no password is generated here.</p>
             </div>
           </div>
         )}

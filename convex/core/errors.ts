@@ -16,7 +16,9 @@ export type AppErrorCode =
   | "NOT_FOUND" // missing OR belongs to another school (indistinguishable on purpose)
   | "INVALID_ARGUMENT" // input failed validation
   | "INVALID_RELATIONSHIP" // ids exist but do not belong together (e.g. section of another class)
-  | "CONFLICT"; // uniqueness / state conflict
+  | "CONFLICT" // uniqueness / state conflict
+  | "PASSWORD_CHANGE_REQUIRED" // signed in with a temporary password: only the password change is allowed
+  | "TEMPORARY_PASSWORD_EXPIRED"; // the temporary password is too old; an administrator must issue a new one
 
 export type AppErrorData = {
   code: AppErrorCode;
@@ -39,3 +41,7 @@ export const notFound = (what = "Record") => new AppError("NOT_FOUND", `${what} 
 export const invalid = (message: string, fields?: Record<string, string>) => new AppError("INVALID_ARGUMENT", message, fields);
 export const invalidRelationship = (message: string) => new AppError("INVALID_RELATIONSHIP", message);
 export const conflict = (message: string) => new AppError("CONFLICT", message);
+export const passwordChangeRequired = () =>
+  new AppError("PASSWORD_CHANGE_REQUIRED", "Choose a new password to continue. You signed in with a temporary password.");
+export const temporaryPasswordExpired = () =>
+  new AppError("TEMPORARY_PASSWORD_EXPIRED", "This temporary password has expired. Ask your school office for a new one.");

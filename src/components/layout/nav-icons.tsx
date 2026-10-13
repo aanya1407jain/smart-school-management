@@ -1,6 +1,6 @@
 import {
   BarChart3, Bell, BookOpenCheck, CalendarClock, CalendarCheck2, ClipboardList, GraduationCap, LayoutDashboard, Megaphone,
-  School, Settings, UserRound, Users, Wallet, Award, Presentation, type LucideIcon,
+  KeyRound, School, Settings, UserRound, Users, Wallet, Award, Presentation, type LucideIcon,
 } from "lucide-react";
 import type { NavIcon } from "@/lib/permissions";
 
@@ -21,4 +21,5 @@ export const NAV_ICONS: Record<NavIcon, LucideIcon> = {
   classes: Presentation,
   results: Award,
   profile: UserRound,
+  accounts: KeyRound,
 };

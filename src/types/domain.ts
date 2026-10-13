@@ -386,6 +386,11 @@ export type Role = "admin" | "teacher" | "student";
  */
 export interface UserAccount {
   id: ID;
+  /**
+   * Login ID of the matching Convex account (demo personas only). The session
+   * bridge binds the signed-in identity to this record by Login ID.
+   */
+  loginId?: string;
   email: string;
   role: Role;
   displayName: string;

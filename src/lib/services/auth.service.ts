@@ -18,19 +18,30 @@ export type CurrentUser = UserAccount;
  * Structural on purpose so it can be built from the Convex response or in tests.
  */
 export interface ServerIdentity {
-  email: string;
+  /** Canonical Login ID — the key used to find the demo-data counterpart. */
+  loginId: string | null;
+  email: string | null;
   role: Role;
   displayName: string;
   permissionSets: readonly string[];
   /** Students the server says this member may view (self, or linked children). */
   students: readonly { studentId: string; name: string }[];
+  /** The school the server resolved for this membership. */
+  school: { slug: string };
 }
+
+/**
+ * The ONLY tenant whose accounts may be bound to the in-browser demo data
+ * (src/lib/mock-data). Accounts of any other school never see demo personas,
+ * even if a Login ID happens to look like one.
+ */
+export const DEMO_SCHOOL_SLUG = "aster-academy";
 
 export type BindResult =
   | { ok: true; user: CurrentUser; studentMap: Record<string, string> }
   | { ok: false };
 
-const norm = (s: string) => s.trim().toLowerCase();
+const norm = (s: string) => s.trim().toUpperCase();
 
 export const mockAuthService = {
   /**
@@ -41,8 +52,12 @@ export const mockAuthService = {
    * sides, so the browser can never widen access.
    */
   bindIdentity(identity: ServerIdentity): BindResult {
+    if (identity.school.slug !== DEMO_SCHOOL_SLUG) {
+      clearSession();
+      return { ok: false };
+    }
     const db = readDb();
-    const record = db.users.find((u) => norm(u.email) === norm(identity.email));
+    const record = identity.loginId ? db.users.find((u) => u.loginId && norm(u.loginId) === norm(identity.loginId!)) : undefined;
     if (!record || record.role !== identity.role) {
       clearSession();
       return { ok: false };
@@ -65,7 +80,7 @@ export const mockAuthService = {
       userId: record.id,
       role: identity.role,
       permissionSets: [...identity.permissionSets],
-      email: identity.email,
+      email: identity.email ?? record.email,
       displayName: identity.displayName,
       studentIds,
       activeStudentId,

@@ -3,14 +3,21 @@
 /**
  * The ONE session state of the app.
  *
- *  - Authentication: Convex Auth (email + password). Tokens live in httpOnly
+ *  - Authentication: Convex Auth (Login ID + password). Tokens live in httpOnly
  *    cookies managed by the Next.js proxy — never in Web Storage.
  *  - Identity: `users.session` derives the user, school, membership, role and
- *    linked teacher/student/guardian on the SERVER. The login form's role
- *    selector is only checked against it; it never grants anything.
- *  - Domain data: the business modules still run on the mock store, so the
- *    server identity is bound (in memory) to its demo-data counterpart — see
- *    src/lib/services/session-store.ts.
+ *    linked teacher/student/guardian on the SERVER. The browser never
+ *    supplies a role; the portal opened after sign-in follows the server role.
+ *  - Domain data, two sources (`dataSource`):
+ *      "demo" → the demo school's persona accounts are bound (in memory) to
+ *               their counterpart in the in-browser demo data — see
+ *               src/lib/services/session-store.ts. Only the demo school
+ *               (DEMO_SCHOOL_SLUG) can ever bind.
+ *      "live" → every other student-portal account (students and guardians
+ *               created by the school). The portal reads ONLY Convex
+ *               (convex/studentPortal.ts, attendance, notifications) for the
+ *               students the server links to the membership; the demo data
+ *               stays unbound, so a real account can never see a demo persona.
  *
  * Components read this via `useSession()` — never from storage directly.
  */
@@ -20,30 +27,37 @@ import { useConvex, useConvexAuth, useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import type { Viewer } from "@convex/users";
-import type { Role } from "@/types/domain";
 import { services, type CurrentUser } from "@/lib/services";
 import type { BindResult } from "@/lib/services/auth.service";
 import { purgeLegacySessionStorage } from "@/lib/services/session-store";
 import { subscribeDb } from "@/lib/store/db";
-import { permissionsFor, ROLE_LABELS, type Permission } from "@/lib/permissions";
+import { permissionsFor, type Permission } from "@/lib/permissions";
 import { isConvexConfigured } from "@/lib/convex/config";
 import { getAppError } from "@/lib/convex/errors";
 import { useMembership } from "@/lib/convex/membership";
+import { liveStudentPortalUser } from "./live-user";
+
+export { liveStudentPortalUser };
 
 /**
  *  loading          → resolving the session (or verifying a sign-in)
  *  unauthenticated  → signed out
- *  unavailable      → signed in, but there is nothing this account can open
+ *  unavailable      → signed in, but there is nothing this account can open:
+ *                     no active school membership (viewer = null), or no
+ *                     demo-data record yet (viewer set: the account is valid
+ *                     and can still use /account, e.g. to change its password)
  *                     (no active school membership, or no demo-data record yet)
  *  authenticated    → signed in with a resolved role
  */
 type Status = "loading" | "authenticated" | "unauthenticated" | "unavailable";
 
+/** Where the portal's domain data comes from for this session (see the header). */
+export type DataSource = "demo" | "live";
+
 export interface LoginInput {
-  email: string;
+  /** Login ID issued by the school (case/whitespace-insensitive). */
+  loginId: string;
   password: string;
-  /** What the person SAYS they are. Only compared with the server role; never trusted. */
-  role: Role;
 }
 
 interface SessionContextValue {
@@ -53,9 +67,14 @@ interface SessionContextValue {
   viewer: Viewer | null;
   /** Why the session is "unavailable". */
   notice: string | null;
+  /** The account must replace an administrator-issued temporary password. */
+  mustChangePassword: boolean;
   activeStudentId: string | null;
+  /** "demo" (persona bound to demo data) or "live" (Convex only); null unless authenticated. */
+  dataSource: DataSource | null;
   can: (permission: Permission) => boolean;
-  login: (input: LoginInput) => Promise<CurrentUser>;
+  /** Resolves to the portal user, or null when the account is valid but has no portal data yet (go to /account). */
+  login: (input: LoginInput) => Promise<CurrentUser | null>;
   logout: () => Promise<void>;
   /** Guardians: switch the linked student being viewed (verified by the server). */
   setActiveStudent: (id: string) => Promise<void>;
@@ -65,27 +84,26 @@ const SessionContext = createContext<SessionContextValue | null>(null);
 
 const UNAVAILABLE_PREVIEW =
   "You're signed in, but your school records aren't available in this preview yet. Please contact the school office.";
-const SIGN_IN_FAILED = "The email or password you entered is incorrect.";
+const SIGN_IN_FAILED = "The Login ID or password you entered is incorrect.";
 
 function signInErrorMessage(error: unknown): string {
   const app = getAppError(error);
-  if (app?.code === "NO_SCHOOL_ACCESS") return app.message;
+  if (app?.code === "NO_SCHOOL_ACCESS" || app?.code === "TEMPORARY_PASSWORD_EXPIRED") return app.message;
   const raw = error instanceof Error ? error.message : String(error);
   if (/TooManyFailedAttempts/.test(raw)) return "Too many incorrect attempts. Please wait a while and try again.";
   if (/NO_SCHOOL_ACCESS/.test(raw)) return "Your account does not have active access to any school.";
+  if (/TEMPORARY_PASSWORD_EXPIRED/.test(raw)) return "This temporary password has expired. Ask your school office for a new one.";
   if (/InvalidSecret|InvalidAccountId|Invalid credentials/i.test(raw)) return SIGN_IN_FAILED;
   if (/Failed to fetch|NetworkError|network/i.test(raw)) return "We couldn't reach the server. Check your connection and try again.";
   return SIGN_IN_FAILED;
 }
 
-const roleMismatchMessage = (role: Role) =>
-  `This account does not have ${ROLE_LABELS[role]} access. Select the role that matches your account.`;
 
 // ------------------------------------------------------------------ no backend configured
 function UnconfiguredSessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => { purgeLegacySessionStorage(); services.auth.clearIdentity(); }, []);
   const value = useMemo<SessionContextValue>(() => ({
-    status: "unauthenticated", user: null, viewer: null, notice: null, activeStudentId: null,
+    status: "unauthenticated", user: null, viewer: null, notice: null, mustChangePassword: false, activeStudentId: null, dataSource: null,
     can: () => false,
     login: async () => { throw new Error("Sign-in is not available: the school backend is not configured for this deployment."); },
     logout: async () => {},
@@ -95,7 +113,7 @@ function UnconfiguredSessionProvider({ children }: { children: ReactNode }) {
 }
 
 // ------------------------------------------------------------------ Convex Auth
-type PendingLogin = { role: Role; resolve: (u: CurrentUser) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> };
+type PendingLogin = { resolve: (u: CurrentUser | null) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> };
 
 function ConvexSessionProvider({ children }: { children: ReactNode }) {
   const { signIn, signOut } = useAuthActions();
@@ -107,6 +125,8 @@ function ConvexSessionProvider({ children }: { children: ReactNode }) {
   const [bound, setBound] = useState<{ viewer: Viewer; result: BindResult } | null>(null);
   const [tick, setTick] = useState(0);
   const [verifying, setVerifying] = useState(false);
+  /** Live portal: the linked student being viewed (guardians with several children). */
+  const [liveActiveStudentId, setLiveActiveStudentId] = useState<string | null>(null);
   const pending = useRef<PendingLogin | null>(null);
 
   useEffect(() => { purgeLegacySessionStorage(); }, []);
@@ -130,19 +150,31 @@ function ConvexSessionProvider({ children }: { children: ReactNode }) {
     return () => { a(); b(); };
   }, []);
 
+  const liveUser = useMemo(() => (viewer && viewer.role === "student" ? liveStudentPortalUser(viewer) : null), [viewer]);
+
   const base = useMemo(() => {
     void tick;
-    if (authLoading) return { status: "loading" as Status, notice: null, user: null, activeStudentId: null, viewer: null };
-    if (!isAuthenticated) return { status: "unauthenticated" as Status, notice: null, user: null, activeStudentId: null, viewer: null };
-    if (session === undefined) return { status: "loading" as Status, notice: null, user: null, activeStudentId: null, viewer: null };
-    if (session.status === "signedOut") return { status: "unauthenticated" as Status, notice: null, user: null, activeStudentId: null, viewer: null };
-    if (session.status === "noSchool") return { status: "unavailable" as Status, notice: session.message, user: null, activeStudentId: null, viewer: null };
-    if (!bound || bound.viewer !== session.viewer) return { status: "loading" as Status, notice: null, user: null, activeStudentId: null, viewer: null };
-    if (!bound.result.ok) return { status: "unavailable" as Status, notice: UNAVAILABLE_PREVIEW, user: null, activeStudentId: null, viewer: null };
+    const none = { notice: null, user: null, activeStudentId: null, viewer: null, dataSource: null };
+    if (authLoading) return { status: "loading" as Status, ...none };
+    if (!isAuthenticated) return { status: "unauthenticated" as Status, ...none };
+    if (session === undefined) return { status: "loading" as Status, ...none };
+    if (session.status === "signedOut") return { status: "unauthenticated" as Status, ...none };
+    if (session.status === "noSchool") return { status: "unavailable" as Status, ...none, notice: session.message };
+    if (!bound || bound.viewer !== session.viewer) return { status: "loading" as Status, ...none };
+    if (!bound.result.ok) {
+      // Student-portal accounts created by the school: the live (Convex) portal.
+      if (liveUser && session.viewer.role === "student") {
+        const ids = liveUser.studentIds ?? [];
+        const active = liveActiveStudentId && ids.includes(liveActiveStudentId) ? liveActiveStudentId : ids[0] ?? null;
+        return { status: "authenticated" as Status, notice: null, user: liveUser, activeStudentId: active, viewer: session.viewer, dataSource: "live" as DataSource };
+      }
+      // Staff accounts outside the demo data: those workspaces still run on demo data only.
+      return { status: "unavailable" as Status, ...none, notice: UNAVAILABLE_PREVIEW, viewer: session.viewer };
+    }
     const snap = services.auth.getSessionSnapshot();
-    if (!snap.user) return { status: "loading" as Status, notice: null, user: null, activeStudentId: null, viewer: null };
-    return { status: "authenticated" as Status, notice: null, user: snap.user, activeStudentId: snap.activeStudentId, viewer: session.viewer };
-  }, [authLoading, isAuthenticated, session, bound, tick]);
+    if (!snap.user) return { status: "loading" as Status, ...none };
+    return { status: "authenticated" as Status, notice: null, user: snap.user, activeStudentId: snap.activeStudentId, viewer: session.viewer, dataSource: "demo" as DataSource };
+  }, [authLoading, isAuthenticated, session, bound, tick, liveUser, liveActiveStudentId]);
 
   const finishPending = useCallback(() => {
     const p = pending.current;
@@ -152,38 +184,37 @@ function ConvexSessionProvider({ children }: { children: ReactNode }) {
     return p;
   }, []);
 
-  // A sign-in is only complete once the SERVER role is known and matches what was selected.
+  // A sign-in is only complete once the SERVER-derived identity is known.
   useEffect(() => {
     const p = pending.current;
     if (!p) return;
     if (base.status === "authenticated" && base.user) {
-      if (base.user.role === p.role) {
-        finishPending()?.resolve(base.user);
-      } else {
-        void signOut().finally(() => finishPending()?.reject(new Error(roleMismatchMessage(p.role))));
-      }
+      finishPending()?.resolve(base.user);
+    } else if (base.status === "unavailable" && base.viewer) {
+      // Valid account without portal data yet: signed in, sent to /account.
+      finishPending()?.resolve(null);
     } else if (base.status === "unavailable") {
       const notice = base.notice ?? UNAVAILABLE_PREVIEW;
       void signOut().finally(() => finishPending()?.reject(new Error(notice)));
     }
   }, [base, signOut, finishPending]);
 
-  const login = useCallback(async ({ email, password, role }: LoginInput): Promise<CurrentUser> => {
+  const login = useCallback(async ({ loginId, password }: LoginInput): Promise<CurrentUser | null> => {
     if (pending.current) throw new Error("A sign-in is already in progress.");
     setVerifying(true);
     try {
-      const result = await signIn("password", { email: email.trim().toLowerCase(), password, flow: "signIn" });
+      const result = await signIn("password", { loginId: loginId.trim(), password, flow: "signIn" });
       if (!result.signingIn) throw new Error(SIGN_IN_FAILED);
     } catch (e) {
       setVerifying(false);
       throw new Error(signInErrorMessage(e));
     }
-    return await new Promise<CurrentUser>((resolve, reject) => {
+    return await new Promise<CurrentUser | null>((resolve, reject) => {
       const timer = setTimeout(() => {
         if (pending.current?.timer !== timer) return;
         void signOut().finally(() => finishPending()?.reject(new Error("Signing in is taking longer than expected. Please try again.")));
       }, 20_000);
-      pending.current = { role, resolve, reject, timer };
+      pending.current = { resolve, reject, timer };
     });
   }, [signIn, signOut, finishPending]);
 
@@ -191,9 +222,20 @@ function ConvexSessionProvider({ children }: { children: ReactNode }) {
     await signOut();
     services.auth.clearIdentity();
     setBound(null);
+    setLiveActiveStudentId(null);
   }, [signOut]);
 
   const setActiveStudent = useCallback(async (mockStudentId: string) => {
+    if (base.dataSource === "live") {
+      // Live portal: ids ARE Convex student ids; the server must confirm the link.
+      if (!base.user?.studentIds?.includes(mockStudentId)) throw new Error("This student is not linked to your account.");
+      await convex.query(api.users.studentContext, {
+        studentId: mockStudentId as Id<"students">,
+        ...(activeMembershipId ? { membershipId: activeMembershipId } : {}),
+      });
+      setLiveActiveStudentId(mockStudentId);
+      return;
+    }
     if (!bound?.result.ok) throw new Error("Your session has ended. Please sign in again.");
     const serverId = Object.entries(bound.result.studentMap).find(([, m]) => m === mockStudentId)?.[0];
     if (!serverId) throw new Error("This student is not linked to your account.");
@@ -203,7 +245,7 @@ function ConvexSessionProvider({ children }: { children: ReactNode }) {
       ...(activeMembershipId ? { membershipId: activeMembershipId } : {}),
     });
     services.auth.setActiveStudent(mockStudentId);
-  }, [bound, convex, activeMembershipId]);
+  }, [base.dataSource, base.user, bound, convex, activeMembershipId]);
 
   const value = useMemo<SessionContextValue>(() => {
     const status: Status = verifying ? "loading" : base.status;
@@ -214,7 +256,9 @@ function ConvexSessionProvider({ children }: { children: ReactNode }) {
       user,
       viewer: verifying ? null : base.viewer,
       notice: verifying ? null : base.notice,
+      mustChangePassword: !verifying && base.viewer?.mustChangePassword === true,
       activeStudentId: verifying ? null : base.activeStudentId,
+      dataSource: verifying ? null : base.dataSource,
       can: (p) => perms.has(p),
       login,
       logout,

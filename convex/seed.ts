@@ -4,22 +4,26 @@
  *   npx convex env set ALLOW_DEMO_SEED true
  *   npx convex run seed:demo                       # seeds the "aster-academy" dataset
  *   npx convex run seed:demo '{"dataset":"aster-academy"}'
+ *   npx convex run seed:upgradeDemoLoginIds         # older demo deployment → Login IDs (see below)
  *
  * The seeder never branches on a school's identity; every school-specific value
  * comes from a dataset in convex/seedData/. It refuses to run unless
  * ALLOW_DEMO_SEED=true, and refuses to seed a slug that already exists.
  *
- * Demo logins are created through the SAME invitation path real users take:
- * an invited membership + one-time code → Convex Auth `createAccount` →
- * `createOrUpdateUser` callback activates the membership.
+ * Demo logins are created through the SAME account path real users take
+ * (convex/model/accounts.ts): a reserved membership with a Login ID →
+ * Convex Auth `createAccount` → `createOrUpdateUser` activates it. Demo Login
+ * IDs and passwords live in the dataset; real schools never use them — they
+ * are onboarded with convex/setup.ts and the admin's account/import screens.
  */
 import { v } from "convex/values";
-import { createAccount } from "@convex-dev/auth/server";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalAction, internalMutation, type MutationCtx } from "./_generated/server";
 import { conflict, forbidden, notFound } from "./core/errors";
-import { generateInviteCode, hashInviteCode, INVITE_TTL_MS } from "./model/memberships";
+import { PASSWORD_PROVIDER, provisionAccount, reserveAccount, syncLoginIdCounter } from "./model/accounts";
+import { renumberSections } from "./model/rollNumbers";
+import { canonicalLoginId } from "./model/loginIds";
 import { addDays, isSchoolDay, todayIn } from "./model/calendar";
 import { gradeFor } from "./model/grading";
 import { writeAudit } from "./model/audit";
@@ -36,13 +40,13 @@ function datasetOrThrow(key: string): SeedDataset {
   return ds;
 }
 
-type Login = { email: string; password: string };
+type Login = { loginId: string; password: string };
 
 function loginsOf(ds: SeedDataset): Login[] {
-  const out: Login[] = [{ email: ds.admin.email, password: ds.admin.login.password }];
-  ds.teachers.forEach((t) => t.login && out.push({ email: t.email, password: t.login.password }));
-  ds.students.forEach((s) => s.login && out.push({ email: s.email, password: s.login.password }));
-  ds.guardians.forEach((g) => g.login && out.push({ email: g.email, password: g.login.password }));
+  const out: Login[] = [ds.admin.login];
+  ds.teachers.forEach((t) => t.login && out.push(t.login));
+  ds.students.forEach((s) => s.login && out.push(s.login));
+  ds.guardians.forEach((g) => g.login && out.push(g.login));
   return out;
 }
 
@@ -55,35 +59,103 @@ export const demo = internalAction({
     }
     const ds = datasetOrThrow(dataset);
     const logins = loginsOf(ds);
-    const invites: { email: string; code: string; codeHash: string }[] = [];
-    for (const l of logins) {
-      const code = generateInviteCode();
-      invites.push({ email: l.email, code, codeHash: await hashInviteCode(code) });
-    }
 
-    const { schoolId }: { schoolId: Id<"schools"> } = await ctx.runMutation(internal.seed.createStructure, {
-      dataset, invites: invites.map(({ email, codeHash }) => ({ email, codeHash })),
-    });
+    // Creates the school structure and RESERVES one membership per demo login.
+    const { schoolId }: { schoolId: Id<"schools"> } = await ctx.runMutation(internal.seed.createStructure, { dataset });
 
-    for (const l of logins) {
-      const code = invites.find((i) => i.email === l.email)!.code;
-      await createAccount(ctx, {
-        provider: "password",
-        account: { id: l.email, secret: l.password },
-        // `inviteCode` is consumed by the createOrUpdateUser callback in convex/auth.ts.
-        profile: { email: l.email, inviteCode: code } as unknown as { email: string },
-      });
-    }
+    // Demo passwords are known on purpose, so no forced change on first sign-in.
+    for (const l of logins) await provisionAccount(ctx, { loginId: l.loginId, password: l.password, mustChangePassword: false });
 
     const summary: { attendanceRegisters: number; results: number } = await ctx.runMutation(internal.seed.createActivity, { dataset, schoolId });
-    return { schoolId, logins: logins.map((l) => l.email), ...summary };
+    return { schoolId, logins: logins.map((l) => l.loginId), ...summary };
+  },
+});
+
+// ================================================================ upgrade an older demo deployment
+/**
+ * One-off, NON-destructive upgrade of a demo deployment that was seeded
+ * before the Login ID migration (demo accounts keyed by email):
+ *
+ *   npx convex run seed:upgradeDemoLoginIds                   # dry run: report only
+ *   npx convex run seed:upgradeDemoLoginIds '{"apply":true}'  # apply
+ *
+ * For each demo login of the dataset it re-keys the existing Convex Auth
+ * password account from the demo email to the dataset's Login ID and records
+ * that Login ID on the user and its memberships. Password hashes, users,
+ * sessions and school data are kept as they are (nothing is deleted or
+ * re-created; a demo password someone changed stays changed). It also clears
+ * the deprecated invitation-code fields of that school's memberships.
+ * Demo deployments only (ALLOW_DEMO_SEED=true); idempotent. Returns counts and
+ * Login IDs only — never emails, passwords or hashes.
+ */
+export const upgradeDemoLoginIds = internalMutation({
+  args: { dataset: v.optional(v.string()), apply: v.optional(v.boolean()) },
+  handler: async (ctx, { dataset = asterAcademy.school.slug, apply = false }) => {
+    if (process.env.ALLOW_DEMO_SEED !== "true") {
+      throw forbidden("Demo upgrades are disabled. Set ALLOW_DEMO_SEED=true on a development deployment.");
+    }
+    const ds = datasetOrThrow(dataset);
+    const school = await ctx.db.query("schools").withIndex("by_slug", (q) => q.eq("slug", ds.school.slug)).unique();
+    if (!school) throw notFound(`Demo school "${ds.school.slug}"`);
+
+    const pairs: { email: string; loginId: string }[] = [{ email: ds.admin.email, loginId: ds.admin.login.loginId }];
+    ds.teachers.forEach((t) => t.login && pairs.push({ email: t.email, loginId: t.login.loginId }));
+    ds.students.forEach((x) => x.login && pairs.push({ email: x.email, loginId: x.login.loginId }));
+    ds.guardians.forEach((g) => g.login && pairs.push({ email: g.email, loginId: g.login.loginId }));
+
+    const accountFor = (id: string) => ctx.db.query("authAccounts")
+      .withIndex("providerAndAccountId", (q) => q.eq("provider", PASSWORD_PROVIDER).eq("providerAccountId", id)).unique();
+    const report: { loginId: string; status: "upgraded" | "already_upgraded" | "no_legacy_account" | "conflict" }[] = [];
+
+    for (const pair of pairs) {
+      const loginId = canonicalLoginId(pair.loginId)!;
+      const email = pair.email.normalize("NFKC").trim().toLowerCase();
+      let account = await accountFor(loginId);
+      let status: (typeof report)[number]["status"] = "already_upgraded";
+      if (!account) {
+        account = await accountFor(email);
+        if (!account) { report.push({ loginId, status: "no_legacy_account" }); continue; }
+        const holder = await ctx.db.query("users").withIndex("by_login_id", (q) => q.eq("loginId", loginId)).first();
+        if (holder && holder._id !== account.userId) { report.push({ loginId, status: "conflict" }); continue; }
+        status = "upgraded";
+        if (apply) await ctx.db.patch(account._id, { providerAccountId: loginId });
+      }
+      const user = await ctx.db.get(account.userId);
+      if (apply && user && user.loginId !== loginId) await ctx.db.patch(user._id, { loginId });
+      const memberships = await ctx.db.query("schoolMemberships").withIndex("by_user", (q) => q.eq("userId", account.userId)).collect();
+      for (const m of memberships) {
+        if (m.schoolId !== school._id) continue;
+        if (apply && m.loginId !== loginId) await ctx.db.patch(m._id, { loginId });
+      }
+      if (apply) await syncLoginIdCounter(ctx, school._id, loginId);
+      report.push({ loginId, status });
+    }
+
+    // Deprecated invitation fields (schema keeps them optional only for this upgrade).
+    const schoolMemberships = await ctx.db.query("schoolMemberships").withIndex("by_school_role", (q) => q.eq("schoolId", school._id)).collect();
+    const legacy = schoolMemberships.filter((m) => m.inviteCodeHash !== undefined || m.inviteExpiresAt !== undefined || m.invitedByUserId !== undefined);
+    if (apply) for (const m of legacy) await ctx.db.patch(m._id, { inviteCodeHash: undefined, inviteExpiresAt: undefined, invitedByUserId: undefined });
+
+    // Password accounts that still have no valid Login ID (e.g. extra test users): they cannot sign in.
+    const passwordAccounts = (await ctx.db.query("authAccounts").collect()).filter((a) => a.provider === PASSWORD_PROVIDER);
+    // (A transaction reads its own writes, so after `apply` the re-keyed accounts already count as upgraded.)
+    const withoutLoginId = passwordAccounts.filter((a) => canonicalLoginId(a.providerAccountId) !== a.providerAccountId).length;
+    const upgraded = report.filter((r) => r.status === "upgraded").length;
+
+    return {
+      applied: apply,
+      school: ds.school.slug,
+      logins: report,
+      membershipsWithLegacyInviteFields: legacy.length,
+      passwordAccountsWithoutLoginId: apply ? withoutLoginId : withoutLoginId - upgraded,
+    };
   },
 });
 
 // ================================================================ step 1: structure
 export const createStructure = internalMutation({
-  args: { dataset: v.string(), invites: v.array(v.object({ email: v.string(), codeHash: v.string() })) },
-  handler: async (ctx, { dataset, invites }) => {
+  args: { dataset: v.string() },
+  handler: async (ctx, { dataset }) => {
     const ds = datasetOrThrow(dataset);
     const existing = await ctx.db.query("schools").withIndex("by_slug", (q) => q.eq("slug", ds.school.slug)).unique();
     if (existing) throw conflict(`A school with slug "${ds.school.slug}" already exists.`);
@@ -148,9 +220,11 @@ export const createStructure = internalMutation({
         firstName: s.firstName, lastName: s.lastName, gender: s.gender, dateOfBirth: s.dateOfBirth, admissionDate: ds.academicYear.startDate, status: "active", email: s.email,
       });
       await ctx.db.insert("enrollments", {
-        schoolId, studentId: studentIds[s.key], academicYearId: yearId, classId: section.classId, sectionId: section._id, rollNo: s.rollNo, status: "active", startDate: ds.academicYear.startDate,
+        schoolId, studentId: studentIds[s.key], academicYearId: yearId, classId: section.classId, sectionId: section._id, status: "active", startDate: ds.academicYear.startDate,
       });
     }
+    // Roll numbers are system-assigned (alphabetical per section), exactly as for real imports.
+    await renumberSections(ctx, Object.values(sectionIds));
 
     const guardianIds: Record<string, Id<"guardians">> = {};
     for (const g of ds.guardians) {
@@ -160,18 +234,12 @@ export const createStructure = internalMutation({
       }
     }
 
-    // Invited memberships for every login (activated when the account is created).
-    const hashFor = (email: string) => invites.find((i) => i.email === email)?.codeHash;
-    const expires = Date.now() + INVITE_TTL_MS;
-    const invite = async (m: Omit<Doc<"schoolMemberships">, "_id" | "_creationTime" | "schoolId" | "status" | "inviteCodeHash" | "inviteExpiresAt" | "permissionSets">) => {
-      const codeHash = hashFor(m.email);
-      if (!codeHash) return;
-      await ctx.db.insert("schoolMemberships", { schoolId, status: "invited", permissionSets: [], inviteCodeHash: codeHash, inviteExpiresAt: expires, ...m });
-    };
-    await invite({ email: ds.admin.email, displayName: ds.admin.displayName, role: "admin" });
-    for (const t of ds.teachers) if (t.login) await invite({ email: t.email, displayName: `${t.firstName} ${t.lastName}`, role: "teacher", teacherId: teacherIds[t.key] });
-    for (const s of ds.students) if (s.login) await invite({ email: s.email, displayName: `${s.firstName} ${s.lastName}`, role: "student", studentId: studentIds[s.key] });
-    for (const g of ds.guardians) if (g.login) await invite({ email: g.email, displayName: g.name, role: "student", guardianId: guardianIds[g.key] });
+    // Reserved memberships (with the dataset's demo Login IDs) for every demo login;
+    // `demo` then creates the Convex Auth accounts, which activates them.
+    await reserveAccount(ctx, { schoolId, role: "admin", kind: "admin", loginId: ds.admin.login.loginId, displayName: ds.admin.displayName, email: ds.admin.email });
+    for (const t of ds.teachers) if (t.login) await reserveAccount(ctx, { schoolId, role: "teacher", kind: "teacher", loginId: t.login.loginId, displayName: `${t.firstName} ${t.lastName}`, email: t.email, teacherId: teacherIds[t.key] });
+    for (const s of ds.students) if (s.login) await reserveAccount(ctx, { schoolId, role: "student", kind: "student", loginId: s.login.loginId, displayName: `${s.firstName} ${s.lastName}`, email: s.email, studentId: studentIds[s.key] });
+    for (const g of ds.guardians) if (g.login) await reserveAccount(ctx, { schoolId, role: "student", kind: "guardian", loginId: g.login.loginId, displayName: g.name, email: g.email, guardianId: guardianIds[g.key] });
 
     // Fee structures + per-student obligations (amounts in minor units).
     for (const fs of ds.feeStructures) {
