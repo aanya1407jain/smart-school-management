@@ -1,13 +1,14 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { CheckCircle2, KeyRound } from "lucide-react";
+import { useMutation } from "convex/react";
+import { api } from "../../../convex/_generated/api";
+import type { Id } from "../../../convex/_generated/dataModel";
 import { services, ServiceError } from "@/lib/services";
-import type { StudentInput } from "@/lib/services/students.service";
 import { useQuery } from "@/lib/hooks/use-query";
 import { useSchoolProfile } from "@/lib/hooks/use-school-profile";
 import { Button, Card, Checkbox, FormField, FormSection, Input, LoadingState, Modal, PageHeader, Select, ErrorState, useToast, LinkButton } from "@/components/ui";
@@ -55,7 +56,13 @@ export function StudentForm({ studentId }: { studentId?: string }) {
   const [serverError, setServerError] = useState<Error | null>(null);
   const [created, setCreated] = useState<{ id: string; email: string; password: string; feeAssigned: boolean } | null>(null);
 
-  const { register, handleSubmit, watch, reset, setValue, setError, formState: { errors, isSubmitting } } = useForm<Values>({ resolver: zodResolver(schema), defaultValues: EMPTY });
+  // Convex Mutation for Student Creation & Enrollment
+  const createStudentWithEnrollment = useMutation(api.academics.createStudentWithEnrollment);
+
+  const { register, handleSubmit, watch, reset, setValue, setError, formState: { errors, isSubmitting } } = useForm<Values>({
+    resolver: zodResolver(schema),
+    defaultValues: EMPTY,
+  });
 
   useEffect(() => {
     if (editable.data && opts.data) {
@@ -69,19 +76,38 @@ export function StudentForm({ studentId }: { studentId?: string }) {
 
   const onSubmit = async (v: Values) => {
     setServerError(null);
-    const input: StudentInput = { ...v, guardian: { ...v.guardian } };
     try {
       if (studentId) {
-        await services.students.update(studentId, input);
+        await services.students.update(studentId, { ...v, guardian: { ...v.guardian } });
         toast({ title: "Student updated", description: `${v.firstName} ${v.lastName}'s details were saved.` });
         router.push(`/admin/students/${studentId}`);
       } else {
-        const res = await services.students.create(input);
-        toast({ title: "Student added", description: `${v.firstName} ${v.lastName} is now enrolled.` });
+        // Direct Convex backend call
+        const res = await createStudentWithEnrollment({
+          firstName: v.firstName,
+          lastName: v.lastName,
+          gender: v.gender,
+          dateOfBirth: v.dateOfBirth,
+          admissionDate: v.admissionDate,
+          status: v.status,
+          email: v.email || undefined,
+          phone: v.phone || undefined,
+          address: v.address,
+          bloodGroup: v.bloodGroup,
+          sectionId: v.sectionId as Id<"sections">,
+          guardian: {
+            name: v.guardian.name,
+            relation: v.guardian.relation,
+            phone: v.guardian.phone,
+            email: v.guardian.email || undefined,
+            occupation: v.guardian.occupation || undefined,
+          },
+        });
+        toast({ title: "Student enrolled", description: `${v.firstName} ${v.lastName} is now enrolled via Convex.` });
         setCreated(res);
       }
-    } catch (e) {
-      setServerError(e as Error);
+    } catch (e: any) {
+      setServerError(e instanceof Error ? e : new Error(String(e)));
       if (e instanceof ServiceError && e.fieldErrors) {
         Object.entries(e.fieldErrors).forEach(([k, msg]) => setError(k as keyof Values, { message: msg }));
       }
