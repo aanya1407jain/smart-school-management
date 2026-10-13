@@ -676,7 +676,9 @@ export default defineSchema({
   /** Append-only trail of important actions. Written via convex/audit/log.ts. */
   auditLogs: defineTable({
     schoolId: v.id("schools"),
-    actorUserId: v.optional(v.id("users")), // absent for system jobs (seed, migrations)
+    /** WHO performed the operation; absent for system jobs (seed, migrations). */
+    actorUserId: v.optional(v.id("users")),
+    /** The ACTOR's role in this school when they acted — never the affected account's role (see metadata.targetRole). */
     actorRole: v.optional(vRole),
     action: v.string(), // "<entity>.<verb>", e.g. "attendance.corrected"
     entity: vEntityRef,

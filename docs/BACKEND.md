@@ -150,6 +150,14 @@ Isolation is tested in `tests/convex/tenancy.test.ts` (two schools with identica
   section is touched; closed/historical enrollments keep their last number. Roll numbers in uploaded files are
   ignored. Limit: 1,000 active students per section (`MAX_SECTION_ROSTER`). There is no student-name editing in
   Convex yet; when it is added it must call `renumberSections` for the student's active section.
+- **Audit semantics** (`auditLogs`): `actorUserId`/`actorRole` describe WHO acted (e.g. the administrator who
+  created an account); `entity` is what changed. Account and membership events (`account.created`,
+  `account.credentials_issued`, `account.disabled/enabled`, `membership.access_changed`) also record the AFFECTED
+  account in `metadata.targetRole`/`targetKind`/`targetLoginId`. For `account.created` the actor's role is derived
+  from the creator's membership in that school (it was previously written as a constant "admin"). Older rows are
+  left untouched (no `metadata.target*`; the summary still names the account's role). Read-only check:
+  `npx convex run audit:accountCreationReport '{"schoolSlug":"…"}'` compares each `account.created` row with the
+  membership's actual role and student link.
 - **Student portal** (`convex/studentPortal.ts`): `myProfile` resolves the caller's OWN student record purely
   server-side (session → membership → `studentId` or guardian links → student → current-year enrollment). An
   optional `studentId` only chooses among the students the server links to the caller; anything else is NOT_FOUND.

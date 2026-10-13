@@ -28,7 +28,7 @@ import type { PermissionSetName, Role } from "../core/permissions";
 import { allocateNumber, ensureCounterAtLeast } from "./counters";
 import { formatLoginId, loginIdCounterKey, parseGeneratedLoginId, type LoginIdKind } from "./loginIds";
 import { assertMembershipShape, hasActiveAccess } from "./memberships";
-import { writeAudit } from "./audit";
+import { accountTarget, roleInSchool, writeAudit } from "./audit";
 
 export const PASSWORD_PROVIDER = "password";
 
@@ -193,10 +193,13 @@ export async function activatePendingAccount(ctx: MutationCtx, args: { loginId: 
     await ctx.db.patch(m._id, { userId, status: "active", activatedAt: now });
     await writeAudit(ctx, {
       schoolId: m.schoolId,
-      actor: m.createdByUserId ? { userId: m.createdByUserId, role: "admin" } : null,
+      // Actor = the member who created the account (derived from their membership,
+      // never assumed); the created account's own role goes in metadata.targetRole.
+      actor: m.createdByUserId ? { userId: m.createdByUserId, role: await roleInSchool(ctx, m.createdByUserId, m.schoolId) } : null,
       action: "account.created",
       entity: { table: "schoolMemberships", id: m._id },
       summary: `Account ${args.loginId} created for ${m.displayName} (${m.role})`,
+      metadata: accountTarget({ ...m, loginId: args.loginId }),
     });
   }
   return userId;

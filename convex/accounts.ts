@@ -25,7 +25,7 @@ import { getCurrentAcademicYearId, getInSchool, requirePermission } from "./core
 import { forbidden, invalid } from "./core/errors";
 import { fullName, teacherDisplayName } from "./model/academics";
 import { generateTemporaryPassword, PASSWORD_PROVIDER, provisionAccount, reserveAccount, temporaryPasswordFields } from "./model/accounts";
-import { writeAudit } from "./model/audit";
+import { accountTarget, writeAudit } from "./model/audit";
 
 const vPersonRef = v.union(
   v.object({ kind: v.literal("student"), studentId: v.id("students") }),
@@ -97,6 +97,7 @@ export const recordCredentialsIssued = internalMutation({
       schoolId: actor.schoolId, actor, action: "account.credentials_issued",
       entity: { table: "schoolMemberships", id: target._id },
       summary: `Issued a temporary password for ${target.loginId} (${target.displayName})`,
+      metadata: accountTarget(target),
     });
   },
 });
@@ -119,6 +120,7 @@ export const applyStatus = internalMutation({
         schoolId: actor.schoolId, actor, action: status === "suspended" ? "account.disabled" : "account.enabled",
         entity: { table: "schoolMemberships", id: target._id },
         summary: `${status === "suspended" ? "Disabled" : "Enabled"} account ${target.loginId ?? ""} (${target.displayName})`,
+        metadata: accountTarget(target),
       });
     }
     return { userId: target.userId ?? null };
