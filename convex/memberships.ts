@@ -13,7 +13,7 @@ import { schoolQuery, schoolMutation } from "./core/functions";
 import { getInSchool, requirePermission } from "./core/authorization";
 import { forbidden, invalid } from "./core/errors";
 import { vMembershipStatus, vPermissionSet, vRole } from "./core/validators";
-import { writeAudit } from "./model/audit";
+import { accountTarget, writeAudit } from "./model/audit";
 
 /**
  * Members of the caller's school (admin), newest first, PAGINATED — a school
@@ -63,7 +63,7 @@ export const updateAccess = schoolMutation({
       schoolId: ctx.actor.schoolId, actor: ctx.actor, action: "membership.access_changed",
       entity: { table: "schoolMemberships", id: target._id },
       summary: `Changed access for ${target.displayName}`,
-      metadata: { from: { status: target.status, permissionSets: target.permissionSets }, to: { status: status ?? target.status, permissionSets: permissionSets ?? target.permissionSets } },
+      metadata: { ...accountTarget(target), from: { status: target.status, permissionSets: target.permissionSets }, to: { status: status ?? target.status, permissionSets: permissionSets ?? target.permissionSets } },
     });
     return { ok: true };
   },
