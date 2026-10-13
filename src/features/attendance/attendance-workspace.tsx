@@ -180,8 +180,8 @@ function Register({ sectionId, date }: { sectionId: string; date: string }) {
   const registerData = useQuery(api.attendance.getByDate, {
     sectionId: sectionId as Id<"sections">,
     date,
+    today: date,
   });
-
   // Convex Mutations
   const markAttendance = useMutation(api.attendance.mark);
   const updateAttendance = useMutation(api.attendance.update);
