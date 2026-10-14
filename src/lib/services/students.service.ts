@@ -2,7 +2,6 @@ import type { Gender, GuardianLink, ID, Student, StudentStatus } from "@/types/d
 import { readDb, writeDb } from "@/lib/store/db";
 import { newId } from "@/lib/utils/ids";
 import { hasPermission } from "@/lib/permissions";
-import { DEMO_PASSWORDS } from "@/lib/mock-data/seed";
 import {
   assertStudentInScope, forbidden, handle, invalid, notFound, requireActor, requireAny, requirePermission, scopeFor,
 } from "./core";
@@ -224,7 +223,7 @@ export const mockStudentService = {
         const guardian = { id: newId("g"), name: input.guardian.name.trim(), phone: input.guardian.phone.trim(), email: input.guardian.email.trim(), occupation: input.guardian.occupation.trim(), address: input.address.trim() };
         db.guardians.push(guardian);
         db.guardianLinks.push({ id: newId("gl"), guardianId: guardian.id, studentId: student.id, relation: input.guardian.relation, isPrimary: true });
-        db.users.push({ id: `u_${student.id}`, email, password: DEMO_PASSWORDS.default, role: "student", displayName: fullName(student), phone: student.phone, studentIds: [student.id] });
+        db.users.push({ id: `u_${student.id}`, email, role: "student", displayName: fullName(student), phone: student.phone, studentIds: [student.id] });
 
         let feeAssigned = false;
         if (input.assignFees) {
@@ -239,7 +238,7 @@ export const mockStudentService = {
           category: "general", title: `New student in ${label}`, message: `${fullName(student)} has joined Class ${label} (Roll ${rollNo}).`, href: `/teacher/classes/${section.id}`,
         });
         notify(db, [`u_${student.id}`], { category: "general", title: `Welcome to ${db.school.name}`, message: `You are enrolled in Class ${label}.`, href: "/student/dashboard" });
-        return { id: student.id, email, password: DEMO_PASSWORDS.default, feeAssigned };
+        return { id: student.id, email, feeAssigned };
       });
     });
   },

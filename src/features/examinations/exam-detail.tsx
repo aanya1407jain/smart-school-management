@@ -45,7 +45,7 @@ export function ExamDetail({ examId, area }: { examId: string; area: "admin" | "
                   {e.status === "scheduled" && <Button variant="outline" onClick={() => setConfirm("start")}><PlayCircle className="h-4 w-4" /> Start exam</Button>}
                   {(e.status === "scheduled" || e.status === "in_progress") && <Button variant="outline" onClick={() => setConfirm("marks")}><PenLine className="h-4 w-4" /> Open marks entry</Button>}
                   {e.status === "published" && <Button variant="outline" onClick={() => setConfirm("reopen")}><RotateCcw className="h-4 w-4" /> Reopen marks entry</Button>}
-                  {e.status !== "published" && <Button onClick={() => setConfirm("publish")} disabled={!!d.progress?.pending.length}><Megaphone className="h-4 w-4" /> Publish results</Button>}
+                  {e.status !== "published" && <Button onClick={() => setConfirm("publish")} disabled={!d.progress?.readyToPublish} title={d.progress?.publishBlockedReason ?? undefined}><Megaphone className="h-4 w-4" /> Publish results</Button>}
                 </>
               )}
             />
@@ -60,7 +60,7 @@ export function ExamDetail({ examId, area }: { examId: string; area: "admin" | "
                   </div>
                   <div className="flex-1">
                     {d.progress.pending.length === 0 ? (
-                      <p className="flex items-center gap-2 text-sm text-lagoon"><CheckCircle2 className="h-5 w-5" /> {e.status === "published" ? "Results are published and visible to students." : "All marks entered — ready to publish."}</p>
+                      <p className="flex items-center gap-2 text-sm text-lagoon"><CheckCircle2 className="h-5 w-5" /> {e.status === "published" ? "Results are published and visible to students." : d.progress.readyToPublish ? "All marks entered — ready to publish." : `All marks entered. ${d.progress.publishBlockedReason ?? ""}`}</p>
                     ) : (
                       <>
                         <p className="mb-2 text-[13px] font-medium text-ink-soft">Waiting for marks ({d.progress.pending.length})</p>

@@ -30,8 +30,16 @@ async function run() {
   // Reset DB to clean state before test run
   resetDb();
 
-  const login = (email: string, password: string, role: "admin" | "teacher" | "student") =>
-    services.auth.login({ email, password, role, remember: false });
+  const SERVER_STUDENTS: Record<string, { studentId: string; name: string }[]> = {
+    "student@asteracademy.edu": [{ studentId: "cvx_aarav", name: "Aarav Sharma" }],
+    "guardian@asteracademy.edu": [{ studentId: "cvx_aarav", name: "Aarav Sharma" }, { studentId: "cvx_ananya", name: "Ananya Sharma" }],
+  };
+  const login = (email: string, roleOrPassword: "admin" | "teacher" | "student" | string, roleArg?: "admin" | "teacher" | "student") => {
+    const role = (roleArg ?? roleOrPassword) as "admin" | "teacher" | "student";
+    const bound = services.auth.bindIdentity({ email, role, displayName: email, permissionSets: [], students: SERVER_STUDENTS[email] ?? [] });
+    if (!bound.ok) throw new Error(`could not bind ${email}`);
+    return bound.user;
+  };
 
   const rejects = async (fn: () => Promise<unknown>) => {
     try {

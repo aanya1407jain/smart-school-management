@@ -20,19 +20,13 @@ import type {
 } from "@/types/domain";
 import { addDays, dayOfWeek, isSchoolDay, previousSchoolDay, todayISO } from "@/lib/utils/dates";
 import { createRng } from "./random";
+import { asterAcademy } from "@convex/seedData/asterAcademy";
 import {
   BLOOD_GROUPS, FATHER_FIRST, FEMALE_FIRST, LAST_NAMES, LOCALITIES, MALE_FIRST, MOTHER_FIRST, OCCUPATIONS,
 } from "./names";
 
-export const DB_VERSION = 4;
+export const DB_VERSION = 6; // v6: demo user records carry Convex Login IDs (v5: no passwords)
 export const AY_ID = "ay_2026";
-export const DEMO_PASSWORDS = {
-  admin: "Admin@123",
-  teacher: "Teacher@123",
-  student: "Student@123",
-  guardian: "Guardian@123",
-  default: "Welcome@123",
-} as const;
 
 const GRADES = [8, 9, 10, 11, 12] as const;
 const SECTION_NAMES = ["A", "B", "C"] as const;
@@ -564,17 +558,24 @@ export function createSeedDatabase(today: string = todayISO()): Database {
 
   // ------------------------------------------------------------ Accounts
   const users: UserAccount[] = [
-    { id: "u_admin", email: "admin@asteracademy.edu", password: DEMO_PASSWORDS.admin, role: "admin", displayName: "Aanya Jain", phone: "+91 98450 10001", title: "Principal" },
+    { id: "u_admin", email: "admin@asteracademy.edu", role: "admin", displayName: "Aanya Jain", phone: "+91 98450 10001", title: "Principal" },
   ];
   for (const t of teachers) {
     const isDemo = t.id === "t_verma";
-    users.push({ id: `u_${t.id}`, email: isDemo ? "teacher@asteracademy.edu" : t.email, password: isDemo ? DEMO_PASSWORDS.teacher : DEMO_PASSWORDS.default, role: "teacher", displayName: `${t.firstName} ${t.lastName}`, phone: t.phone, teacherId: t.id });
+    users.push({ id: `u_${t.id}`, email: isDemo ? "teacher@asteracademy.edu" : t.email, role: "teacher", displayName: `${t.firstName} ${t.lastName}`, phone: t.phone, teacherId: t.id });
   }
   for (const s of students) {
     const isDemo = s.id === "stu_aarav";
-    users.push({ id: `u_${s.id}`, email: isDemo ? "student@asteracademy.edu" : s.email, password: isDemo ? DEMO_PASSWORDS.student : DEMO_PASSWORDS.default, role: "student", displayName: `${s.firstName} ${s.lastName}`, phone: s.phone, studentIds: [s.id] });
+    users.push({ id: `u_${s.id}`, email: isDemo ? "student@asteracademy.edu" : s.email, role: "student", displayName: `${s.firstName} ${s.lastName}`, phone: s.phone, studentIds: [s.id] });
   }
-  users.push({ id: "u_guardian_sharma", email: "guardian@asteracademy.edu", password: DEMO_PASSWORDS.guardian, role: "student", displayName: "Priya Sharma", phone: sharmaGuardian.phone, studentIds: ["stu_aarav", "stu_ananya"], guardianId: "g_sharma" });
+  users.push({ id: "u_guardian_sharma", email: "guardian@asteracademy.edu", role: "student", displayName: "Priya Sharma", phone: sharmaGuardian.phone, studentIds: ["stu_aarav", "stu_ananya"], guardianId: "g_sharma" });
+  // Demo personas are bound to their Convex demo accounts by Login ID
+  // (convex/seedData/asterAcademy.ts is the single source of the demo IDs).
+  const demoLoginIds = demoLoginIdsByEmail();
+  for (const u of users) {
+    const loginId = demoLoginIds.get(u.email.toLowerCase());
+    if (loginId) u.loginId = loginId;
+  }
 
   // ------------------------------------------------------------ Notifications
   const ts = (daysAgo: number, hh: number, mm = 0) => `${addDays(today, -daysAgo)}T${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:00.000+05:30`;
@@ -731,4 +732,16 @@ function shuffle<T>(arr: readonly T[], rng: { next: () => number }): T[] {
     [out[i], out[j]] = [out[j], out[i]];
   }
   return out;
+}
+
+/** Demo dataset email → demo Login ID (demo data only). */
+function demoLoginIdsByEmail(): Map<string, string> {
+  const ds = asterAcademy;
+  const pairs: [string, string | undefined][] = [
+    [ds.admin.email, ds.admin.login.loginId],
+    ...ds.teachers.map((t) => [t.email, t.login?.loginId] as [string, string | undefined]),
+    ...ds.students.map((s) => [s.email, s.login?.loginId] as [string, string | undefined]),
+    ...ds.guardians.map((g) => [g.email, g.login?.loginId] as [string, string | undefined]),
+  ];
+  return new Map(pairs.filter((p): p is [string, string] => !!p[1]).map(([e, id]) => [e.toLowerCase(), id]));
 }

@@ -43,10 +43,24 @@ export async function handle<T>(fn: () => T): Promise<T> {
   return result === undefined ? result : (structuredClone(result) as T);
 }
 
+/**
+ * The caller for the mock services: the demo-data record bound to the
+ * server-derived identity (see session-store.ts). Role, permission sets and
+ * linked students come from the server identity, never from the mock record.
+ */
 export function getActor(): UserAccount | null {
-  const session = readSession();
-  if (!session) return null;
-  return readDb().users.find((u) => u.id === session.userId) ?? null;
+  const identity = readSession();
+  if (!identity) return null;
+  const record = readDb().users.find((u) => u.id === identity.userId);
+  if (!record) return null;
+  return {
+    ...record,
+    role: identity.role,
+    permissionSets: [...identity.permissionSets] as UserAccount["permissionSets"],
+    email: identity.email,
+    displayName: identity.displayName,
+    studentIds: identity.role === "student" ? [...identity.studentIds] : record.studentIds,
+  };
 }
 
 export function requireActor(): UserAccount {
