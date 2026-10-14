@@ -29,10 +29,11 @@ async function newPage(width = 1440) {
   return { ctx, page };
 }
 
-async function login(page, email, password, role) {
+/** Demo accounts sign in with their Login ID; the portal (role) comes from the server, not the form. */
+const DEMO_LOGIN_IDS = { "admin@asteracademy.edu": "ADMIN-001", "teacher@asteracademy.edu": "TCH-00001", "student@asteracademy.edu": "STU-2026-00001", "guardian@asteracademy.edu": "GRD-00001" };
+async function login(page, email, password, _role) {
   await page.goto(BASE + "/login");
-  await page.getByRole("radio", { name: new RegExp(role, "i") }).first().click();
-  await page.getByLabel(/email or username/i).fill(email);
+  await page.getByLabel(/^login id/i).fill(DEMO_LOGIN_IDS[email] ?? email);
   await page.getByLabel(/^password/i).fill(password);
   await page.getByRole("button", { name: /^sign in/i }).click();
   await page.waitForURL(/dashboard/);

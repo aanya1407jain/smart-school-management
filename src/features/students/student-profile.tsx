@@ -2,10 +2,16 @@
 import Link from "next/link";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis, Legend } from "recharts";
 import { Cake, Droplet, FileText, Mail, MapPin, Pencil, Phone, UserRound, Wallet, CalendarDays, Download } from "lucide-react";
-import { useQuery } from "convex/react";
+import { Component, type ReactNode } from "react";
+import type { FunctionReturnType } from "convex/server";
 import { api } from "../../../convex/_generated/api";
-import type { Id } from "../../../convex/_generated/dataModel";
+import { useSchoolQuery } from "@/lib/convex/membership";
+import { getAppError } from "@/lib/convex/errors";
 import { useSession } from "@/features/auth/session-provider";
+import { services } from "@/lib/services";
+import { useQuery as useDemoQuery } from "@/lib/hooks/use-query";
+import { DemoStudentProfileBody } from "./demo-student-profile";
+import { LiveFeesPanel, LiveHomeworkList, LiveResultsList, homeworkState, type LiveFees } from "@/features/student-portal/live-records";
 import {
   Avatar, Badge, Card, CardHeader, EmptyState, GlassCard, LinkButton, ProgressRing, StatusBadge, Tabs, TabsContent, TabsList,
 } from "@/components/ui";
@@ -14,28 +20,46 @@ import { CHART, CHART_GRID } from "@/lib/constants/theme";
 import { formatCurrency, formatPercent, titleCase } from "@/lib/utils/format";
 import { formatDate, formatShortDate, formatWeekday, daysBetween, todayISO } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils/cn";
-import { FeeObligationsTable, PaymentsTable } from "@/features/fees/fee-tables";
-import { ResultCard } from "@/features/examinations/result-card";
 
 /* ------------------------------------------------------------------ */
 /* Container: fetches data and handles loading / not-found             */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Student profile for admin / teacher / family views.
+ *  - Demo personas viewing a record of the in-browser demo dataset (ids like
+ *    "stu_aarav") get the demo view — demo data never reaches real accounts.
+ *  - Everything else is a REAL record: academics.getStudentProfile decides on
+ *    the server whether the caller may see it (school staff, the assigned
+ *    teacher, or the student / a linked guardian).
+ */
 export function StudentProfileView({ studentId, backHref }: { studentId: string; backHref?: string }) {
-  const data = useQuery(
-    api.academics.getStudentProfile,
-    studentId ? { studentId: studentId as Id<"students"> } : "skip",
-  );
-
+  const { dataSource } = useSession();
+  const demoMode = dataSource === "demo" && !!studentId;
+  const demo = useDemoQuery(() => services.students.getProfile(studentId), [studentId], { enabled: demoMode });
   if (!studentId) return <NotFound backHref={backHref} />;
+  if (demoMode && demo.isLoading) return <div className="p-8 text-center text-ink-muted" role="status">Loading student profile...</div>;
+  if (demoMode && demo.data) return <DemoStudentProfileBody p={demo.data} backHref={backHref} />;
+  return <ProfileBoundary backHref={backHref}><LiveStudentProfileView studentId={studentId} backHref={backHref} /></ProfileBoundary>;
+}
 
-  if (data === undefined) {
-    return <div className="p-8 text-center text-ink-muted">Loading student profile...</div>;
-  }
-
-  if (!data || !data.student) return <NotFound backHref={backHref} />;
-
+function LiveStudentProfileView({ studentId, backHref }: { studentId: string; backHref?: string }) {
+  const data = useSchoolQuery(api.academics.getStudentProfile, { studentId });
+  if (data === undefined) return <div className="p-8 text-center text-ink-muted" role="status">Loading student profile...</div>;
+  if (!data) return <NotFound backHref={backHref} />;
   return <ProfileBody p={normalizeProfile(data)} backHref={backHref} />;
+}
+
+/** NOT_FOUND (no such student, other school, or no access) renders as "not found"; other errors as a message. */
+class ProfileBoundary extends Component<{ backHref?: string; children: ReactNode }, { error: Error | null }> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  render() {
+    if (!this.state.error) return this.props.children;
+    const app = getAppError(this.state.error);
+    if (!app || app.code === "NOT_FOUND" || app.code === "FORBIDDEN") return <NotFound backHref={this.props.backHref} />;
+    return <div className="mx-auto max-w-4xl p-6"><EmptyState title="Couldn't load this profile" description={app.message} /></div>;
+  }
 }
 
 function NotFound({ backHref }: { backHref?: string }) {
@@ -68,95 +92,57 @@ type GuardianVM = {
   otherChildren: { id: string; name: string; classLabel?: string }[];
 };
 
-type FeesVM = {
-  totals: { gross: number; concession: number; paid: number; outstanding: number; overdue: number };
-  standing?: string;
-  obligations: any[];
-  payments: any[];
-  receipts: any[];
-};
-
 type ProfileVM = ReturnType<typeof normalizeProfile>;
 
-function arr<T = any>(v: unknown): T[] {
-  return Array.isArray(v) ? (v as T[]) : [];
-}
+type ServerProfile = NonNullable<FunctionReturnType<typeof api.academics.getStudentProfile>>;
 
-function normalizeProfile(raw: any) {
-  const s = raw?.student ?? {};
-  const enrollment = raw?.enrollment ?? null;
-
+/** Turn the server's explicit-field response into the view model. */
+function normalizeProfile(raw: ServerProfile) {
+  const s = raw.student;
+  const enrollment = raw.enrollment;
   const student = {
-    id: String(s.id ?? s._id ?? ""),
-    firstName: s.firstName ?? "",
-    lastName: s.lastName ?? "",
+    id: s.studentId as string,
+    firstName: s.firstName,
+    lastName: s.lastName,
     status: s.status as string | undefined,
-    admissionNo: s.admissionNo as string | undefined,
-    admissionDate: s.admissionDate as string | undefined,
-    dateOfBirth: s.dateOfBirth as string | undefined,
-    gender: s.gender as string | undefined,
-    bloodGroup: s.bloodGroup as string | undefined,
-    email: s.email as string | undefined,
-    phone: s.phone as string | undefined,
-    address: s.address as string | undefined,
-    documents: arr(s.documents),
+    admissionNo: s.admissionNo,
+    admissionDate: s.admissionDate ?? undefined,
+    dateOfBirth: s.dateOfBirth ?? undefined,
+    gender: s.gender ?? undefined,
+    bloodGroup: s.bloodGroup ?? undefined,
+    email: s.email ?? undefined,
+    phone: s.phone ?? undefined,
+    address: s.address ?? undefined,
+    documents: [] as { id?: string; name?: string; kind?: string; sizeKb?: number; uploadedAt?: string }[],
   };
-
-  const classLabel = enrollment
-    ? [enrollment.className, enrollment.sectionName].filter(Boolean).join(" - ")
-    : "";
-
-  // Backend returns a single `guardian`; also accept `guardians` if it ever becomes a list.
-  const rawGuardians = Array.isArray(raw?.guardians) ? raw.guardians : raw?.guardian ? [raw.guardian] : [];
-  const guardians: GuardianVM[] = rawGuardians.map((g: any, i: number) => ({
-    id: String(g.id ?? g._id ?? i),
-    name: g.name ?? "Unnamed guardian",
-    relation: g.relationship ?? g.relation ?? "Guardian",
-    occupation: g.occupation,
-    phone: g.phone,
-    email: g.email,
-    address: g.address,
-    isPrimary: g.isPrimary ?? i === 0,
-    otherChildren: arr(g.otherChildren),
+  const classLabel = enrollment ? enrollment.sectionDisplayName ?? [enrollment.className, enrollment.sectionName].filter(Boolean).join(" - ") : "";
+  const guardians: GuardianVM[] = raw.guardians.map((g) => ({
+    id: g.guardianId as string,
+    name: g.name,
+    relation: g.relationship,
+    occupation: g.occupation ?? undefined,
+    phone: g.phone ?? undefined,
+    email: g.email ?? undefined,
+    isPrimary: g.isPrimary,
+    otherChildren: [],
   }));
-
-  // Attendance arrives as a flat list of { date, status } records.
-  const records: AttendanceRecord[] = (Array.isArray(raw?.attendance) ? raw.attendance : arr(raw?.attendance?.recent))
-    .filter((r: any) => r && typeof r.date === "string");
-  const attendance = summarizeAttendance(records);
-
-  const homework = arr(raw?.homework);
-  const results = arr(raw?.results).filter(Boolean);
-
-  const fees: FeesVM | null = raw?.fees
-    ? {
-        totals: {
-          gross: raw.fees.totals?.gross ?? 0,
-          concession: raw.fees.totals?.concession ?? 0,
-          paid: raw.fees.totals?.paid ?? 0,
-          outstanding: raw.fees.totals?.outstanding ?? 0,
-          overdue: raw.fees.totals?.overdue ?? 0,
-        },
-        standing: raw.fees.standing,
-        obligations: arr(raw.fees.obligations),
-        payments: arr(raw.fees.payments),
-        receipts: arr(raw.fees.receipts),
-      }
-    : null;
-
+  const records: AttendanceRecord[] = raw.attendance.map((r) => ({ date: r.date, status: r.status }));
   return {
+    access: raw.access,
     student,
     enrollment,
+    enrollmentState: raw.enrollmentState,
+    academicYear: raw.academicYear?.name ?? null,
     classLabel,
-    classTeacher: (enrollment?.classTeacher ?? raw?.classInfo?.classTeacher) as string | undefined,
-    room: (enrollment?.room ?? raw?.classInfo?.room) as string | undefined,
-    teachers: arr<{ subjectId: string; subject: string; teacher: string }>(raw?.teachers),
+    classTeacher: enrollment?.classTeacher ?? undefined,
+    room: enrollment?.room ?? undefined,
+    teachers: [] as { subjectId: string; subject: string; teacher: string }[],
     guardians,
-    account: raw?.account as { email?: string } | undefined,
-    attendance,
-    homework,
-    results,
-    fees,
+    account: undefined as { email?: string } | undefined,
+    attendance: summarizeAttendance(records),
+    homework: raw.homework,
+    results: raw.results,
+    fees: raw.fees as LiveFees | null,
   };
 }
 
@@ -211,7 +197,7 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
   const pct = p.attendance.stats.percentage;
   const latest = p.results[0];
   const primaryGuardian = p.guardians[0];
-  const pendingHw = p.homework.filter((h: any) => h?.status === "pending" || h?.status === "overdue").length;
+  const pendingHw = p.homework.filter((h) => { const st = homeworkState(h); return st === "pending" || st === "overdue"; }).length;
 
   const tabs = [
     { value: "overview", label: "Overview" },
@@ -261,8 +247,8 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
           <Metric label="Pending homework" value={String(pendingHw)} />
           <Metric
             label="Fee balance"
-            value={p.fees ? (p.fees.totals.outstanding ? formatCurrency(p.fees.totals.outstanding) : "Paid") : "Restricted"}
-            tone={p.fees?.standing === "overdue" ? "warn" : undefined}
+            value={p.fees ? (p.fees.totals.outstandingMinor ? formatCurrency(p.fees.totals.outstandingMinor / 100) : p.fees.obligations.length ? "Paid" : "None assigned") : "Restricted"}
+            tone={p.fees?.obligations.some((o) => o.outstandingMinor > 0 && o.dueDate < todayISO()) ? "warn" : undefined}
           />
         </dl>
       </GlassCard>
@@ -396,38 +382,16 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
 
         {p.fees && (
           <TabsContent value="fees">
-            <FeesTab fees={p.fees} />
+            <LiveFeesPanel fees={p.fees} />
           </TabsContent>
         )}
 
         <TabsContent value="exams">
-          {p.results.length === 0 ? (
-            <Card><EmptyState title="No examination results" description="Results appear here once marks are entered." /></Card>
-          ) : (
-            <div className="grid gap-4 lg:grid-cols-2">
-              {p.results.map((r: any, i: number) => <ResultCard key={r.examId ?? r._id ?? i} result={r} />)}
-            </div>
-          )}
+          <LiveResultsList results={p.results} />
         </TabsContent>
 
         <TabsContent value="homework">
-          <Card>
-            {p.homework.length === 0 ? <EmptyState title="No homework assigned yet" /> : (
-              <ul className="divide-y divide-line/60">
-                {p.homework.map((h: any, i: number) => (
-                  <li key={h.id ?? h._id ?? i} className="flex items-center justify-between gap-3 px-5 py-3.5">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-ink">{h.title ?? "Untitled"}</p>
-                      <p className="text-[12.5px] text-ink-muted">
-                        {[h.subject, h.dueDate && `due ${formatDate(h.dueDate)}`].filter(Boolean).join(" · ") || dash}
-                      </p>
-                    </div>
-                    {h.status && <StatusBadge status={h.status} />}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
+          <LiveHomeworkList homework={p.homework} />
         </TabsContent>
 
         <TabsContent value="documents">
@@ -504,36 +468,6 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
           )}
         </TabsContent>
       </Tabs>
-    </div>
-  );
-}
-
-function FeesTab({ fees }: { fees: FeesVM }) {
-  const payments = fees.payments.map((x: any) => ({
-    ...x,
-    receiptNo: fees.receipts.find((r: any) => r.id === x.receiptId)?.receiptNo ?? "",
-  }));
-
-  return (
-    <div className="space-y-4">
-      <div className="grid gap-4 sm:grid-cols-4">
-        <Metric boxed label="Total fees" value={formatCurrency(fees.totals.gross)} />
-        <Metric boxed label="Concession" value={formatCurrency(fees.totals.concession)} />
-        <Metric boxed label="Paid" value={formatCurrency(fees.totals.paid)} />
-        <Metric boxed label="Outstanding" value={formatCurrency(fees.totals.outstanding)} tone={fees.totals.overdue > 0 ? "warn" : undefined} />
-      </div>
-      <Card>
-        <CardHeader title="Installments" />
-        <div className="p-5">
-          {fees.obligations.length === 0 ? <EmptyState title="No installments" /> : <FeeObligationsTable obligations={fees.obligations} />}
-        </div>
-      </Card>
-      <Card>
-        <CardHeader title="Payment history" />
-        <div className="p-5">
-          {payments.length === 0 ? <EmptyState title="No payments recorded" /> : <PaymentsTable payments={payments} />}
-        </div>
-      </Card>
     </div>
   );
 }

@@ -258,3 +258,32 @@ returns `{ page, isDone, continueCursor }`; `studentHistory` returns `range`; ti
   bulk-created account) · authz 29/29 · E2E 129/131 — W3 and A7 also fail on the untouched baseline (date-dependent
   demo-data checks) · typecheck ✅ · build ✅.
 - Still demo-only: staff accounts (admins/teachers) that are not demo personas still get the "preview" notice.
+
+---
+
+## 16. Post-merge fixes for the academic-workflow merge (15 Oct 2026, uncommitted)
+- **Attendance filter crash** (`attendance:getByDate … sectionId "sec_10a"`): after `d3d7454`/`4822b0d` the register
+  and overview called Convex, but the Class/Section filters (and `?section=` links from the demo teacher pages) still
+  came from the in-browser demo dataset (`useAcademicOptions` → ids like `sec_10a`), and were cast to
+  `Id<"sections">`. The filters now list `academics.listClasses/listSections` (server-scoped: admins all, teachers
+  their scope); only a listed section is ever queried; `?section=` takes a real id or a label ("10-A").
+- **`Could not find public function for 'academics:getStudentProfile'`**: the function exists in `main`
+  (`d87bbdc`) but the dev deployment had not been pushed since the merge. The merged query also had no
+  authorization (any member could read any student by id or admission number) and spread whole documents; it is now
+  tiered (school staff / assigned teacher / self & linked guardian), explicit-field, `normalizeId`-validated.
+  Demo personas viewing demo records (`stu_*`) get the demo profile again.
+- **Student admission** (`createStudentWithEnrollment`): no longer falls back to the first section of the school,
+  takes class + section ids validated against each other and the current year, uses the atomic admission counter,
+  re-uses guardians by phone, renumbers the section (alphabetical roll numbers), reports a missing class teacher,
+  and returns no credentials (the hard-coded `DemoPassword123!` is gone).
+- **Student portal for school-created accounts**: timetable, homework (with own submission status), published
+  results, fees (obligations, concessions, payments, receipts) and notices (audience-filtered) are now Convex
+  queries (`studentPortal.my*`) backed by `convex/model/studentRecords.ts`.
+- **Also fixed:** `next build` failed on `main` (three finance/communications test scripts used the old
+  email-based identity bridge); `scripts/e2e-communications-finance.mjs` used the old login form; the W5 E2E
+  assertions removed in the merge were restored (they pass).
+- Verified (sandbox): unit 155/155 · integration 114/114 · authz 29/29 · fees-reports 36/36 ·
+  notices-notifications 24/24 · dashboard-settings 30/30 · E2E 141/141 · comms/finance E2E 16/16 · typecheck ✅ ·
+  build ✅.
+- **Still demo-only:** admin/teacher Students list, My Classes, timetable/homework/exams/fees management and the
+  demo student portal; homework submission and online fee payment have no backend yet.

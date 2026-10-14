@@ -5,13 +5,14 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { CheckCircle2, KeyRound } from "lucide-react";
-import { useMutation } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
+import { useSchoolMutation, useSchoolQuery } from "@/lib/convex/membership";
+import { getAppError } from "@/lib/convex/errors";
 import { services, ServiceError } from "@/lib/services";
 import { useQuery } from "@/lib/hooks/use-query";
 import { useSchoolProfile } from "@/lib/hooks/use-school-profile";
-import { Button, Card, Checkbox, FormField, FormSection, Input, LoadingState, Modal, PageHeader, Select, ErrorState, useToast, LinkButton } from "@/components/ui";
+import { Button, Card, FormField, FormSection, Input, LoadingState, Modal, PageHeader, Select, ErrorState, useToast, LinkButton } from "@/components/ui";
 import { FormError } from "@/features/shared/form-error";
 import { useAcademicOptions } from "@/features/shared/use-academic-options";
 import { todayISO } from "@/lib/utils/dates";
@@ -51,13 +52,17 @@ export function StudentForm({ studentId }: { studentId?: string }) {
   const emailDomain = useSchoolProfile()?.emailDomain ?? "school.edu";
   const router = useRouter();
   const { toast } = useToast();
+  // Editing still works on the demo dataset (services.students); a NEW student is admitted in Convex,
+  // so its class/section choices come from the server's real records — never demo ids.
+  const editing = !!studentId;
   const opts = useAcademicOptions();
+  const liveClasses = useSchoolQuery(api.academics.listClasses, editing ? "skip" : {});
+  const liveSections = useSchoolQuery(api.academics.listSections, editing ? "skip" : {});
   const editable = useQuery(() => services.students.getEditable(studentId!), [studentId], { enabled: !!studentId });
   const [serverError, setServerError] = useState<Error | null>(null);
-  const [created, setCreated] = useState<any>(null);
+  const [created, setCreated] = useState<{ studentId: Id<"students">; admissionNo: string; section: string; rollNo: number | null; classTeacher: string | null; warnings: string[] } | null>(null);
 
-  // Convex Mutation for Student Creation & Enrollment
-  const createStudentWithEnrollment = useMutation(api.academics.createStudentWithEnrollment);
+  const createStudentWithEnrollment = useSchoolMutation(api.academics.createStudentWithEnrollment);
 
   const { register, handleSubmit, watch, reset, setValue, setError, formState: { errors, isSubmitting } } = useForm<Values>({
     resolver: zodResolver(schema),
@@ -72,7 +77,12 @@ export function StudentForm({ studentId }: { studentId?: string }) {
   }, [editable.data, opts.data, reset]);
 
   const classId = watch("classId");
-  const sections = (opts.data?.sections ?? []).filter((s) => s.classId === classId);
+  const classOptions = editing
+    ? (opts.data?.classes ?? []).map((c) => ({ id: c.id, name: c.name }))
+    : (liveClasses ?? []).filter((c) => c.active && (liveSections ?? []).some((s) => s.classId === c._id)).sort((a, b) => a.level - b.level).map((c) => ({ id: c._id as string, name: c.name }));
+  const sections = editing
+    ? (opts.data?.sections ?? []).filter((s) => s.classId === classId).map((s) => ({ id: s.id, name: s.name, detail: s.room }))
+    : (liveSections ?? []).filter((s) => s.classId === classId).map((s) => ({ id: s._id as string, name: s.name, detail: s.classTeacherName ? `Class teacher: ${s.classTeacherName}` : "No class teacher yet" }));
 
   const onSubmit = async (v: Values) => {
     setServerError(null);
@@ -82,19 +92,25 @@ export function StudentForm({ studentId }: { studentId?: string }) {
         toast({ title: "Student updated", description: `${v.firstName} ${v.lastName}'s details were saved.` });
         router.push(`/admin/students/${studentId}`);
       } else {
-        // Direct Convex backend call
+        // The ids come from the server's own lists; the server re-validates class ↔ section ↔ year.
+        const cls = (liveClasses ?? []).find((c) => c._id === v.classId);
+        const section = (liveSections ?? []).find((s) => s._id === v.sectionId && s.classId === v.classId);
+        if (!cls || !section) {
+          setError("sectionId", { message: "Choose a class and section from the list" });
+          return;
+        }
         const res = await createStudentWithEnrollment({
           firstName: v.firstName,
           lastName: v.lastName,
           gender: v.gender,
           dateOfBirth: v.dateOfBirth,
           admissionDate: v.admissionDate,
-          status: v.status,
           email: v.email || undefined,
           phone: v.phone || undefined,
           address: v.address,
           bloodGroup: v.bloodGroup,
-          sectionId: v.sectionId as Id<"sections">,
+          classId: cls._id,
+          sectionId: section._id,
           guardian: {
             name: v.guardian.name,
             relation: v.guardian.relation,
@@ -103,13 +119,15 @@ export function StudentForm({ studentId }: { studentId?: string }) {
             occupation: v.guardian.occupation || undefined,
           },
         });
-        toast({ title: "Student enrolled", description: `${v.firstName} ${v.lastName} is now enrolled via Convex.` });
+        toast({ title: "Student enrolled", description: `${v.firstName} ${v.lastName} is enrolled in ${res.section}.` });
         setCreated(res);
       }
     } catch (e: any) {
-      setServerError(e instanceof Error ? e : new Error(String(e)));
-      if (e instanceof ServiceError && e.fieldErrors) {
-        Object.entries(e.fieldErrors).forEach(([k, msg]) => setError(k as keyof Values, { message: msg }));
+      const app = getAppError(e);
+      setServerError(app ? new Error(app.message) : e instanceof Error ? e : new Error(String(e)));
+      const fieldErrors = app?.fields ?? (e instanceof ServiceError ? e.fieldErrors : undefined);
+      if (fieldErrors) {
+        Object.entries(fieldErrors).forEach(([k, msg]) => setError(k as keyof Values, { message: msg }));
       }
     }
   };
@@ -121,7 +139,7 @@ export function StudentForm({ studentId }: { studentId?: string }) {
     <div className="mx-auto max-w-5xl">
       <PageHeader
         title={studentId ? "Edit student" : "Add student"}
-        description={studentId ? "Update personal, enrollment and guardian details." : "Create the student record, enroll them in a section and link a guardian. A portal login is created automatically."}
+        description={studentId ? "Update personal, enrollment and guardian details." : "Create the student record, enroll them in a section of the current academic year and link a guardian. Sign-in accounts are created separately in Accounts & Import."}
       />
       <form onSubmit={handleSubmit(onSubmit)} noValidate>
         <Card className="space-y-7 p-5 sm:p-7">
@@ -133,27 +151,27 @@ export function StudentForm({ studentId }: { studentId?: string }) {
             <FormField label="Blood group"><Select {...register("bloodGroup")}>{["A+", "A-", "B+", "B-", "O+", "O-", "AB+", "AB-"].map((b) => <option key={b}>{b}</option>)}</Select></FormField>
           </FormSection>
 
-          <FormSection title="Contact" description="The email becomes the student's portal login.">
-            <FormField label="Student email" hint={`Leave blank to generate firstname.lastname@students.${emailDomain}`} error={errors.email?.message}><Input type="email" {...register("email")} placeholder="Optional" /></FormField>
+          <FormSection title="Contact" description="Contact details only — students sign in with a Login ID issued in Accounts & Import.">
+            <FormField label="Student email" hint={editing ? undefined : "Optional"} error={errors.email?.message}><Input type="email" {...register("email")} placeholder={`e.g. name@${emailDomain}`} /></FormField>
             <FormField label="Phone" error={errors.phone?.message}><Input type="tel" {...register("phone")} placeholder="+91 98xxx xxxxx" /></FormField>
             <FormField label="Home address" required error={errors.address?.message} className="sm:col-span-2"><Input {...register("address")} placeholder="House no., street, locality, city" /></FormField>
           </FormSection>
 
-          <FormSection title="Enrollment" description="Academic year 2026–27. Teachers of the chosen section will see this student immediately.">
+          <FormSection title="Enrollment" description="Current academic year. Roll numbers are assigned automatically (alphabetical, whole section). Teachers of the chosen section will see this student immediately.">
             <FormField label="Class" required error={errors.classId?.message}>
               <Select {...register("classId", { onChange: () => setValue("sectionId", "") })}>
                 <option value="">Select class</option>
-                {(opts.data?.classes ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {classOptions.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </Select>
             </FormField>
             <FormField label="Section" required error={errors.sectionId?.message}>
               <Select {...register("sectionId")} disabled={!classId}>
                 <option value="">{classId ? "Select section" : "Choose a class first"}</option>
-                {sections.map((s) => <option key={s.id} value={s.id}>Section {s.name} · {s.room}</option>)}
+                {sections.map((s) => <option key={s.id} value={s.id}>Section {s.name}{s.detail ? ` · ${s.detail}` : ""}</option>)}
               </Select>
             </FormField>
             <FormField label="Admission date" required error={errors.admissionDate?.message}><Input type="date" {...register("admissionDate")} /></FormField>
-            <FormField label="Status"><Select {...register("status")}><option value="active">Active</option><option value="inactive">Inactive</option><option value="transferred">Transferred</option><option value="alumni">Alumni</option></Select></FormField>
+            {editing && <FormField label="Status"><Select {...register("status")}><option value="active">Active</option><option value="inactive">Inactive</option><option value="transferred">Transferred</option><option value="alumni">Alumni</option></Select></FormField>}
           </FormSection>
 
           <FormSection title="Guardian" description="Guardians are linked to students — one guardian can be linked to siblings.">
@@ -164,11 +182,6 @@ export function StudentForm({ studentId }: { studentId?: string }) {
             <FormField label="Occupation"><Input {...register("guardian.occupation")} placeholder="Optional" /></FormField>
           </FormSection>
 
-          {!studentId && (
-            <FormSection title="Fees" description="Creates the student's fee obligations from the class fee structure.">
-              <Checkbox className="sm:col-span-2" label="Assign this class's annual fee structure" description="You can also assign or adjust fees later from the Fees module." {...register("assignFees")} />
-            </FormSection>
-          )}
 
           <FormError error={serverError} />
           <div className="flex flex-col-reverse gap-2 border-t border-line/70 pt-5 sm:flex-row sm:justify-end">
@@ -178,13 +191,10 @@ export function StudentForm({ studentId }: { studentId?: string }) {
         </Card>
       </form>
 
-     <Modal
+      <Modal
         open={!!created}
         onOpenChange={(o) => {
-          if (!o && created) {
-            const sid = created._id ?? created.studentId ?? created.id ?? created;
-            router.push(`/admin/students/${sid}`);
-          }
+          if (!o && created) router.push(`/admin/students/${created.studentId}`);
         }}
         title="Student enrolled"
         size="sm"
@@ -200,29 +210,27 @@ export function StudentForm({ studentId }: { studentId?: string }) {
             >
               Add another
             </LinkButton>
-            <Button
-              onClick={() => {
-                const sid = created?._id ?? created?.studentId ?? created?.id ?? created;
-                router.push(`/admin/students/${sid}`);
-              }}
-            >
-              Open profile
-            </Button>
+            <Button onClick={() => created && router.push(`/admin/students/${created.studentId}`)}>Open profile</Button>
           </>
         }
       >
         {created && (
-          <div className="space-y-4 text-sm">
+          <div className="space-y-4 text-sm" data-testid="student-created">
             <p className="flex items-center gap-2 text-ink-soft"><CheckCircle2 className="h-5 w-5 text-lagoon" /> The student appears in class lists, attendance registers and the teachers&apos; rosters.</p>
-            <div className="rounded-2xl border border-line bg-alabaster p-4">
-              <p className="flex items-center gap-2 text-[12px] font-semibold uppercase tracking-wide text-ink-muted"><KeyRound className="h-3.5 w-3.5" /> Contact email</p>
-              <p className="mt-2 font-mono text-[13px] text-ink">{created.email}</p>
-              <p className="mt-1 text-[12.5px] text-ink-muted">Sign-in accounts (Login ID + temporary password) are created by an administrator in Accounts &amp; Import — no password is generated here.</p>
-            </div>
-            <p className="text-ink-muted">{created.feeAssigned ? "Class fee structure assigned — obligations created." : "No fee structure was assigned."}</p>
+            <dl className="grid grid-cols-2 gap-3 rounded-2xl border border-line bg-alabaster p-4">
+              <div><dt className="text-[12px] text-ink-muted">Admission no.</dt><dd className="font-mono font-semibold text-ink" data-testid="created-admission">{created.admissionNo}</dd></div>
+              <div><dt className="text-[12px] text-ink-muted">Class</dt><dd className="font-semibold text-ink" data-testid="created-section">{created.section}{created.rollNo != null ? ` · Roll ${created.rollNo}` : ""}</dd></div>
+              <div className="col-span-2"><dt className="text-[12px] text-ink-muted">Class teacher</dt><dd className="font-semibold text-ink">{created.classTeacher ?? "Not assigned yet"}</dd></div>
+            </dl>
+            {created.warnings.length > 0 && (
+              <ul className="space-y-1 rounded-xl border border-blush bg-blush/30 px-4 py-3 text-[12.5px] text-plum" role="status">
+                {created.warnings.map((w) => <li key={w}>{w}</li>)}
+              </ul>
+            )}
+            <p className="flex items-start gap-2 text-[12.5px] text-ink-muted"><KeyRound className="mt-0.5 h-3.5 w-3.5 shrink-0" /> Sign-in accounts (Login ID + temporary password) are created by an administrator in Accounts &amp; Import — no password is generated here.</p>
           </div>
         )}
       </Modal>
     </div>
   );
-}
+}

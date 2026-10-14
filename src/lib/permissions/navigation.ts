@@ -86,16 +86,16 @@ const STUDENT_NAV: NavGroup[] = [
     label: "My school",
     items: [
       { label: "My Attendance", href: "/student/attendance", icon: "attendance", anyOf: ["attendance:read:own"], live: true },
-      { label: "My Timetable", href: "/student/timetable", icon: "timetable", anyOf: ["timetable:read:own"] },
-      { label: "My Homework", href: "/student/homework", icon: "homework", anyOf: ["homework:read:own"] },
-      { label: "My Results", href: "/student/results", icon: "results", anyOf: ["results:read:own"] },
-      { label: "My Fees", href: "/student/fees", icon: "fees", anyOf: ["fees:read:own"] },
+      { label: "My Timetable", href: "/student/timetable", icon: "timetable", anyOf: ["timetable:read:own"], live: true },
+      { label: "My Homework", href: "/student/homework", icon: "homework", anyOf: ["homework:read:own"], live: true },
+      { label: "My Results", href: "/student/results", icon: "results", anyOf: ["results:read:own"], live: true },
+      { label: "My Fees", href: "/student/fees", icon: "fees", anyOf: ["fees:read:own"], live: true },
     ],
   },
   {
     label: "Updates",
     items: [
-      { label: "Notices", href: "/student/notices", icon: "notices", anyOf: ["notices:read"] },
+      { label: "Notices", href: "/student/notices", icon: "notices", anyOf: ["notices:read"], live: true },
       { label: "Notifications", href: "/student/notifications", icon: "notifications", anyOf: ["notifications:read"], live: true },
       { label: "Profile", href: "/student/profile", icon: "profile", anyOf: ["profile:read:own"], live: true },
     ],

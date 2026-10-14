@@ -37,6 +37,7 @@ import type * as model_loginIds from "../model/loginIds.js";
 import type * as model_memberships from "../model/memberships.js";
 import type * as model_notifications from "../model/notifications.js";
 import type * as model_rollNumbers from "../model/rollNumbers.js";
+import type * as model_studentRecords from "../model/studentRecords.js";
 import type * as notifications from "../notifications.js";
 import type * as schools from "../schools.js";
 import type * as seed from "../seed.js";
@@ -82,6 +83,7 @@ declare const fullApi: ApiFromModules<{
   "model/memberships": typeof model_memberships;
   "model/notifications": typeof model_notifications;
   "model/rollNumbers": typeof model_rollNumbers;
+  "model/studentRecords": typeof model_studentRecords;
   notifications: typeof notifications;
   schools: typeof schools;
   seed: typeof seed;

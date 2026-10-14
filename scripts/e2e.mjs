@@ -162,33 +162,38 @@ async function serverAnswer(ctx, path) {
   const { ctx, page } = await newPage();
   await login(page, "ADMIN-001", "Admin@123");
   await page.goto(BASE + "/admin/students/new");
+  // A unique surname per run: the admission is a real (Convex) record, so earlier runs' students remain.
+  const ISHITA_LAST = `Menon${Array.from({ length: 5 }, () => String.fromCharCode(97 + Math.floor(Math.random() * 26))).join("")}`;
+  const ISHITA = `Ishita ${ISHITA_LAST}`;
   await page.getByLabel(/^first name/i).fill("Ishita");
-  await page.getByLabel(/^last name/i).fill("Menon");
+  await page.getByLabel(/^last name/i).fill(ISHITA_LAST);
   await page.getByLabel(/date of birth/i).fill("2011-05-14");
   await page.getByLabel(/home address/i).fill("12, 4th Main, Jayanagar, Bengaluru");
-  await page.getByRole("combobox", { name: /^Class/ }).selectOption({ label: "Class 10" });
-  await page.getByRole("combobox", { name: /^Section/ }).selectOption({ index: 1 });
+  // The form lists the school's REAL classes/sections (Convex), not demo ids.
+  await page.getByRole("combobox", { name: /^Class/ }).selectOption({ label: "Grade 10" });
+  await page.getByRole("combobox", { name: /^Section/ }).selectOption({ index: 1 }); // first section of Grade 10 → 10-A
   await page.getByLabel(/guardian name/i).fill("Kavita Menon");
   await page.getByLabel(/guardian phone/i).fill("+91 98450 77777");
   await page.getByRole("button", { name: /^add student$/i }).click();
   check("W1 Admin adds student", await waitText(page, /Student enrolled/i));
   const dialogText = await page.getByRole("dialog").innerText();
   check("W1 No password is generated or shown here (accounts are created in Accounts & Import)", /Accounts & Import/i.test(dialogText) && !/Welcome@123/.test(dialogText));
+  check("W1 Enrolled in the selected section (10-A) with a system roll number", /10-A · Roll \d+/.test(await page.getByTestId("created-section").innerText()) && /^AA-\d{4}-\d+$/.test((await page.getByTestId("created-admission").innerText()).trim()));
   await page.getByRole("button", { name: /open profile/i }).click();
-  await page.waitForURL(/\/admin\/students\/stu_/);
+  await page.waitForURL(/\/admin\/students\/[a-z0-9]{20,}$/);
   const newStudentPath = new URL(page.url()).pathname;
-  check("W1 New student profile opens with class 10-A", await waitText(page, /Class 10 · Section A/));
-  await page.goto(BASE + "/admin/students?q=Ishita Menon");
-  check("W1 Student appears in Students list", await waitText(page, /Ishita Menon/));
+  check("W1 New student profile (real record) opens with class 10-A", await waitText(page, /Class 10-A/) && await waitText(page, new RegExp(ISHITA)));
+  await page.goto(BASE + "/admin/accounts");
+  await page.getByLabel(/filter students by section/i).selectOption({ label: "10-A" });
+  check("W1 Student appears in the school's student records (Accounts & Import)", await page.locator("tr", { hasText: ISHITA }).first().waitFor().then(() => true, () => false));
   await logout(page);
 
   await login(page, "TCH-00001", "Teacher@123");
-  await page.goto(BASE + "/teacher/classes/sec_10a");
-  check("W1 Teacher assigned to 10-A sees the new student", await waitText(page, /Ishita Menon/));
-  await page.goto(BASE + "/teacher/attendance?section=sec_10a");
+  await page.goto(BASE + "/teacher/attendance?section=10-A");
   await waitText(page, /Class 10-A ·/);
+  check("W1 Class teacher of 10-A sees the new student on the register", await page.getByRole("radiogroup", { name: `Attendance for ${ISHITA}` }).waitFor().then(() => true, () => false));
   await page.getByRole("button", { name: /mark all present/i }).click();
-  await page.getByRole("radiogroup", { name: /Attendance for Ishita Menon/ }).getByRole("radio", { name: "Absent" }).click();
+  await page.getByRole("radiogroup", { name: `Attendance for ${ISHITA}` }).getByRole("radio", { name: "Absent" }).click();
   await page.getByRole("radiogroup", { name: /Attendance for Aarav Sharma/ }).getByRole("radio", { name: "Absent" }).click();
   await page.getByRole("button", { name: /update attendance|save attendance/i }).click();
   check("W3 Teacher saves attendance (Aarav + Ishita absent)", await waitText(page, /Attendance (saved|updated)/i));
@@ -201,26 +206,24 @@ async function serverAnswer(ctx, path) {
   check("W1 New student's profile reflects attendance (0% after 1 absence)", /^0(\.0)?%$/.test(metric.trim()), metric);
   await logout(page);
 
-  await login(page, "STU-2026-00001", "Student@123");
-  await waitText(page, /Good (morning|afternoon|evening)/);
-  const t2 = await text(page);
-  check("W3 Aarav's attendance dropped after being marked absent (92% → 90%)", /90%/.test(t2), (t2.match(/\d+%/g) || []).slice(0, 3).join(","));
-  await page.goto(BASE + "/student/notifications");
-  check("W3 Aarav notified of absence", await waitText(page, /Aarav was marked absent/));
-  await logout(page);
-
-  // Class teacher CORRECTS the record (absent → present); the change propagates back.
+  // The register is stored in Convex: a fresh load shows the saved statuses.
+  // (The demo student/guardian dashboards read the in-browser demo dataset, so the
+  // Convex register is verified here and through live student accounts below.)
   await login(page, "TCH-00001", "Teacher@123");
-  await page.goto(BASE + "/teacher/attendance?section=sec_10a");
+  await page.goto(BASE + "/teacher/attendance?section=10-A");
   await waitText(page, /Class 10-A ·/);
+  const aaravAbsent = page.getByRole("radiogroup", { name: /Attendance for Aarav Sharma/ }).getByRole("radio", { name: "Absent" });
+  check("W3 Saved register reloads from the server (Aarav absent)", await aaravAbsent.waitFor().then(async () => (await aaravAbsent.getAttribute("aria-checked")) === "true", () => false));
+
+  // Class teacher CORRECTS the record (absent → present); the change is persisted.
   await page.getByRole("radiogroup", { name: /Attendance for Aarav Sharma/ }).getByRole("radio", { name: "Present" }).click();
   await page.getByRole("button", { name: /update attendance/i }).click();
   check("A16a Class teacher corrects Aarav absent → present", await waitText(page, /Attendance updated/i));
+  await page.reload();
+  await waitText(page, /Class 10-A ·/);
+  const aaravPresent = page.getByRole("radiogroup", { name: /Attendance for Aarav Sharma/ }).getByRole("radio", { name: "Present" });
+  check("A16b Correction is persisted", await aaravPresent.waitFor().then(async () => (await aaravPresent.getAttribute("aria-checked")) === "true", () => false));
   await logout(page);
-  await login(page, "GRD-00001", "Guardian@123");
-  await waitText(page, /Viewing Aarav Sharma/);
-  const t3 = await text(page);
-  check("A16b Correction propagates to guardian dashboard (back to 92%)", /92%/.test(t3), (t3.match(/\d+%/g) || []).slice(0, 3).join(","));
   await ctx.close();
 }
 
@@ -233,17 +236,27 @@ async function serverAnswer(ctx, path) {
 
   // Rahul — class teacher of 10-A; teaches Maths in 10-B (class teacher: Meera Iyer)
   await login(page, "TCH-00001", "Teacher@123");
-  await page.goto(BASE + "/teacher/attendance?section=sec_10a");
+  await page.goto(BASE + "/teacher/attendance?section=10-A");
   await waitText(page, /Class 10-A ·/);
   check("A1/A2 Rahul (class teacher) gets mark/edit controls for 10-A", await editable());
   await page.getByRole("button", { name: /mark all present/i }).click();
   await page.getByRole("button", { name: /update attendance|save attendance/i }).click();
   await waitText(page, /Attendance (saved|updated)/i);
-  await page.goto(BASE + "/teacher/attendance?section=sec_10b");
+  await page.goto(BASE + "/teacher/attendance?section=10-B");
   await waitText(page, /Class 10-B ·/);
   check("A3/A4 Rahul sees 10-B read-only (subject teacher, not class teacher)", await readOnly() && await waitText(page, /Only the class teacher of 10-B \(Ms\. Meera Iyer\)/));
   await page.goto(BASE + "/teacher/attendance?section=sec_12a");
-  check("A14 Direct URL to an unrelated class register is blocked", await waitText(page, /not assigned to you/i));
+  check("A14 A link to a class outside the teacher's scope (or a demo id) never reaches the register — own class shown instead",
+    await waitText(page, /isn't one of your sections/i) && await waitText(page, /Class 10-A ·/));
+  // Class / section filters use real ids and switch the register without errors.
+  await page.getByRole("combobox", { name: /^Class$/ }).selectOption({ label: "Grade 9" });
+  check("ATT Class filter switches to the teacher's 9-A register", await waitText(page, /Class 9-A ·/));
+  await page.getByRole("combobox", { name: /^Class$/ }).selectOption({ label: "Grade 10" });
+  await page.getByRole("combobox", { name: /^Section$/ }).selectOption({ label: "Section B" });
+  check("ATT Section filter switches to 10-B", await waitText(page, /Class 10-B ·/));
+  const pastDate = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+  await page.getByLabel(/^date$/i).fill(pastDate);
+  check("ATT Date filter loads that day's register (or the no-school notice)", await waitText(page, /Class 10-B ·|No school on this day/));
   await page.goto(BASE + "/teacher/classes/sec_10b");
   await waitText(page, /Class 10-B/);
   check("A3c Class page for 10-B offers View (not Mark) attendance", (await page.getByRole("link", { name: /view attendance/i }).count()) === 1 && (await page.getByRole("link", { name: /mark attendance|edit today's attendance/i }).count()) === 0);
@@ -255,10 +268,10 @@ async function serverAnswer(ctx, path) {
 
   // Sunita Rao — teaches English in 10-A, class teacher of 10-C
   await login(page, "TCH-00003", "Welcome@123");
-  await page.goto(BASE + "/teacher/attendance?section=sec_10a");
+  await page.goto(BASE + "/teacher/attendance?section=10-A");
   await waitText(page, /Class 10-A ·/);
   check("A5/A6 Subject teacher of 10-A cannot mark or edit 10-A", await readOnly());
-  await page.goto(BASE + "/teacher/attendance?section=sec_10c");
+  await page.goto(BASE + "/teacher/attendance?section=10-C");
   await waitText(page, /Class 10-C ·/);
   check("A5b Sunita CAN mark/edit her own class 10-C", await editable());
   await logout(page);
@@ -266,7 +279,7 @@ async function serverAnswer(ctx, path) {
   // Admin — view only
   await login(page, "ADMIN-001", "Admin@123");
   check("A8a Admin dashboard has no 'Mark attendance' action", (await page.getByText(/^Mark attendance$/).count()) === 0 && await waitText(page, /Review attendance/));
-  await page.goto(BASE + "/admin/attendance?section=sec_10a");
+  await page.goto(BASE + "/admin/attendance?section=10-A");
   await waitText(page, /Class 10-A ·/);
   check("A7 Admin can view 10-A register and school overview", await waitText(page, /School attendance/) && (await page.getByText("Present", { exact: true }).count()) > 0);
   check("A8/A9 Admin has no mark/edit controls", await readOnly() && await waitText(page, /Administrators can view and monitor attendance/));
@@ -277,7 +290,7 @@ async function serverAnswer(ctx, path) {
   await page.goto(BASE + "/student/attendance");
   check("A10 Student can view own attendance", await waitText(page, /Attendance calendar/));
   check("A11 Student has no attendance edit controls", (await page.getByRole("radiogroup", { name: /^Attendance for / }).count()) === 0 && (await page.getByRole("button", { name: /save attendance|update attendance|mark all/i }).count()) === 0);
-  await page.goto(BASE + "/teacher/attendance?section=sec_10a");
+  await page.goto(BASE + "/teacher/attendance?section=10-A");
   check("A11b Student blocked from the register route", await waitText(page, /don't have access/i));
   await logout(page);
   await login(page, "GRD-00001", "Guardian@123");
@@ -369,14 +382,16 @@ async function serverAnswer(ctx, path) {
   await login(page, "TCH-00001", "Teacher@123");
   await page.goto(BASE + "/teacher/examinations");
   await page.getByRole("link", { name: /Mathematics · Class 10-A/ }).first().click();
-  await waitText(page, /Mathematics · Class 10-A/);
+  // The link text also matches the list page, so wait for the marks sheet itself
+  // (URL + its inputs) before counting rows — count() does not auto-wait.
+  await page.waitForURL(/\/teacher\/examinations\/marks\?/);
   const inputs = page.getByRole("textbox", { name: /Marks for/ });
   await inputs.first().waitFor({ state: "visible", timeout: 10000 });
   const n = await inputs.count();
   const marks = [72, 67.5, 58, 61, 70, 49, 75, 66, 55];
   for (let i = 0; i < n; i++) await inputs.nth(i).fill(String(marks[i % marks.length]));
   await page.getByRole("button", { name: /save marks/i }).click();
-  check("W5 Teacher enters marks for assigned subject", await waitText(page, /Marks saved/));
+  check("W5 Teacher enters marks for assigned subject", await waitText(page, /Marks saved/) && await waitText(page, /All students entered/));
   await page.goto(BASE + "/teacher/examinations/marks?paper=ep_ex_hy_12_mat&section=sec_12a");
   check("W5 Teacher cannot enter marks for unassigned class", await waitText(page, /not assigned|don't have access/i));
   await logout(page);
@@ -392,9 +407,9 @@ async function serverAnswer(ctx, path) {
   const n2 = await in2.count();
   for (let i = 0; i < n2; i++) await in2.nth(i).fill(String(50 + i));
   await page.getByRole("button", { name: /save marks/i }).click();
-  await waitText(page, /Marks saved/);
+  check("W5 Admin completes the last pending sheet", await waitText(page, /Marks saved/) && await waitText(page, /All students entered/));
   await page.goto(BASE + "/admin/examinations/ex_hy");
-  await waitText(page, /ready to publish/i);
+  check("W5 Exam reports ready to publish", await waitText(page, /ready to publish/i));
   await page.getByRole("button", { name: /publish results/i }).first().click();
   await page.getByRole("dialog").getByRole("button", { name: /publish results/i }).click();
   check("W5 Admin publishes results", await waitText(page, /Results published/));
@@ -484,14 +499,24 @@ async function serverAnswer(ctx, path) {
     `${await page.getByTestId("dash-class").innerText()} ${await page.getByTestId("dash-year").innerText()}`);
   check("LIVE No demo persona data is shown to a real account", !/Aarav Sharma|Priya Sharma/.test(await page.locator("body").innerText()));
   const liveNav = await page.getByRole("navigation", { name: /main navigation/i }).innerText();
-  check("LIVE Navigation lists only modules backed by school records", /My Attendance/.test(liveNav) && /Profile/.test(liveNav) && !/My Fees|My Timetable|My Homework|My Results/.test(liveNav), liveNav.replace(/\s+/g, " "));
+  check("LIVE Navigation lists the student modules (all backed by school records)", ["My Attendance", "My Timetable", "My Homework", "My Results", "My Fees", "Notices", "Notifications", "Profile"].every((x) => liveNav.includes(x)), liveNav.replace(/\s+/g, " "));
   await page.goto(BASE + "/student/profile");
   await page.getByTestId("live-student-profile").waitFor();
   check("LIVE Profile shows the Login ID and class/section/year", (await page.getByTestId("profile-login-id").innerText()).trim() === newId && (await page.getByTestId("profile-section").innerText()).trim().length === 1 && /^\d{4}-\d{2}$/.test((await page.getByTestId("profile-year").innerText()).trim()));
   await page.goto(BASE + "/student/attendance");
   check("LIVE Attendance page reads the student's own attendance", await page.getByTestId("live-attendance").waitFor().then(() => true, () => false));
-  await page.goto(BASE + "/student/fees");
-  check("LIVE Unconnected modules say so instead of showing demo data", await page.getByTestId("module-not-connected").waitFor().then(() => true, () => false) && !(await text(page)).includes("₹"));
+  // Each module renders the account's real records, or the explicit empty state when the school has none.
+  for (const [path, pattern, label] of [
+    ["/student/timetable", /Weekly timetable|No timetable yet|Not enrolled in a class/, "timetable"],
+    ["/student/homework", /open assignment|No homework set|Not enrolled in a class/, "homework"],
+    ["/student/results", /No published results yet|Grade/, "results"],
+    ["/student/fees", /Installments|No current academic year/, "fees"],
+    ["/student/notices", /Announcements for the whole school/, "notices"],
+  ]) {
+    await page.goto(BASE + path);
+    const ok = await waitText(page, pattern);
+    check(`LIVE ${label} page shows the student's real records (no demo data)`, ok && !/Aarav Sharma/.test(await page.locator("body").innerText()));
+  }
   await page.goto(BASE + "/admin/accounts");
   check("LIVE Student cannot open admin pages", await waitText(page, /can't open|don't have access/i));
   await logout(page);
@@ -544,7 +569,7 @@ async function serverAnswer(ctx, path) {
   await page.getByRole("checkbox", { name: /select all students without an account on this page/i }).uncheck();
   check("BULK Header checkbox clears the page selection", (await page.getByRole("region", { name: "Selection" }).count()) === 0);
   await page.locator("tr", { hasText: IRA }).getByRole("checkbox").check();
-  await page.locator("tr", { hasText: otherName }).getByRole("checkbox").check();
+  await other.getByRole("checkbox").check(); // the same row as before (names can repeat across runs)
   await page.getByRole("region", { name: "Selection" }).getByRole("button", { name: /create accounts/i }).click();
   const confirmBox = page.getByTestId("bulk-confirm");
   await confirmBox.waitFor();
@@ -590,6 +615,32 @@ async function serverAnswer(ctx, path) {
     check("LIVE Bulk-created account resolves its own record (name, admission no., 10-C)",
       (await page.getByTestId("dash-name").innerText()).trim() === IRA && (await page.getByTestId("dash-admission").innerText()).trim() === admission &&
       (await page.getByTestId("dash-class").innerText()).trim() === "10-C" && cls.includes("10-C"), `${loginId} ${cls}`);
+    await logout(page);
+    // The class teacher of 10-C marks the register; the live student sees it and is notified.
+    await login(page, "TCH-00003", "Welcome@123");
+    await page.goto(BASE + "/teacher/attendance?section=10-C");
+    await waitText(page, /Class 10-C ·/);
+    const markable = await page.getByRole("button", { name: /mark all present/i }).count();
+    // Absence notifications are sent when a register is first marked (corrections do not re-notify).
+    const freshRegister = (await page.getByRole("button", { name: /^save attendance$/i }).count()) > 0;
+    if (markable) {
+      await page.getByRole("button", { name: /mark all present/i }).click();
+      await page.getByRole("radiogroup", { name: new RegExp(`Attendance for ${IRA}`) }).getByRole("radio", { name: "Absent" }).click();
+      await page.getByRole("button", { name: /update attendance|save attendance/i }).click();
+      await waitText(page, /Attendance (saved|updated)/i);
+    }
+    await logout(page);
+    await login(page, loginId, "IraChosen#2026", false);
+    await page.waitForURL(/\/student\/dashboard/);
+    await page.goto(BASE + "/student/attendance");
+    await page.getByTestId("live-attendance").waitFor();
+    check("LIVE Bulk-created student sees the class teacher's register (absent recorded)", !markable || await waitText(page, /Absent/));
+    await page.goto(BASE + "/student/notifications");
+    await page.getByTestId("live-notifications").waitFor();
+    check("LIVE Bulk-created student is notified of the absence", !markable || !freshRegister || await waitText(page, /marked absent/i), freshRegister ? "first marking" : "register already marked today — correction (no notification by design)");
+    await page.goto(BASE + "/student/timetable");
+    // Only 10-A has a timetable in the demo seed, so 10-C shows the explicit empty state.
+    check("LIVE Bulk-created student sees 10-C's timetable state from the school's records", await waitText(page, /Class 10-C · weekly schedule/) && await waitText(page, /No timetable yet|Weekly timetable/));
     await logout(page);
   }
   await login(page, "TCH-00001", "Teacher@123");
