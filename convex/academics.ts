@@ -16,92 +16,57 @@ import type { QueryCtx } from "./_generated/server";
 import { schoolMutation, schoolQuery } from "./core/functions";
 import {
   getCurrentAcademicYearId, getInSchool, getSchoolSettings, hasPermission, linkedStudentIds, requirePermission,
-  requireSectionRead, teacherSectionIds, enrollmentFor,
+  requireSectionRead, requireStudentAccess, teacherSectionIds, enrollmentFor,
 } from "./core/authorization";
-import { conflict, invalid, invalidRelationship } from "./core/errors";
-import { assertIsoDate, assertNonEmpty, vAcademicYearStatus } from "./core/validators";
+import { AppError, conflict, invalid, invalidRelationship } from "./core/errors";
+import { assertIsoDate, assertNonEmpty, vAcademicYearStatus, vGender } from "./core/validators";
 import { activeRoster, fullName, teacherDisplayName } from "./model/academics";
 import { writeAudit } from "./model/audit";
 import { renumberSections } from "./model/rollNumbers";
 import { notifyUsers } from "./model/notifications";
+import { nextAdmissionNumber } from "./model/counters";
+import { attendanceRecords, currentYear, feeLedger, guardiansOf, homeworkFor, placement, publishedResults, studentFields } from "./model/studentRecords";
 
 const byLabel = (a: { displayName: string }, b: { displayName: string }) => a.displayName.localeCompare(b.displayName, undefined, { numeric: true });
 
 // ================================================================ reads
 
-/** Single student full profile for admin view */
+/**
+ * One student's profile (admin / teacher / student-portal views).
+ *
+ * Access is decided on the server by the same three tiers as every other
+ * student-data function (requireStudentAccess): school-wide staff
+ * (students:read:all), a teacher whose scope includes the student's CURRENT
+ * section (students:read:assigned), or the student themself / a linked
+ * guardian (profile:read:own). Anyone else — including another school — gets
+ * NOT_FOUND. The response lists explicit fields only (never spread documents):
+ * guardian contact details only for school-wide staff and the family, fee
+ * details only for fee staff and the family. Returns null for a malformed id.
+ */
 export const getStudentProfile = schoolQuery({
+  // A route parameter: validated here with normalizeId (an unknown or malformed id is "not found").
   args: { studentId: v.string() },
   handler: async (ctx, args) => {
-    let student = null;
-    try {
-      student = await ctx.db.get(args.studentId as Id<"students">);
-    } catch {
-      // Fallback if an admissionNo was passed
-    }
-
-    if (!student) {
-      student = await ctx.db
-        .query("students")
-        .withIndex("by_school_admission", (q) =>
-          q.eq("schoolId", ctx.actor.schoolId).eq("admissionNo", args.studentId)
-        )
-        .first();
-    }
-
-    if (!student || student.schoolId !== ctx.actor.schoolId) {
-      return null;
-    }
-
-    const enrollment = await ctx.db
-      .query("enrollments")
-      .withIndex("by_student_year", (q) => q.eq("studentId", student._id))
-      .filter((q) => q.eq(q.field("status"), "active"))
-      .first();
-
-    let section = null;
-    let cls = null;
-    if (enrollment) {
-      section = await ctx.db.get(enrollment.sectionId);
-      if (section) {
-        cls = await ctx.db.get(section.classId);
-      }
-    }
-
-    const link = await ctx.db
-      .query("guardianLinks")
-      .filter((q) => q.eq(q.field("studentId"), student._id))
-      .first();
-
-    let guardian = null;
-    if (link) {
-      guardian = await ctx.db.get(link.guardianId);
-    }
-
+    const studentId = ctx.db.normalizeId("students", args.studentId);
+    if (!studentId) return null;
+    const student = await requireStudentAccess(ctx, studentId, { all: "students:read:all", assigned: "students:read:assigned", own: "profile:read:own" });
+    const schoolWide = hasPermission(ctx.actor, "students:read:all");
+    const own = (await linkedStudentIds(ctx, ctx.actor)).includes(student._id);
+    const year = await currentYear(ctx, ctx.actor.schoolId);
+    const { enrollmentState, enrollment, row } = await placement(ctx, student, year);
+    const activeSection = row && row.status === "active" ? await ctx.db.get(row.sectionId) : null;
+    const canSeeFees = hasPermission(ctx.actor, "fees:manage") || (own && hasPermission(ctx.actor, "fees:read:own"));
     return {
-      student: {
-        ...student,
-        id: student._id,
-        documents: [],
-      },
-      enrollment: enrollment
-        ? {
-            ...enrollment,
-            className: cls?.name ?? "N/A",
-            sectionName: section?.name ?? "N/A",
-            rollNo: enrollment.rollNo ?? null,
-          }
-        : null,
-      guardian: guardian
-        ? {
-            ...guardian,
-            relationship: link?.relationship ?? "Guardian",
-          }
-        : null,
-        homework: [],
-        results: [],
-        attendance: [],
-        fees: null,
+      access: schoolWide ? ("school" as const) : own ? ("own" as const) : ("assigned" as const),
+      student: studentFields(student),
+      academicYear: year ? { academicYearId: year._id, name: year.name } : null,
+      enrollmentState,
+      enrollment,
+      guardians: await guardiansOf(ctx, student, schoolWide || own),
+      attendance: year ? await attendanceRecords(ctx, student._id, year) : [],
+      results: await publishedResults(ctx, student),
+      homework: activeSection && activeSection.schoolId === ctx.actor.schoolId ? await homeworkFor(ctx, student, activeSection) : [],
+      fees: canSeeFees && year ? await feeLedger(ctx, student, year) : null,
     };
   },
 });
@@ -491,22 +456,32 @@ export const endEnrollment = schoolMutation({
 });
 
 /**
- * Create a student, auto-generate server-side admission number, link guardian,
- * and enroll them in a section for the active academic year.
+ * Admit ONE student from the admin form: student record + current-year
+ * enrollment + guardian link, in one transaction. It follows the same rules
+ * as the spreadsheet import (convex/model/importers.ts):
+ *  - the class and section must be real records of this school, the section
+ *    must belong to that class and to the CURRENT academic year — anything
+ *    else is rejected (never a silent fallback to another section);
+ *  - the admission number comes from the school's atomic counter;
+ *  - a guardian is matched by phone number (siblings share one guardian);
+ *  - roll numbers are system-assigned: the whole section is renumbered
+ *    alphabetically in this same transaction (model/rollNumbers.ts).
+ * No sign-in account is created here — that stays in Accounts & Import
+ * (Login ID + temporary password), so no credentials are generated or returned.
  */
 export const createStudentWithEnrollment = schoolMutation({
   args: {
     firstName: v.string(),
     lastName: v.string(),
-    gender: v.optional(v.union(v.literal("male"), v.literal("female"), v.literal("other"))),
+    gender: v.optional(vGender),
     dateOfBirth: v.string(),
     admissionDate: v.string(),
-    status: v.union(v.literal("active"), v.literal("inactive"), v.literal("transferred"), v.literal("alumni")),
     email: v.optional(v.string()),
     phone: v.optional(v.string()),
     address: v.string(),
     bloodGroup: v.optional(v.string()),
-    sectionId: v.string(),
+    classId: v.id("classes"),
+    sectionId: v.id("sections"),
     guardian: v.object({
       name: v.string(),
       relation: v.string(),
@@ -519,94 +494,80 @@ export const createStudentWithEnrollment = schoolMutation({
     requirePermission(ctx.actor, "students:write");
     assertIsoDate(a.admissionDate, "admissionDate");
     assertIsoDate(a.dateOfBirth, "dateOfBirth");
+    if (a.dateOfBirth >= a.admissionDate) throw invalid("The date of birth must be before the admission date.", { dateOfBirth: "Must be before the admission date" });
+    const firstName = assertNonEmpty(a.firstName, "firstName", 50);
+    const lastName = assertNonEmpty(a.lastName, "lastName", 50);
+    const address = assertNonEmpty(a.address, "address", 200);
+    const guardianName = assertNonEmpty(a.guardian.name, "guardian.name", 80);
+    const guardianRelation = assertNonEmpty(a.guardian.relation, "guardian.relation", 30);
+    const guardianPhone = normalizePhone(a.guardian.phone, "guardian.phone");
+    const phone = a.phone?.trim() ? normalizePhone(a.phone, "phone") : undefined;
+    const email = a.email?.trim() ? a.email.trim() : undefined;
 
-    const school = await ctx.db.get(ctx.actor.schoolId);
-    const schoolCode = school?.code ?? "SCH";
+    // Class ↔ section ↔ current academic year must agree. No fallbacks.
+    const cls = await getInSchool(ctx, "classes", a.classId, "Class");
+    const section = await getInSchool(ctx, "sections", a.sectionId, "Section");
+    if (section.classId !== cls._id) throw mismatch(`Section ${section.displayName} does not belong to ${cls.name}.`, { sectionId: "Not a section of the selected class" });
+    const yearId = await getCurrentAcademicYearId(ctx, ctx.actor.schoolId);
+    if (section.academicYearId !== yearId) throw mismatch(`Section ${section.displayName} is not in the current academic year.`, { sectionId: "Not in the current academic year" });
+    const year = (await ctx.db.get(yearId))!;
+    if (a.admissionDate > year.endDate) throw mismatch("The admission date is after the current academic year.", { admissionDate: "After the current academic year" });
 
-    // 1. Server-side Admission Number Generation
-    const existing = await ctx.db
-      .query("students")
-      .withIndex("by_school_admission", (q) => q.eq("schoolId", ctx.actor.schoolId))
-      .collect();
-    const nextSeq = existing.length + 1;
-    const yearPrefix = new Date(a.admissionDate).getFullYear();
-    const admissionNo = `${schoolCode}-${yearPrefix}-${String(nextSeq).padStart(4, "0")}`;
-
-    // 2. Insert Student
+    const school = (await ctx.db.get(ctx.actor.schoolId))!;
+    const admissionNo = await nextAdmissionNumber(ctx, school, a.admissionDate.slice(0, 4));
     const studentId = await ctx.db.insert("students", {
-      schoolId: ctx.actor.schoolId,
-      admissionNo,
-      firstName: assertNonEmpty(a.firstName, "firstName", 50),
-      lastName: assertNonEmpty(a.lastName, "lastName", 50),
-      gender: a.gender,
-      dateOfBirth: a.dateOfBirth,
-      admissionDate: a.admissionDate,
-      status: a.status,
-      email: a.email && a.email.trim().length > 0 ? a.email.trim() : undefined,
-      phone: a.phone && a.phone.trim().length > 0 ? a.phone.trim() : undefined,
-      address: assertNonEmpty(a.address, "address", 200),
-      bloodGroup: a.bloodGroup,
+      schoolId: school._id, admissionNo, firstName, lastName, status: "active", admissionDate: a.admissionDate, dateOfBirth: a.dateOfBirth, address,
+      ...(a.gender ? { gender: a.gender } : {}), ...(email ? { email } : {}), ...(phone ? { phone } : {}),
+      ...(a.bloodGroup?.trim() ? { bloodGroup: a.bloodGroup.trim() } : {}),
     });
 
-    // 3. Insert Guardian & Link
-    const guardianId = await ctx.db.insert("guardians", {
-      schoolId: ctx.actor.schoolId,
-      name: assertNonEmpty(a.guardian.name, "guardian.name", 80),
-      phone: assertNonEmpty(a.guardian.phone, "guardian.phone", 20),
-      email: a.guardian.email && a.guardian.email.trim().length > 0 ? a.guardian.email.trim() : undefined,
-      occupation: a.guardian.occupation,
-      address: a.address,
+    // Guardian: reuse an existing guardian with the same phone (siblings), as the import does.
+    const existingGuardian = await ctx.db.query("guardians").withIndex("by_school_phone", (q) => q.eq("schoolId", school._id).eq("phone", guardianPhone)).first();
+    const guardianId = existingGuardian?._id ?? await ctx.db.insert("guardians", {
+      schoolId: school._id, name: guardianName, phone: guardianPhone, address,
+      ...(a.guardian.email?.trim() ? { email: a.guardian.email.trim() } : {}),
+      ...(a.guardian.occupation?.trim() ? { occupation: a.guardian.occupation.trim() } : {}),
     });
+    await ctx.db.insert("guardianLinks", { schoolId: school._id, guardianId, studentId, relationship: guardianRelation, isPrimary: true });
 
-    await ctx.db.insert("guardianLinks", {
-      schoolId: ctx.actor.schoolId,
-      guardianId,
-      studentId,
-      relationship: a.guardian.relation,
-      isPrimary: true,
+    const startDate = a.admissionDate < year.startDate ? year.startDate : a.admissionDate;
+    const enrollmentId = await ctx.db.insert("enrollments", {
+      schoolId: school._id, studentId, academicYearId: yearId, classId: cls._id, sectionId: section._id, status: "active", startDate,
     });
+    await renumberSections(ctx, [section._id]);
 
-    // 4. Resolve Section with fallback
-    const schoolSections = await ctx.db
-      .query("sections")
-      .withIndex("by_school_year", (q) => q.eq("schoolId", ctx.actor.schoolId))
-      .collect();
-
-    const targetSection =
-      schoolSections.find((s) => s._id === a.sectionId) ??
-      schoolSections.find(
-        (s) =>
-          s.name.toLowerCase() === a.sectionId.toLowerCase() ||
-          s.displayName.toLowerCase().includes(a.sectionId.toLowerCase())
-      ) ??
-      schoolSections[0];
-
-    if (targetSection) {
-      await ctx.db.insert("enrollments", {
-        schoolId: ctx.actor.schoolId,
-        studentId,
-        academicYearId: targetSection.academicYearId,
-        classId: targetSection.classId,
-        sectionId: targetSection._id,
-        status: "active",
-        startDate: a.admissionDate,
-      });
-
-      await writeAudit(ctx, {
-        schoolId: ctx.actor.schoolId,
-        actor: ctx.actor,
-        action: "enrollment.created",
-        entity: { table: "students", id: studentId },
-        summary: `Enrolled ${fullName({ firstName: a.firstName, lastName: a.lastName })} (${admissionNo}) in ${targetSection.displayName}`,
-      });
+    const classTeacher = section.classTeacherId ? await ctx.db.get(section.classTeacherId) : null;
+    const warnings: string[] = [];
+    if (existingGuardian && existingGuardian.name.trim().toLowerCase() !== guardianName.toLowerCase()) {
+      warnings.push(`Phone ${guardianPhone} already belongs to guardian ${existingGuardian.name}; the student was linked to them.`);
     }
-
+    if (!classTeacher || classTeacher.schoolId !== school._id) {
+      warnings.push(`Section ${section.displayName} has no class teacher yet — assign one in Academics so attendance can be marked.`);
+    }
+    await writeAudit(ctx, {
+      schoolId: school._id, actor: ctx.actor, action: "student.admitted", entity: { table: "students", id: studentId },
+      summary: `Admitted ${fullName({ firstName, lastName })} (${admissionNo}) to ${section.displayName} (${year.name})`,
+      metadata: { enrollmentId, sectionId: section._id, guardianReused: !!existingGuardian },
+    });
+    const rollNo = (await ctx.db.get(enrollmentId))?.rollNo ?? null;
     return {
-      id: studentId,
+      studentId,
       admissionNo,
-      email: a.email || `${a.firstName.toLowerCase()}.${a.lastName.toLowerCase()}@school.edu`,
-      password: "DemoPassword123!",
-      feeAssigned: false,
+      section: section.displayName,
+      rollNo,
+      classTeacher: classTeacher && classTeacher.schoolId === school._id ? teacherDisplayName(classTeacher) : null,
+      warnings,
     };
   },
 });
+
+/** INVALID_RELATIONSHIP with a field hint for the form. */
+const mismatch = (message: string, fields: Record<string, string>) => new AppError("INVALID_RELATIONSHIP", message, fields);
+
+/** Phone numbers as the import stores them: digits with optional +, spaces, dashes, brackets; 7–15 digits. */
+function normalizePhone(raw: string, field: string): string {
+  const value = raw.trim();
+  const digits = value.replace(/\D/g, "");
+  if (!/^\+?[\d\s()-]+$/.test(value) || digits.length < 7 || digits.length > 15) throw invalid(`"${value}" is not a valid phone number.`, { [field]: "Enter a valid phone number" });
+  return value.replace(/\s+/g, " ");
+}

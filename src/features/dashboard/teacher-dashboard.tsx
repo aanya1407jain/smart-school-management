@@ -82,7 +82,7 @@ export function TeacherDashboard() {
                 <ul className="space-y-2 p-5">
                   {d.attendanceTasks.map((t) => (
                     <li key={t.sectionId}>
-                      <Link href={`/teacher/attendance?section=${t.sectionId}`} className="flex items-center justify-between gap-3 rounded-xl border border-line/70 bg-white/70 px-3.5 py-2.5 hover:bg-white">
+                      <Link href={`/teacher/attendance?section=${encodeURIComponent(t.label)}`} className="flex items-center justify-between gap-3 rounded-xl border border-line/70 bg-white/70 px-3.5 py-2.5 hover:bg-white">
                         <span>
                           <span className="block text-sm font-semibold text-ink">Class {t.label}{t.isClassTeacher && <span className="ml-1.5 text-[11px] font-medium text-plum">Class teacher</span>}</span>
                           <span className="block text-[12px] text-ink-muted">{t.students} students</span>

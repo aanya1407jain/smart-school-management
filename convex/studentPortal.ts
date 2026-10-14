@@ -18,47 +18,45 @@ import { v } from "convex/values";
 import { internalQuery, type QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { schoolQuery } from "./core/functions";
+import type { Actor } from "./core/actor";
+import type { Permission } from "./core/permissions";
 import { getSchoolSettings, linkedStudentIds, requireGuardianStudentAccess, requirePermission } from "./core/authorization";
-import { classTeacherOf, fullName, teacherDisplayName } from "./model/academics";
+import { assertIsoDate } from "./core/validators";
+import { fullName } from "./model/academics";
+import {
+  currentYear, feeLedger, guardiansOf, homeworkFor, noticesForStudent, placement, publishedResults, studentFields, timetableFor,
+} from "./model/studentRecords";
 
-type EnrollmentState = "active" | "ended" | "missing" | "no_current_year";
+type Ctx = QueryCtx & { actor: Actor };
 
-async function currentYear(ctx: QueryCtx, schoolId: Id<"schools">): Promise<Doc<"academicYears"> | null> {
-  const settings = await ctx.db.query("schoolSettings").withIndex("by_school", (q) => q.eq("schoolId", schoolId)).first();
-  if (!settings?.currentAcademicYearId) return null;
-  const year = await ctx.db.get(settings.currentAcademicYearId);
-  return year && year.schoolId === schoolId ? year : null;
+/**
+ * The student this portal request is about. Without `studentId`: the first
+ * student the server links to the membership (the student themself, or a
+ * guardian's first linked child). With `studentId`: only one of those linked
+ * students — anything else is NOT_FOUND. Never trusts a browser-supplied id
+ * on its own.
+ */
+async function resolvePortalStudent(ctx: Ctx, studentId: Id<"students"> | undefined, permission: Permission): Promise<Doc<"students"> | null> {
+  requirePermission(ctx.actor, "area:student");
+  requirePermission(ctx.actor, permission);
+  if (studentId) return await requireGuardianStudentAccess(ctx, studentId);
+  for (const id of await linkedStudentIds(ctx, ctx.actor)) {
+    const s = await ctx.db.get(id);
+    if (s && s.schoolId === ctx.actor.schoolId) return s;
+  }
+  return null;
 }
 
-/** The student's placement in the current year: the active enrollment, else the most recent one of that year. */
-async function placement(ctx: QueryCtx, student: Doc<"students">, year: Doc<"academicYears"> | null) {
-  if (!year) return { enrollmentState: "no_current_year" as EnrollmentState, enrollment: null };
-  const rows = (await ctx.db
-    .query("enrollments")
-    .withIndex("by_student_year", (q) => q.eq("studentId", student._id).eq("academicYearId", year._id))
-    .collect()).filter((e) => e.schoolId === student.schoolId);
-  const chosen = rows.find((e) => e.status === "active") ?? rows.sort((a, b) => b.startDate.localeCompare(a.startDate))[0];
-  if (!chosen) return { enrollmentState: "missing" as EnrollmentState, enrollment: null };
-  const section = await ctx.db.get(chosen.sectionId);
-  const klass = await ctx.db.get(chosen.classId);
-  const sectionOk = section && section.schoolId === student.schoolId ? section : null;
-  const teacher = sectionOk ? await classTeacherOf(ctx, sectionOk) : null;
-  return {
-    enrollmentState: (chosen.status === "active" ? "active" : "ended") as EnrollmentState,
-    enrollment: {
-      enrollmentId: chosen._id,
-      status: chosen.status,
-      startDate: chosen.startDate,
-      endDate: chosen.endDate ?? null,
-      rollNo: chosen.status === "active" ? (chosen.rollNo ?? null) : null,
-      className: klass && klass.schoolId === student.schoolId ? klass.name : null,
-      sectionName: sectionOk?.name ?? null,
-      sectionDisplayName: sectionOk?.displayName ?? null,
-      room: sectionOk?.room ?? null,
-      classTeacher: teacher ? teacherDisplayName(teacher) : null,
-    },
-  };
+/** The student's active section in the current year (null when not actively enrolled). */
+async function activeSection(ctx: Ctx, student: Doc<"students">) {
+  const year = await currentYear(ctx, ctx.actor.schoolId);
+  const { row } = await placement(ctx, student, year);
+  if (!year || !row || row.status !== "active") return { year, row, section: null };
+  const section = await ctx.db.get(row.sectionId);
+  return { year, row, section: section && section.schoolId === ctx.actor.schoolId ? section : null };
 }
+
+const vPortalStudent = { studentId: v.optional(v.id("students")) };
 
 /**
  * My school record. Returns `{ state: "no_student_record" }` when this
@@ -66,59 +64,87 @@ async function placement(ctx: QueryCtx, student: Doc<"students">, year: Doc<"aca
  * but the office has not linked it — never filled with demo data).
  */
 export const myProfile = schoolQuery({
-  args: { studentId: v.optional(v.id("students")) },
+  args: vPortalStudent,
   handler: async (ctx, { studentId }) => {
-    requirePermission(ctx.actor, "area:student");
-    let student: Doc<"students"> | null = null;
-    if (studentId) {
-      // Self, or a child linked to this guardian — otherwise NOT_FOUND.
-      student = await requireGuardianStudentAccess(ctx, studentId);
-    } else {
-      for (const id of await linkedStudentIds(ctx, ctx.actor)) {
-        const s = await ctx.db.get(id);
-        if (s && s.schoolId === ctx.actor.schoolId) { student = s; break; }
-      }
-    }
+    const student = await resolvePortalStudent(ctx, studentId, "profile:read:own");
     if (!student) return { state: "no_student_record" as const };
-
     const year = await currentYear(ctx, ctx.actor.schoolId);
     const { enrollmentState, enrollment } = await placement(ctx, student, year);
-    const links = (await ctx.db.query("guardianLinks").withIndex("by_student", (q) => q.eq("studentId", student._id)).collect())
-      .filter((l) => l.schoolId === ctx.actor.schoolId);
-    const guardians = [];
-    for (const l of links) {
-      const g = await ctx.db.get(l.guardianId);
-      if (g && g.schoolId === ctx.actor.schoolId) {
-        guardians.push({ name: g.name, relationship: l.relationship, phone: g.phone, email: g.email ?? null, isPrimary: l.isPrimary });
-      }
-    }
-    guardians.sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary) || a.name.localeCompare(b.name));
     const settings = await getSchoolSettings(ctx, ctx.actor.schoolId);
-
     return {
       state: "ok" as const,
       relation: ctx.actor.studentId === student._id ? ("self" as const) : ("guardian" as const),
-      student: {
-        studentId: student._id,
-        name: fullName(student),
-        firstName: student.firstName,
-        lastName: student.lastName,
-        admissionNo: student.admissionNo,
-        admissionDate: student.admissionDate ?? null,
-        status: student.status,
-        gender: student.gender ?? null,
-        dateOfBirth: student.dateOfBirth ?? null,
-        bloodGroup: student.bloodGroup ?? null,
-        email: student.email ?? null,
-        phone: student.phone ?? null,
-        address: student.address ?? null,
-      },
+      student: { ...studentFields(student), name: fullName(student) },
       academicYear: year ? { academicYearId: year._id, name: year.name, startDate: year.startDate, endDate: year.endDate, status: year.status } : null,
       enrollmentState,
       enrollment,
-      guardians,
+      // The family's own guardians, with contact details.
+      guardians: (await guardiansOf(ctx, student, true)).map(({ name, relationship, phone, email, isPrimary }) => ({ name, relationship, phone, email, isPrimary })),
       lowAttendanceThreshold: settings.attendance.lowAttendanceThreshold,
     };
+  },
+});
+
+/** Weekly timetable of the student's current section. */
+export const myTimetable = schoolQuery({
+  args: vPortalStudent,
+  handler: async (ctx, { studentId }) => {
+    const student = await resolvePortalStudent(ctx, studentId, "timetable:read:own");
+    if (!student) return { state: "no_student_record" as const };
+    const { section } = await activeSection(ctx, student);
+    if (!section) return { state: "not_enrolled" as const };
+    return { state: "ok" as const, section: section.displayName, ...(await timetableFor(ctx, section)) };
+  },
+});
+
+/** Homework set for the student's current section, with their own submission status. */
+export const myHomework = schoolQuery({
+  args: vPortalStudent,
+  handler: async (ctx, { studentId }) => {
+    const student = await resolvePortalStudent(ctx, studentId, "homework:read:own");
+    if (!student) return { state: "no_student_record" as const };
+    const { section } = await activeSection(ctx, student);
+    if (!section) return { state: "not_enrolled" as const };
+    return { state: "ok" as const, section: section.displayName, homework: await homeworkFor(ctx, student, section) };
+  },
+});
+
+/** Published exam results of the student. */
+export const myResults = schoolQuery({
+  args: vPortalStudent,
+  handler: async (ctx, { studentId }) => {
+    const student = await resolvePortalStudent(ctx, studentId, "results:read:own");
+    if (!student) return { state: "no_student_record" as const };
+    return { state: "ok" as const, results: await publishedResults(ctx, student) };
+  },
+});
+
+/** The student's fee obligations, payments and receipts for the current year. */
+export const myFees = schoolQuery({
+  args: vPortalStudent,
+  handler: async (ctx, { studentId }) => {
+    const student = await resolvePortalStudent(ctx, studentId, "fees:read:own");
+    if (!student) return { state: "no_student_record" as const };
+    const year = await currentYear(ctx, ctx.actor.schoolId);
+    if (!year) return { state: "no_current_year" as const };
+    return { state: "ok" as const, ...(await feeLedger(ctx, student, year)) };
+  },
+});
+
+/**
+ * Published notices addressed to the student (school-wide, students, their
+ * class or their section). `today` is the client's date in the school's
+ * timezone — queries must not read the clock; it only hides notices whose
+ * publish date has not arrived or that have expired.
+ */
+export const myNotices = schoolQuery({
+  args: { ...vPortalStudent, today: v.string() },
+  handler: async (ctx, { studentId, today }) => {
+    assertIsoDate(today, "today");
+    const student = await resolvePortalStudent(ctx, studentId, "notices:read");
+    if (!student) return { state: "no_student_record" as const };
+    const { row } = await activeSection(ctx, student);
+    return { state: "ok" as const, notices: await noticesForStudent(ctx, ctx.actor.schoolId, row, today) };
   },
 });
 

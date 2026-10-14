@@ -66,9 +66,9 @@ export function TeacherClassDetail({ sectionId }: { sectionId: string }) {
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {c.isClassTeacher ? (
-                      <LinkButton href={`/teacher/attendance?section=${c.sectionId}`} variant={c.markedToday ? "outline" : "primary"}><CalendarCheck2 className="h-4 w-4" /> {c.markedToday ? "Edit today's attendance" : "Mark attendance"}</LinkButton>
+                      <LinkButton href={`/teacher/attendance?section=${encodeURIComponent(c.label)}`} variant={c.markedToday ? "outline" : "primary"}><CalendarCheck2 className="h-4 w-4" /> {c.markedToday ? "Edit today's attendance" : "Mark attendance"}</LinkButton>
                     ) : (
-                      <LinkButton href={`/teacher/attendance?section=${c.sectionId}`} variant="outline"><CalendarCheck2 className="h-4 w-4" /> View attendance</LinkButton>
+                      <LinkButton href={`/teacher/attendance?section=${encodeURIComponent(c.label)}`} variant="outline"><CalendarCheck2 className="h-4 w-4" /> View attendance</LinkButton>
                     )}
                     <LinkButton href="/teacher/homework?action=new" variant="outline"><ClipboardList className="h-4 w-4" /> Create homework</LinkButton>
                   </div>

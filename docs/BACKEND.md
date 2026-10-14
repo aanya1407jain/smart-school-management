@@ -158,6 +158,14 @@ Isolation is tested in `tests/convex/tenancy.test.ts` (two schools with identica
   left untouched (no `metadata.target*`; the summary still names the account's role). Read-only check:
   `npx convex run audit:accountCreationReport '{"schoolSlug":"…"}'` compares each `account.created` row with the
   membership's actual role and student link.
+- **Student records** (`convex/model/studentRecords.ts`): shared read models (placement, guardians, attendance,
+  published results, fee ledger, homework with own submission, section timetable, audience-filtered notices). They
+  do not authorize; `studentPortal.my*` (own / linked children only) and `academics.getStudentProfile` (school
+  staff, assigned teacher, self/guardian; guardian contact and fees only for staff with full/fee access and the
+  family) authorize first and return explicit fields only.
+- **Admission form** (`academics.createStudentWithEnrollment`): class + section ids must match each other and the
+  current year (no fallback), atomic admission number, guardian re-use by phone, section renumbered in the same
+  transaction; no account or password is created (Accounts & Import does that).
 - **Student portal** (`convex/studentPortal.ts`): `myProfile` resolves the caller's OWN student record purely
   server-side (session → membership → `studentId` or guardian links → student → current-year enrollment). An
   optional `studentId` only chooses among the students the server links to the caller; anything else is NOT_FOUND.

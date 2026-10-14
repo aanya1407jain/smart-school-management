@@ -73,7 +73,12 @@ async function run() {
   };
   const login = (email: string, roleOrPassword: "admin" | "teacher" | "student" | string, roleArg?: "admin" | "teacher" | "student") => {
     const role = (roleArg ?? roleOrPassword) as "admin" | "teacher" | "student";
-    const bound = services.auth.bindIdentity({ email, role, displayName: email, permissionSets: [], students: SERVER_STUDENTS[email] ?? [] });
+    const bound = services.auth.bindIdentity({
+      // The bridge binds demo personas by Login ID within the demo school (users.session supplies both).
+      loginId: readDb().users.find((u) => u.email.toLowerCase() === email.toLowerCase())?.loginId ?? null,
+      school: { slug: "aster-academy" },
+      email, role, displayName: email, permissionSets: [], students: SERVER_STUDENTS[email] ?? [],
+    });
     if (!bound.ok) throw new Error(`could not bind ${email}`);
     return bound.user;
   };

@@ -20,7 +20,8 @@ import { PasswordCard } from "@/features/profile/profile-page";
 import { CategoryIcon } from "@/features/notifications/category-icon";
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, LoadingState, PageHeader, ProgressRing, StatCard, StatusBadge, useToast } from "@/components/ui";
 import { ROLE_LABELS } from "@/lib/permissions";
-import { formatDate, formatDateTime, relativeTime } from "@/lib/utils/dates";
+import { formatDate, formatDateTime, relativeTime, todayISO } from "@/lib/utils/dates";
+import { LiveFeesPanel, LiveHomeworkList, LiveNoticesList, LiveResultsList, LiveTimetableGrid } from "./live-records";
 import { cn } from "@/lib/utils/cn";
 import type { NotificationCategory } from "@/types/domain";
 
@@ -85,8 +86,14 @@ function EnrollmentNotice({ p }: { p: OkProfile }) {
 
 const classLabel = (p: OkProfile) => p.enrollment?.sectionDisplayName ?? (p.enrollment?.className ? `${p.enrollment.className}${p.enrollment.sectionName ? `-${p.enrollment.sectionName}` : ""}` : "—");
 
-/** Modules whose student pages are not connected to the school's records yet. */
-const NOT_CONNECTED = ["Timetable", "Homework", "Results", "Fees", "Notices"];
+/** Student-portal pages backed by the school's real records (live mode). */
+const LIVE_MODULES = [
+  { label: "My Timetable", href: "/student/timetable" },
+  { label: "My Homework", href: "/student/homework" },
+  { label: "My Results", href: "/student/results" },
+  { label: "My Fees", href: "/student/fees" },
+  { label: "Notices", href: "/student/notices" },
+];
 
 // ------------------------------------------------------------------ dashboard
 export function LiveStudentDashboard() {
@@ -134,10 +141,10 @@ export function LiveStudentDashboard() {
           </CardBody>
         </Card>
         <Card>
-          <CardHeader title="More modules" description="Being connected to your school's records" />
+          <CardHeader title="My school" description="Records kept by your school office" />
           <CardBody>
-            <ul className="space-y-2 text-sm text-ink-muted">
-              {NOT_CONNECTED.map((m) => <li key={m} className="flex items-center justify-between"><span>{m}</span><Badge>Not available yet</Badge></li>)}
+            <ul className="space-y-2 text-sm">
+              {LIVE_MODULES.map((m) => <li key={m.href}><Link href={m.href} className="font-medium text-lagoon hover:underline">{m.label}</Link></li>)}
             </ul>
           </CardBody>
         </Card>
@@ -328,15 +335,59 @@ export function LiveNotifications() {
   );
 }
 
-// ------------------------------------------------------------------ not connected
-export function ModuleNotConnected({ module }: { module: string }) {
+// ------------------------------------------------------------------ timetable / homework / results / fees / notices
+/** The portal query args: the server picks the linked student; guardians may choose among their linked children. */
+function usePortalArgs() {
+  const studentId = useActiveStudentId();
+  return studentId ? { studentId: studentId as Id<"students"> } : {};
+}
+
+function NotEnrolled({ what }: { what: string }) {
+  return <Card className="mx-auto mt-6 max-w-xl"><EmptyState title="Not enrolled in a class" description={`${what} is shown for the class you are enrolled in. You are not actively enrolled in a class this year — please contact the school office.`} /></Card>;
+}
+
+export function LiveTimetable() {
+  const t = useSchoolQuery(api.studentPortal.myTimetable, usePortalArgs());
+  if (t === undefined) return <LoadingState variant="table" label="Loading timetable" />;
+  if (t.state === "no_student_record") return <MissingRecord />;
+  if (t.state === "not_enrolled") return <NotEnrolled what="The timetable" />;
+  return (<div><PageHeader title="My Timetable" description={`Class ${t.section} · weekly schedule`} /><LiveTimetableGrid timetable={t} /></div>);
+}
+
+export function LiveHomework() {
+  const h = useSchoolQuery(api.studentPortal.myHomework, usePortalArgs());
+  if (h === undefined) return <LoadingState variant="table" label="Loading homework" />;
+  if (h.state === "no_student_record") return <MissingRecord />;
+  if (h.state === "not_enrolled") return <NotEnrolled what="Homework" />;
+  const open = h.homework.filter((x) => !x.submission && x.homeworkStatus === "active").length;
   return (
-    <Card className="mx-auto mt-6 max-w-xl" data-testid="module-not-connected">
-      <EmptyState
-        title={`${module} isn't available yet`}
-        description={`${module} is not connected to your school's records yet, so there is nothing to show here. Your dashboard, attendance, notifications and profile are up to date.`}
-        action={<Link href="/student/dashboard" className="inline-flex h-10 items-center rounded-xl bg-sapphire px-4 text-sm font-semibold text-white hover:bg-lagoon">Go to dashboard</Link>}
-      />
-    </Card>
+    <div>
+      <PageHeader title="My Homework" description={`Class ${h.section} · ${open} open assignment${open === 1 ? "" : "s"}. Submissions are handed in to your teacher; online submission is not available yet.`} />
+      <LiveHomeworkList homework={h.homework} />
+    </div>
   );
 }
+
+export function LiveResults() {
+  const r = useSchoolQuery(api.studentPortal.myResults, usePortalArgs());
+  if (r === undefined) return <LoadingState variant="cards" label="Loading results" />;
+  if (r.state === "no_student_record") return <MissingRecord />;
+  return (<div><PageHeader title="My Results" description="Published examination results." /><LiveResultsList results={r.results} /></div>);
+}
+
+export function LiveFees() {
+  const f = useSchoolQuery(api.studentPortal.myFees, usePortalArgs());
+  if (f === undefined) return <LoadingState variant="table" label="Loading fees" />;
+  if (f.state === "no_student_record") return <MissingRecord />;
+  if (f.state === "no_current_year") return <Card className="mx-auto mt-6 max-w-xl"><EmptyState title="No current academic year" description="Fees are shown per academic year; the school has not set its current year yet." /></Card>;
+  return (<div><PageHeader title="My Fees" description="Installments, concessions and payments recorded by the school office. Online payment is not available yet." /><LiveFeesPanel fees={f} /></div>);
+}
+
+export function LiveNotices() {
+  const today = todayISO();
+  const n = useSchoolQuery(api.studentPortal.myNotices, { ...usePortalArgs(), today });
+  if (n === undefined) return <LoadingState variant="table" label="Loading notices" />;
+  if (n.state === "no_student_record") return <MissingRecord />;
+  return (<div className="mx-auto max-w-4xl"><PageHeader title="Notices" description="Announcements for the whole school, students, and your class." /><LiveNoticesList notices={n.notices} /></div>);
+}
+

@@ -308,6 +308,31 @@ async function main() {
     const pb = await (await signIn(cred.loginId, "BulkPortal#2026")).query(api.studentPortal.myProfile, {});
     check("Bulk account: signs in and resolves its own record (10-C, current year)",
       pb.state === "ok" && pb.student.studentId === bulkImported.studentId && pb.enrollment?.sectionDisplayName === "10-C" && typeof pb.enrollment.rollNo === "number");
+    // Every student-portal module resolves for the bulk-created account (real records, own only).
+    const bulkClient = await signIn(cred.loginId, "BulkPortal#2026");
+    const [tt, hw, res, fees, notices] = await Promise.all([
+      bulkClient.query(api.studentPortal.myTimetable, {}), bulkClient.query(api.studentPortal.myHomework, {}), bulkClient.query(api.studentPortal.myResults, {}),
+      bulkClient.query(api.studentPortal.myFees, {}), bulkClient.query(api.studentPortal.myNotices, { today: TODAY }),
+    ]);
+    check("Bulk account: timetable, homework, results, fees and notices load from the deployment",
+      tt.state === "ok" && tt.section === "10-C" && hw.state === "ok" && res.state === "ok" && fees.state === "ok" && notices.state === "ok" && notices.notices.length > 0,
+      [tt.state, hw.state, res.state, fees.state, notices.state].join(","));
+    await expectCode("Bulk account: another student's fees are NOT_FOUND", () => bulkClient.query(api.studentPortal.myFees, { studentId: aaravId }), "NOT_FOUND");
+    await expectCode("Bulk account: another student's profile is NOT_FOUND", () => bulkClient.query(api.academics.getStudentProfile, { studentId: aaravId }), "NOT_FOUND");
+    const ownProfile = await bulkClient.query(api.academics.getStudentProfile, { studentId: bulkImported.studentId });
+    check("academics:getStudentProfile is deployed and returns the student's own explicit-field profile",
+      ownProfile?.access === "own" && ownProfile.student.studentId === bulkImported.studentId && !("schoolId" in ownProfile.student) && !("_creationTime" in ownProfile.student));
+  }
+  // Demo student: real Convex records for every module (seeded data).
+  {
+    const [res, fees] = await Promise.all([aarav.query(api.studentPortal.myResults, {}), aarav.query(api.studentPortal.myFees, {})]);
+    check("Demo student: published results and fee ledger come from the deployment", res.state === "ok" && res.results.length > 0 && fees.state === "ok" && fees.obligations.length > 0);
+    const adminView = await admin.query(api.academics.getStudentProfile, { studentId: aaravId });
+    const teacherView = await rahul.query(api.academics.getStudentProfile, { studentId: aaravId });
+    check("Profile tiers: admin sees guardian contact + fees; assigned teacher sees neither",
+      adminView?.access === "school" && !!adminView.guardians[0]?.phone && adminView.fees !== null &&
+      teacherView?.access === "assigned" && teacherView.guardians.every((g) => g.phone === null) && teacherView.fees === null);
+    check("A malformed (demo) id is simply not found", (await admin.query(api.academics.getStudentProfile, { studentId: "stu_aarav" })) === null);
   }
   check("After changing it: temp password stops working, the new one works, flag cleared",
     (await signInFails(newStudent.loginId!, temp)) !== null &&

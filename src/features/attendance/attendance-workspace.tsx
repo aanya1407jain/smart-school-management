@@ -2,7 +2,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { CalendarX2, CheckCheck, CheckCircle2, History, Lock, Save, UserX, Loader2 } from "lucide-react";
-import { useQuery, useMutation } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import type { AttendanceStatus } from "@/types/domain";
@@ -10,7 +9,8 @@ import {
   Avatar, Badge, Button, Card, CardHeader, EmptyState, FormField, GlassCard, Input, PageHeader, Segmented, Select, StatusBadge,
   Tabs, TabsContent, TabsList, useToast, ProgressBar,
 } from "@/components/ui";
-import { useAcademicOptions } from "@/features/shared/use-academic-options";
+import { useSchoolMutation, useSchoolQuery } from "@/lib/convex/membership";
+import { pickSection, type LiveSection } from "./section-pick";
 import { formatDate, formatDateTime, formatLongDate, isSchoolDay, previousSchoolDay, todayISO } from "@/lib/utils/dates";
 import { formatPercent } from "@/lib/utils/format";
 import { cn } from "@/lib/utils/cn";
@@ -21,32 +21,43 @@ const STATUS_OPTIONS: { value: AttendanceStatus; label: string; short: string; a
   { value: "late", label: "Late", short: "L", activeClass: "bg-mauve text-white shadow-soft" },
 ];
 
-/** Shared by Admin (all sections) and Teacher (assigned sections only — enforced by the service). */
+/** Shared by Admin (all sections, view-only) and Teacher (assigned sections; only the class teacher can mark). */
 export function AttendanceWorkspace({ area }: { area: "admin" | "teacher" }) {
   const params = useSearchParams();
-  const opts = useAcademicOptions();
+  const requested = params.get("section");
   const defaultDate = isSchoolDay(todayISO()) ? todayISO() : previousSchoolDay(todayISO());
   const [date, setDate] = useState(defaultDate);
-  const [classId, setClassId] = useState("");
-  const [sectionId, setSectionId] = useState(params.get("section") ?? "");
+  const [classId, setClassId] = useState<string>("");
+  const [sectionId, setSectionId] = useState<string>("");
 
-  // Real Convex query for overview
-  const overviewList = useQuery(api.attendance.dailyOverview, { date });
+  // Live academic structure (real Convex ids), scoped to the caller by the server.
+  const years = useSchoolQuery(api.academics.listAcademicYears, {});
+  const classes = useSchoolQuery(api.academics.listClasses, {});
+  const sectionList = useSchoolQuery(api.academics.listSections, {});
+  const overviewList = useSchoolQuery(api.attendance.dailyOverview, { date });
+  const year = years?.find((y) => y.isCurrent) ?? null;
 
-  // Pick a sensible default section once options load
+  const sectionsAll = useMemo<LiveSection[]>(() => (sectionList ?? []).map((s) => ({ _id: s._id, classId: s.classId, name: s.name, displayName: s.displayName, isClassTeacher: s.isClassTeacher })), [sectionList]);
+  // Only classes that have a section this account can see.
+  const classOptions = useMemo(() => (classes ?? []).filter((c) => sectionsAll.some((s) => s.classId === c._id)).sort((a, b) => a.level - b.level), [classes, sectionsAll]);
+
+  // Initial / deep-linked selection, once the server lists are in.
   useEffect(() => {
-    if (sectionId || !overviewList || overviewList.length === 0) return;
-    const first = overviewList.find((r) => r.isClassTeacher) ?? overviewList.find((r) => !r.marked) ?? overviewList[0];
-    if (first) setSectionId(first.sectionId);
-  }, [overviewList, sectionId]);
+    if (sectionId || sectionList === undefined) return;
+    const first = pickSection(sectionsAll, requested, overviewList);
+    if (first) { setSectionId(first._id); setClassId(first.classId); }
+  }, [sectionId, sectionList, sectionsAll, requested, overviewList]);
 
-  useEffect(() => {
-    const s = opts.data?.sections.find((x) => x.id === sectionId);
-    if (s) setClassId(s.classId);
-  }, [sectionId, opts.data]);
+  const selected = sectionsAll.find((s) => s._id === sectionId) ?? null;
+  const sections = sectionsAll.filter((s) => !classId || s.classId === classId);
+  const ignoredLink = !!requested && sectionList !== undefined && !sectionsAll.some((s) => s._id === requested || s.displayName.toLowerCase() === requested.trim().toLowerCase());
 
-  const sections = (opts.data?.sections ?? []).filter((s) => !classId || s.classId === classId);
-  const year = opts.data?.years.find((y) => y.id === opts.data?.currentYearId);
+  const selectSection = (id: string) => {
+    const s = sectionsAll.find((x) => x._id === id);
+    if (!s) return;
+    setSectionId(s._id);
+    setClassId(s.classId);
+  };
 
   // Compute school-wide stats from Convex overview
   const overviewStats = useMemo(() => {
@@ -66,6 +77,8 @@ export function AttendanceWorkspace({ area }: { area: "admin" | "teacher" }) {
     return { totalSections, markedSections, percentage, absentCount: totalAbsent };
   }, [overviewList]);
 
+  const loadingStructure = years === undefined || classes === undefined || sectionList === undefined;
+
   return (
     <div>
       <PageHeader
@@ -78,39 +91,53 @@ export function AttendanceWorkspace({ area }: { area: "admin" | "teacher" }) {
       />
       <Card className="mb-5 p-4 sm:p-5">
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          <FormField label="Academic year"><Select value={year?.id ?? ""} disabled>{year && <option value={year.id}>{year.name}</option>}</Select></FormField>
+          <FormField label="Academic year">
+            <Select value={year?._id ?? ""} disabled aria-label="Academic year">
+              {year ? <option value={year._id}>{year.name}</option> : <option value="">{years === undefined ? "Loading…" : "Not set"}</option>}
+            </Select>
+          </FormField>
           <FormField label="Class">
             <Select
+              aria-label="Class"
               value={classId}
+              disabled={loadingStructure || classOptions.length === 0}
               onChange={(e) => {
-                setClassId(e.target.value);
-                const first = opts.data?.sections.find((s) => s.classId === e.target.value);
-                setSectionId(first?.id ?? "");
+                const next = e.target.value;
+                setClassId(next);
+                const first = sectionsAll.find((s) => s.classId === next);
+                setSectionId(first?._id ?? "");
               }}
             >
-              {(opts.data?.classes ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {loadingStructure && <option value="">Loading…</option>}
+              {classOptions.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}
             </Select>
           </FormField>
           <FormField label="Section">
-            <Select value={sectionId} onChange={(e) => setSectionId(e.target.value)}>
-              {sections.map((s) => <option key={s.id} value={s.id}>Section {s.name}</option>)}
+            <Select aria-label="Section" value={sectionId} disabled={loadingStructure || sections.length === 0} onChange={(e) => selectSection(e.target.value)}>
+              {sections.length === 0 && <option value="">{loadingStructure ? "Loading…" : "No sections"}</option>}
+              {sections.map((s) => <option key={s._id} value={s._id}>Section {s.name}{s.isClassTeacher ? " · class teacher" : ""}</option>)}
             </Select>
           </FormField>
           <FormField label="Date"><Input type="date" value={date} max={todayISO()} onChange={(e) => e.target.value && setDate(e.target.value)} /></FormField>
         </div>
+        {ignoredLink && (
+          <p role="status" className="mt-3 text-[12.5px] text-ink-muted">The class in the link isn&apos;t one of your sections, so your own section is shown instead.</p>
+        )}
       </Card>
 
       <div className="grid gap-5 xl:grid-cols-[1fr_320px]">
         <Tabs defaultValue="register">
           <TabsList items={[{ value: "register", label: "Register" }, { value: "history", label: "History" }]} />
           <TabsContent value="register">
-            {sectionId ? (
-              <Register key={`${sectionId}-${date}`} sectionId={sectionId} date={date} />
+            {loadingStructure ? (
+              <Card className="flex items-center justify-center p-12" role="status" aria-label="Loading sections"><Loader2 className="h-6 w-6 animate-spin text-ink-muted" /></Card>
+            ) : selected ? (
+              <Register key={`${selected._id}-${date}`} sectionId={selected._id} date={date} />
             ) : (
-              <Card><EmptyState title="No sections assigned" description="Classes assigned to you will appear here." /></Card>
+              <Card><EmptyState title={area === "admin" ? "No sections in the current academic year" : "No sections assigned"} description={area === "admin" ? "Create sections in Academics to start taking attendance." : "Classes assigned to you will appear here."} /></Card>
             )}
           </TabsContent>
-          <TabsContent value="history">{sectionId && <SectionHistory sectionId={sectionId} />}</TabsContent>
+          <TabsContent value="history">{selected && <SectionHistory sectionId={selected._id} />}</TabsContent>
         </Tabs>
 
         <GlassCard className="h-fit">
@@ -143,7 +170,7 @@ export function AttendanceWorkspace({ area }: { area: "admin" | "teacher" }) {
                     return (
                       <li key={r.sectionId}>
                         <button
-                          onClick={() => setSectionId(r.sectionId)}
+                          onClick={() => selectSection(r.sectionId)}
                           aria-pressed={r.sectionId === sectionId}
                           className={cn(
                             "w-full rounded-xl border px-2 py-2 text-center transition-colors",
@@ -173,18 +200,13 @@ export function AttendanceWorkspace({ area }: { area: "admin" | "teacher" }) {
   );
 }
 
-function Register({ sectionId, date }: { sectionId: string; date: string }) {
+function Register({ sectionId, date }: { sectionId: Id<"sections">; date: string }) {
   const { toast } = useToast();
 
-  // Convex Query for Register
-  const registerData = useQuery(api.attendance.getByDate, {
-    sectionId: sectionId as Id<"sections">,
-    date,
-    today: date,
-  });
-  // Convex Mutations
-  const markAttendance = useMutation(api.attendance.mark);
-  const updateAttendance = useMutation(api.attendance.update);
+  // `today` is the real current date (it only affects the canMark hint; `mark` re-checks on the server).
+  const registerData = useSchoolQuery(api.attendance.getByDate, { sectionId, date, today: todayISO() });
+  const markAttendance = useSchoolMutation(api.attendance.mark);
+  const updateAttendance = useSchoolMutation(api.attendance.update);
 
   const [entries, setEntries] = useState<Record<string, AttendanceStatus>>({});
   const [dirty, setDirty] = useState(false);
@@ -228,17 +250,18 @@ function Register({ sectionId, date }: { sectionId: string; date: string }) {
     setDirty(true);
   };
 
+  // Entries keyed by the server's own student ids (only students on this register).
+  const registerEntries = () =>
+    r.students.flatMap((s) => (entries[s.studentId] ? [{ studentId: s.studentId, status: entries[s.studentId] }] : []));
+
   const save = async () => {
     setSaving(true);
     try {
       if (r.session) {
         // Updating existing session
-        const changes = Object.entries(entries).map(([studentId, status]) => ({
-          studentId: studentId as Id<"students">,
-          status,
-        }));
+        const changes = registerEntries();
         await updateAttendance({
-          sectionId: sectionId as Id<"sections">,
+          sectionId,
           date,
           changes,
         });
@@ -246,12 +269,9 @@ function Register({ sectionId, date }: { sectionId: string; date: string }) {
         toast({ title: "Attendance updated", description: `Class ${r.section.displayName} attendance updated successfully.` });
       } else {
         // Creating new register
-        const entriesList = Object.entries(entries).map(([studentId, status]) => ({
-          studentId: studentId as Id<"students">,
-          status,
-        }));
+        const entriesList = registerEntries();
         await markAttendance({
-          sectionId: sectionId as Id<"sections">,
+          sectionId,
           date,
           entries: entriesList,
         });
@@ -369,15 +389,15 @@ function Register({ sectionId, date }: { sectionId: string; date: string }) {
   );
 }
 
-function SectionHistory({ sectionId }: { sectionId: string }) {
+function SectionHistory({ sectionId }: { sectionId: Id<"sections"> }) {
   // Query past 30 days for this section
   const today = todayISO();
   const pastDate = new Date();
   pastDate.setDate(pastDate.getDate() - 30);
   const fromDate = pastDate.toISOString().slice(0, 10);
 
-  const history = useQuery(api.attendance.listBySection, {
-    sectionId: sectionId as Id<"sections">,
+  const history = useSchoolQuery(api.attendance.listBySection, {
+    sectionId,
     from: fromDate,
     to: today,
   });
@@ -418,4 +438,4 @@ function SectionHistory({ sectionId }: { sectionId: string }) {
       </div>
     </Card>
   );
-}
+}
