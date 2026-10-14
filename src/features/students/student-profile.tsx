@@ -2,12 +2,12 @@
 import Link from "next/link";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis, Legend } from "recharts";
 import { Cake, Droplet, FileText, Mail, MapPin, Pencil, Phone, UserRound, Wallet, CalendarDays, Download } from "lucide-react";
-import { services } from "@/lib/services";
-import type { StudentProfile as Profile } from "@/lib/services/students.service";
-import { useQuery } from "@/lib/hooks/use-query";
+import { useQuery } from "convex/react";
+import { api } from "../../../convex/_generated/api";
+import type { Id } from "../../../convex/_generated/dataModel";
 import { useSession } from "@/features/auth/session-provider";
 import {
-  Avatar, Badge, Card, CardHeader, EmptyState, GlassCard, LinkButton, ProgressRing, QueryView, StatusBadge, Tabs, TabsContent, TabsList,
+  Avatar, Badge, Card, CardHeader, EmptyState, GlassCard, LinkButton, ProgressRing, StatusBadge, Tabs, TabsContent, TabsList,
 } from "@/components/ui";
 import { ChartTooltip, axisProps } from "@/components/charts/chart-card";
 import { CHART, CHART_GRID } from "@/lib/constants/theme";
@@ -17,17 +17,202 @@ import { cn } from "@/lib/utils/cn";
 import { FeeObligationsTable, PaymentsTable } from "@/features/fees/fee-tables";
 import { ResultCard } from "@/features/examinations/result-card";
 
+/* ------------------------------------------------------------------ */
+/* Container: fetches data and handles loading / not-found             */
+/* ------------------------------------------------------------------ */
+
 export function StudentProfileView({ studentId, backHref }: { studentId: string; backHref?: string }) {
-  const q = useQuery(() => services.students.getProfile(studentId), [studentId]);
-  return <QueryView query={q}>{(p) => <ProfileBody p={p} backHref={backHref} />}</QueryView>;
+  const data = useQuery(
+    api.academics.getStudentProfile,
+    studentId ? { studentId: studentId as Id<"students"> } : "skip",
+  );
+
+  if (!studentId) return <NotFound backHref={backHref} />;
+
+  if (data === undefined) {
+    return <div className="p-8 text-center text-ink-muted">Loading student profile...</div>;
+  }
+
+  if (!data || !data.student) return <NotFound backHref={backHref} />;
+
+  return <ProfileBody p={normalizeProfile(data)} backHref={backHref} />;
 }
 
-function ProfileBody({ p, backHref }: { p: Profile; backHref?: string }) {
+function NotFound({ backHref }: { backHref?: string }) {
+  return (
+    <div className="mx-auto max-w-4xl p-6">
+      <EmptyState
+        title="Student not found"
+        description="This student record doesn't exist or you don't have access to it."
+        action={backHref ? <LinkButton href={backHref}>Back to students</LinkButton> : undefined}
+      />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Normalization: turn the raw query result into a safe view model     */
+/* ------------------------------------------------------------------ */
+
+type AttendanceRecord = { date: string; status: string };
+
+type GuardianVM = {
+  id: string;
+  name: string;
+  relation: string;
+  occupation?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  isPrimary: boolean;
+  otherChildren: { id: string; name: string; classLabel?: string }[];
+};
+
+type FeesVM = {
+  totals: { gross: number; concession: number; paid: number; outstanding: number; overdue: number };
+  standing?: string;
+  obligations: any[];
+  payments: any[];
+  receipts: any[];
+};
+
+type ProfileVM = ReturnType<typeof normalizeProfile>;
+
+function arr<T = any>(v: unknown): T[] {
+  return Array.isArray(v) ? (v as T[]) : [];
+}
+
+function normalizeProfile(raw: any) {
+  const s = raw?.student ?? {};
+  const enrollment = raw?.enrollment ?? null;
+
+  const student = {
+    id: String(s.id ?? s._id ?? ""),
+    firstName: s.firstName ?? "",
+    lastName: s.lastName ?? "",
+    status: s.status as string | undefined,
+    admissionNo: s.admissionNo as string | undefined,
+    admissionDate: s.admissionDate as string | undefined,
+    dateOfBirth: s.dateOfBirth as string | undefined,
+    gender: s.gender as string | undefined,
+    bloodGroup: s.bloodGroup as string | undefined,
+    email: s.email as string | undefined,
+    phone: s.phone as string | undefined,
+    address: s.address as string | undefined,
+    documents: arr(s.documents),
+  };
+
+  const classLabel = enrollment
+    ? [enrollment.className, enrollment.sectionName].filter(Boolean).join(" - ")
+    : "";
+
+  // Backend returns a single `guardian`; also accept `guardians` if it ever becomes a list.
+  const rawGuardians = Array.isArray(raw?.guardians) ? raw.guardians : raw?.guardian ? [raw.guardian] : [];
+  const guardians: GuardianVM[] = rawGuardians.map((g: any, i: number) => ({
+    id: String(g.id ?? g._id ?? i),
+    name: g.name ?? "Unnamed guardian",
+    relation: g.relationship ?? g.relation ?? "Guardian",
+    occupation: g.occupation,
+    phone: g.phone,
+    email: g.email,
+    address: g.address,
+    isPrimary: g.isPrimary ?? i === 0,
+    otherChildren: arr(g.otherChildren),
+  }));
+
+  // Attendance arrives as a flat list of { date, status } records.
+  const records: AttendanceRecord[] = (Array.isArray(raw?.attendance) ? raw.attendance : arr(raw?.attendance?.recent))
+    .filter((r: any) => r && typeof r.date === "string");
+  const attendance = summarizeAttendance(records);
+
+  const homework = arr(raw?.homework);
+  const results = arr(raw?.results).filter(Boolean);
+
+  const fees: FeesVM | null = raw?.fees
+    ? {
+        totals: {
+          gross: raw.fees.totals?.gross ?? 0,
+          concession: raw.fees.totals?.concession ?? 0,
+          paid: raw.fees.totals?.paid ?? 0,
+          outstanding: raw.fees.totals?.outstanding ?? 0,
+          overdue: raw.fees.totals?.overdue ?? 0,
+        },
+        standing: raw.fees.standing,
+        obligations: arr(raw.fees.obligations),
+        payments: arr(raw.fees.payments),
+        receipts: arr(raw.fees.receipts),
+      }
+    : null;
+
+  return {
+    student,
+    enrollment,
+    classLabel,
+    classTeacher: (enrollment?.classTeacher ?? raw?.classInfo?.classTeacher) as string | undefined,
+    room: (enrollment?.room ?? raw?.classInfo?.room) as string | undefined,
+    teachers: arr<{ subjectId: string; subject: string; teacher: string }>(raw?.teachers),
+    guardians,
+    account: raw?.account as { email?: string } | undefined,
+    attendance,
+    homework,
+    results,
+    fees,
+  };
+}
+
+function summarizeAttendance(records: AttendanceRecord[]) {
+  let present = 0, late = 0, absent = 0;
+  const byMonth = new Map<string, { month: string; present: number; late: number; absent: number }>();
+
+  for (const r of records) {
+    const month = r.date.slice(0, 7);
+    const bucket = byMonth.get(month) ?? { month, present: 0, late: 0, absent: 0 };
+    if (r.status === "present") { present++; bucket.present++; }
+    else if (r.status === "late") { late++; bucket.late++; }
+    else if (r.status === "absent") { absent++; bucket.absent++; }
+    byMonth.set(month, bucket);
+  }
+
+  const total = present + late + absent;
+  const percentage = total > 0 ? ((present + late) / total) * 100 : null;
+
+  const monthly = [...byMonth.values()]
+    .sort((a, b) => a.month.localeCompare(b.month))
+    .map((m) => ({
+      ...m,
+      attended: m.present + m.late,
+      label: new Date(`${m.month}-01T00:00:00`).toLocaleString("en-IN", { month: "short" }),
+    }));
+
+  const recent = [...records].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 14);
+
+  return { stats: { present, late, absent, total, percentage }, monthly, recent };
+}
+
+/* ------------------------------------------------------------------ */
+/* Small formatting guards                                             */
+/* ------------------------------------------------------------------ */
+
+const dash = "—";
+const safe = (v?: string | null) => (v && String(v).trim() ? String(v) : dash);
+const safeDate = (d?: string, fmt: (d: string) => string = formatDate) => (d ? fmt(d) : dash);
+const safeTitle = (v?: string) => (v ? titleCase(v) : dash);
+
+/* ------------------------------------------------------------------ */
+/* View                                                                */
+/* ------------------------------------------------------------------ */
+
+function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
   const { can } = useSession();
   const s = p.student;
-  const name = `${s.firstName} ${s.lastName}`;
-  const age = Math.floor(daysBetween(s.dateOfBirth, todayISO()) / 365.25);
+  const name = `${s.firstName} ${s.lastName}`.trim() || "Unnamed student";
+  const age = s.dateOfBirth ? Math.floor(daysBetween(s.dateOfBirth, todayISO()) / 365.25) : null;
   const isAdmin = can("students:write");
+  const pct = p.attendance.stats.percentage;
+  const latest = p.results[0];
+  const primaryGuardian = p.guardians[0];
+  const pendingHw = p.homework.filter((h: any) => h?.status === "pending" || h?.status === "overdue").length;
+
   const tabs = [
     { value: "overview", label: "Overview" },
     { value: "academic", label: "Academic" },
@@ -38,7 +223,6 @@ function ProfileBody({ p, backHref }: { p: Profile; backHref?: string }) {
     { value: "documents", label: "Documents", count: s.documents.length },
     { value: "guardian", label: "Guardian" },
   ];
-  const pendingHw = p.homework.filter((h) => h.status === "pending" || h.status === "overdue").length;
 
   return (
     <div className="space-y-6">
@@ -50,25 +234,36 @@ function ProfileBody({ p, backHref }: { p: Profile; backHref?: string }) {
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-2xl font-semibold text-sapphire">{name}</h1>
-                <StatusBadge status={s.status} />
+                {s.status && <StatusBadge status={s.status} />}
               </div>
               <p className="mt-1 text-sm text-ink-muted">
-                <span className="font-mono">{s.admissionNo}</span> · {p.classInfo.longLabel}{p.enrollment && ` · Roll ${p.enrollment.rollNo}`}
+                {s.admissionNo && <span className="font-mono">{s.admissionNo}</span>}
+                {p.classLabel && <>{s.admissionNo ? " · " : ""}Class {p.classLabel}</>}
+                {p.enrollment?.rollNo != null && ` · Roll ${p.enrollment.rollNo}`}
               </p>
-              <p className="mt-0.5 text-sm text-ink-muted">Class teacher: <span className="text-ink">{p.classInfo.classTeacher ?? "—"}</span></p>
+              <p className="mt-0.5 text-sm text-ink-muted">
+                Class teacher: <span className="text-ink">{safe(p.classTeacher)}</span>
+              </p>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
             {backHref && <LinkButton href={backHref} variant="ghost">Back</LinkButton>}
-            {isAdmin && <LinkButton href={`/admin/fees/${s.id}`} variant="outline"><Wallet className="h-4 w-4" /> Fee ledger</LinkButton>}
-            {isAdmin && <LinkButton href={`/admin/students/${s.id}/edit`}><Pencil className="h-4 w-4" /> Edit</LinkButton>}
+            {isAdmin && s.id && <LinkButton href={`/admin/fees/${s.id}`} variant="outline"><Wallet className="h-4 w-4" /> Fee ledger</LinkButton>}
+            {isAdmin && s.id && <LinkButton href={`/admin/students/${s.id}/edit`}><Pencil className="h-4 w-4" /> Edit</LinkButton>}
           </div>
         </div>
         <dl className="relative mt-6 grid grid-cols-2 gap-4 border-t border-white/70 pt-5 sm:grid-cols-4">
-          <Metric label="Attendance" value={formatPercent(p.attendance.stats.percentage, 1)} tone={(p.attendance.stats.percentage ?? 100) < 85 ? "warn" : undefined} />
-          <Metric label="Latest result" value={p.results[0]?.percentage != null ? `${formatPercent(p.results[0].percentage, 1)} · ${p.results[0].grade}` : "—"} />
+          <Metric label="Attendance" value={pct != null ? formatPercent(pct, 1) : dash} tone={pct != null && pct < 85 ? "warn" : undefined} />
+          <Metric
+            label="Latest result"
+            value={latest?.percentage != null ? `${formatPercent(latest.percentage, 1)}${latest.grade ? ` · ${latest.grade}` : ""}` : dash}
+          />
           <Metric label="Pending homework" value={String(pendingHw)} />
-          <Metric label="Fee balance" value={p.fees ? (p.fees.totals.outstanding ? formatCurrency(p.fees.totals.outstanding) : "Paid") : "Restricted"} tone={p.fees?.standing === "overdue" ? "warn" : undefined} />
+          <Metric
+            label="Fee balance"
+            value={p.fees ? (p.fees.totals.outstanding ? formatCurrency(p.fees.totals.outstanding) : "Paid") : "Restricted"}
+            tone={p.fees?.standing === "overdue" ? "warn" : undefined}
+          />
         </dl>
       </GlassCard>
 
@@ -80,53 +275,72 @@ function ProfileBody({ p, backHref }: { p: Profile; backHref?: string }) {
             <Card className="lg:col-span-2">
               <CardHeader title="Personal information" />
               <dl className="grid gap-x-6 gap-y-4 p-5 sm:grid-cols-2">
-                <Info icon={<Cake />} label="Date of birth" value={`${formatDate(s.dateOfBirth)} (${age} yrs)`} />
-                <Info icon={<UserRound />} label="Gender" value={titleCase(s.gender)} />
-                <Info icon={<Droplet />} label="Blood group" value={s.bloodGroup} />
-                <Info icon={<CalendarDays />} label="Admitted on" value={formatDate(s.admissionDate)} />
-                <Info icon={<Mail />} label="Email" value={s.email} />
-                <Info icon={<Phone />} label="Phone" value={s.phone || "—"} />
-                <Info icon={<MapPin />} label="Address" value={s.address} className="sm:col-span-2" />
+                <Info icon={<Cake />} label="Date of birth" value={s.dateOfBirth ? `${formatDate(s.dateOfBirth)}${age != null ? ` (${age} yrs)` : ""}` : dash} />
+                <Info icon={<UserRound />} label="Gender" value={safeTitle(s.gender)} />
+                <Info icon={<Droplet />} label="Blood group" value={safe(s.bloodGroup)} />
+                <Info icon={<CalendarDays />} label="Admitted on" value={safeDate(s.admissionDate)} />
+                <Info icon={<Mail />} label="Email" value={safe(s.email)} />
+                <Info icon={<Phone />} label="Phone" value={safe(s.phone)} />
+                <Info icon={<MapPin />} label="Address" value={safe(s.address)} className="sm:col-span-2" />
               </dl>
             </Card>
             <Card>
               <CardHeader title="Primary guardian" />
               <div className="p-5">
-                {p.guardians[0] ? (
+                {primaryGuardian ? (
                   <div className="flex items-start gap-3">
-                    <Avatar name={p.guardians[0].name} />
+                    <Avatar name={primaryGuardian.name} />
                     <div className="text-sm">
-                      <p className="font-semibold text-ink">{p.guardians[0].name}</p>
-                      <p className="text-ink-muted">{p.guardians[0].relation} · {p.guardians[0].occupation}</p>
-                      <p className="mt-2 text-ink-soft">{p.guardians[0].phone}</p>
-                      <p className="text-ink-soft">{p.guardians[0].email}</p>
+                      <p className="font-semibold text-ink">{primaryGuardian.name}</p>
+                      <p className="text-ink-muted">
+                        {primaryGuardian.relation}{primaryGuardian.occupation ? ` · ${primaryGuardian.occupation}` : ""}
+                      </p>
+                      {primaryGuardian.phone && <p className="mt-2 text-ink-soft">{primaryGuardian.phone}</p>}
+                      {primaryGuardian.email && <p className="text-ink-soft">{primaryGuardian.email}</p>}
                     </div>
                   </div>
                 ) : <EmptyState title="No guardian linked" />}
               </div>
-              {p.account && <p className="border-t border-line/60 px-5 py-3 text-[12.5px] text-ink-muted">Portal login: <span className="font-mono text-ink-soft">{p.account.email}</span></p>}
+              {p.account?.email && (
+                <p className="border-t border-line/60 px-5 py-3 text-[12.5px] text-ink-muted">
+                  Portal login: <span className="font-mono text-ink-soft">{p.account.email}</span>
+                </p>
+              )}
             </Card>
           </div>
         </TabsContent>
 
         <TabsContent value="academic">
           <Card>
-            <CardHeader title="Subjects & teachers" description={`${p.classInfo.longLabel} · ${p.classInfo.room ?? ""}`} />
-            <ul className="grid gap-2 p-5 sm:grid-cols-2 lg:grid-cols-3">
-              {p.teachers.map((t) => (
-                <li key={t.subjectId} className="rounded-xl border border-line/70 bg-alabaster/60 px-4 py-3">
-                  <p className="text-sm font-semibold text-ink">{t.subject}</p>
-                  <p className="text-[12.5px] text-ink-muted">{t.teacher}</p>
-                </li>
-              ))}
-            </ul>
+            <CardHeader
+              title="Enrollment"
+              description={[p.classLabel && `Class ${p.classLabel}`, p.room].filter(Boolean).join(" · ") || undefined}
+            />
+            <dl className="grid gap-x-6 gap-y-4 p-5 sm:grid-cols-3">
+              <Info icon={<UserRound />} label="Class" value={safe(p.enrollment?.className)} />
+              <Info icon={<UserRound />} label="Section" value={safe(p.enrollment?.sectionName)} />
+              <Info icon={<UserRound />} label="Roll no." value={p.enrollment?.rollNo != null ? String(p.enrollment.rollNo) : dash} />
+            </dl>
+            {p.teachers.length > 0 && (
+              <>
+                <CardHeader title="Subjects & teachers" />
+                <ul className="grid gap-2 p-5 sm:grid-cols-2 lg:grid-cols-3">
+                  {p.teachers.map((t) => (
+                    <li key={t.subjectId} className="rounded-xl border border-line/70 bg-alabaster/60 px-4 py-3">
+                      <p className="text-sm font-semibold text-ink">{t.subject}</p>
+                      <p className="text-[12.5px] text-ink-muted">{t.teacher}</p>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
           </Card>
         </TabsContent>
 
         <TabsContent value="attendance">
           <div className="grid gap-4 lg:grid-cols-3">
             <Card className="flex flex-col items-center justify-center p-6 text-center">
-              <ProgressRing value={p.attendance.stats.percentage} size={132} stroke={11} sublabel="this year" />
+              <ProgressRing value={pct ?? 0} size={132} stroke={11} sublabel="this year" />
               <dl className="mt-5 grid w-full grid-cols-3 gap-2 text-sm">
                 <div><dt className="text-ink-muted">Present</dt><dd className="font-semibold text-ink">{p.attendance.stats.present}</dd></div>
                 <div><dt className="text-ink-muted">Late</dt><dd className="font-semibold text-ink">{p.attendance.stats.late}</dd></div>
@@ -135,54 +349,64 @@ function ProfileBody({ p, backHref }: { p: Profile; backHref?: string }) {
             </Card>
             <Card className="lg:col-span-2">
               <CardHeader title="Monthly attendance" description="Days present vs absent" />
-              <div className="h-60 px-3 pb-4">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={p.attendance.monthly.map((m) => ({ ...m, label: new Date(`${m.month}-01T00:00:00`).toLocaleString("en-IN", { month: "short" }), attended: m.present + m.late }))} margin={{ top: 10, right: 8, left: 0, bottom: 0 }}>
-                    <CartesianGrid vertical={false} stroke={CHART_GRID} />
-                    <XAxis dataKey="label" {...axisProps} />
-                    <YAxis {...axisProps} width={30} allowDecimals={false} />
-                    <Tooltip content={<ChartTooltip />} cursor={{ fill: "rgba(188,197,204,0.18)" }} />
-                    <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />
-                    <Bar dataKey="attended" name="Present (incl. late)" stackId="a" fill={CHART.primary} maxBarSize={34} stroke="#fff" strokeWidth={1} />
-                    <Bar dataKey="absent" name="Absent" stackId="a" fill={CHART.secondary} radius={[4, 4, 0, 0]} maxBarSize={34} stroke="#fff" strokeWidth={1} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+              {p.attendance.monthly.length === 0 ? (
+                <EmptyState title="No attendance recorded yet" />
+              ) : (
+                <div className="h-60 px-3 pb-4">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={p.attendance.monthly} margin={{ top: 10, right: 8, left: 0, bottom: 0 }}>
+                      <CartesianGrid vertical={false} stroke={CHART_GRID} />
+                      <XAxis dataKey="label" {...axisProps} />
+                      <YAxis {...axisProps} width={30} allowDecimals={false} />
+                      <Tooltip content={<ChartTooltip />} cursor={{ fill: "rgba(188,197,204,0.18)" }} />
+                      <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />
+                      <Bar dataKey="attended" name="Present (incl. late)" stackId="a" fill={CHART.primary} maxBarSize={34} stroke="#fff" strokeWidth={1} />
+                      <Bar dataKey="absent" name="Absent" stackId="a" fill={CHART.secondary} radius={[4, 4, 0, 0]} maxBarSize={34} stroke="#fff" strokeWidth={1} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
             </Card>
             <Card className="lg:col-span-3">
               <CardHeader title="Recent days" />
-              <ul className="flex flex-wrap gap-2 p-5">
-                {p.attendance.recent.map((r) => (
-                  <li key={r.date} className={cn("w-[74px] rounded-xl border px-2 py-2 text-center", r.status === "absent" ? "border-purple/30 bg-blush/40" : r.status === "late" ? "border-mauve/30 bg-lavender/20" : "border-line/70 bg-white")}>
-                    <p className="text-[11px] text-ink-muted">{formatWeekday(r.date)}</p>
-                    <p className="text-sm font-semibold text-ink">{formatShortDate(r.date)}</p>
-                    <p className={cn("text-[11px] font-semibold capitalize", r.status === "absent" ? "text-plum" : r.status === "late" ? "text-plum" : "text-lagoon")}>{r.status}</p>
-                  </li>
-                ))}
-                {p.attendance.recent.length === 0 && <EmptyState title="No attendance records yet" />}
-              </ul>
+              {p.attendance.recent.length === 0 ? (
+                <EmptyState title="No attendance records yet" />
+              ) : (
+                <ul className="flex flex-wrap gap-2 p-5">
+                  {p.attendance.recent.map((r) => (
+                    <li
+                      key={r.date}
+                      className={cn(
+                        "w-[74px] rounded-xl border px-2 py-2 text-center",
+                        r.status === "absent" ? "border-purple/30 bg-blush/40" : r.status === "late" ? "border-mauve/30 bg-lavender/20" : "border-line/70 bg-white",
+                      )}
+                    >
+                      <p className="text-[11px] text-ink-muted">{formatWeekday(r.date)}</p>
+                      <p className="text-sm font-semibold text-ink">{formatShortDate(r.date)}</p>
+                      <p className={cn("text-[11px] font-semibold capitalize", r.status === "absent" || r.status === "late" ? "text-plum" : "text-lagoon")}>
+                        {r.status}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </Card>
           </div>
         </TabsContent>
 
         {p.fees && (
           <TabsContent value="fees">
-            <div className="space-y-4">
-              <div className="grid gap-4 sm:grid-cols-4">
-                <Metric boxed label="Total fees" value={formatCurrency(p.fees.totals.gross)} />
-                <Metric boxed label="Concession" value={formatCurrency(p.fees.totals.concession)} />
-                <Metric boxed label="Paid" value={formatCurrency(p.fees.totals.paid)} />
-                <Metric boxed label="Outstanding" value={formatCurrency(p.fees.totals.outstanding)} tone={p.fees.totals.overdue > 0 ? "warn" : undefined} />
-              </div>
-              <Card><CardHeader title="Installments" /><div className="p-5"><FeeObligationsTable obligations={p.fees.obligations} /></div></Card>
-              <Card><CardHeader title="Payment history" /><div className="p-5"><PaymentsTable payments={p.fees.payments.map((x) => ({ ...x, receiptNo: p.fees!.receipts.find((r) => r.id === x.receiptId)?.receiptNo ?? "" }))} /></div></Card>
-            </div>
+            <FeesTab fees={p.fees} />
           </TabsContent>
         )}
 
         <TabsContent value="exams">
-          {p.results.length === 0 ? <Card><EmptyState title="No examination results" description="Results appear here once marks are entered." /></Card> : (
-            <div className="grid gap-4 lg:grid-cols-2">{p.results.map((r) => r && <ResultCard key={r.examId} result={r} />)}</div>
+          {p.results.length === 0 ? (
+            <Card><EmptyState title="No examination results" description="Results appear here once marks are entered." /></Card>
+          ) : (
+            <div className="grid gap-4 lg:grid-cols-2">
+              {p.results.map((r: any, i: number) => <ResultCard key={r.examId ?? r._id ?? i} result={r} />)}
+            </div>
           )}
         </TabsContent>
 
@@ -190,13 +414,15 @@ function ProfileBody({ p, backHref }: { p: Profile; backHref?: string }) {
           <Card>
             {p.homework.length === 0 ? <EmptyState title="No homework assigned yet" /> : (
               <ul className="divide-y divide-line/60">
-                {p.homework.map((h) => (
-                  <li key={h.id} className="flex items-center justify-between gap-3 px-5 py-3.5">
+                {p.homework.map((h: any, i: number) => (
+                  <li key={h.id ?? h._id ?? i} className="flex items-center justify-between gap-3 px-5 py-3.5">
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-ink">{h.title}</p>
-                      <p className="text-[12.5px] text-ink-muted">{h.subject} · due {formatDate(h.dueDate)}</p>
+                      <p className="truncate text-sm font-semibold text-ink">{h.title ?? "Untitled"}</p>
+                      <p className="text-[12.5px] text-ink-muted">
+                        {[h.subject, h.dueDate && `due ${formatDate(h.dueDate)}`].filter(Boolean).join(" · ") || dash}
+                      </p>
                     </div>
-                    <StatusBadge status={h.status} />
+                    {h.status && <StatusBadge status={h.status} />}
                   </li>
                 ))}
               </ul>
@@ -206,16 +432,30 @@ function ProfileBody({ p, backHref }: { p: Profile; backHref?: string }) {
 
         <TabsContent value="documents">
           <Card>
-            {s.documents.length === 0 ? <EmptyState title="No documents uploaded" description="Document upload will be available once file storage is connected." icon={<FileText className="h-6 w-6" />} /> : (
+            {s.documents.length === 0 ? (
+              <EmptyState
+                title="No documents uploaded"
+                description="Document upload will be available once file storage is connected."
+                icon={<FileText className="h-6 w-6" />}
+              />
+            ) : (
               <ul className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
-                {s.documents.map((d) => (
-                  <li key={d.id} className="flex items-center gap-3 rounded-xl border border-line/70 bg-alabaster/50 p-3.5">
+                {s.documents.map((d: any, i: number) => (
+                  <li key={d.id ?? d._id ?? i} className="flex items-center gap-3 rounded-xl border border-line/70 bg-alabaster/50 p-3.5">
                     <span className="grid h-10 w-10 place-items-center rounded-xl bg-white text-lagoon shadow-soft"><FileText className="h-5 w-5" aria-hidden /></span>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-ink">{d.name}</p>
-                      <p className="text-[12px] text-ink-muted">{titleCase(d.kind)} · {d.sizeKb} KB · {formatShortDate(d.uploadedAt)}</p>
+                      <p className="truncate text-sm font-semibold text-ink">{d.name ?? "Document"}</p>
+                      <p className="text-[12px] text-ink-muted">
+                        {[d.kind && titleCase(d.kind), d.sizeKb != null && `${d.sizeKb} KB`, d.uploadedAt && formatShortDate(d.uploadedAt)].filter(Boolean).join(" · ")}
+                      </p>
                     </div>
-                    <button className="rounded-lg p-2 text-ink-muted hover:bg-white hover:text-ink" aria-label={`Download ${d.name} (demo)`} title="File storage arrives with the backend"><Download className="h-4 w-4" /></button>
+                    <button
+                      className="rounded-lg p-2 text-ink-muted hover:bg-white hover:text-ink"
+                      aria-label={`Download ${d.name ?? "document"}`}
+                      title="File storage arrives with the backend"
+                    >
+                      <Download className="h-4 w-4" />
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -224,37 +464,76 @@ function ProfileBody({ p, backHref }: { p: Profile; backHref?: string }) {
         </TabsContent>
 
         <TabsContent value="guardian">
-          <div className="grid gap-4 md:grid-cols-2">
-            {p.guardians.map((g) => (
-              <Card key={g.id} className="p-5">
-                <div className="flex items-start gap-3">
-                  <Avatar name={g.name} size="lg" />
-                  <div className="min-w-0 text-sm">
-                    <div className="flex items-center gap-2"><p className="text-base font-semibold text-ink">{g.name}</p>{g.isPrimary && <Badge tone="teal">Primary</Badge>}</div>
-                    <p className="text-ink-muted">{g.relation} · {g.occupation}</p>
-                    <dl className="mt-3 space-y-1.5 text-ink-soft">
-                      <div className="flex items-center gap-2"><Phone className="h-3.5 w-3.5 text-ink-muted" aria-hidden />{g.phone}</div>
-                      <div className="flex items-center gap-2"><Mail className="h-3.5 w-3.5 text-ink-muted" aria-hidden />{g.email}</div>
-                      <div className="flex items-center gap-2"><MapPin className="h-3.5 w-3.5 text-ink-muted" aria-hidden />{g.address}</div>
-                    </dl>
+          {p.guardians.length === 0 ? (
+            <Card><EmptyState title="No guardian linked" /></Card>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2">
+              {p.guardians.map((g) => (
+                <Card key={g.id} className="p-5">
+                  <div className="flex items-start gap-3">
+                    <Avatar name={g.name} size="lg" />
+                    <div className="min-w-0 text-sm">
+                      <div className="flex items-center gap-2">
+                        <p className="text-base font-semibold text-ink">{g.name}</p>
+                        {g.isPrimary && <Badge tone="teal">Primary</Badge>}
+                      </div>
+                      <p className="text-ink-muted">{g.relation}{g.occupation ? ` · ${g.occupation}` : ""}</p>
+                      <dl className="mt-3 space-y-1.5 text-ink-soft">
+                        {g.phone && <div className="flex items-center gap-2"><Phone className="h-3.5 w-3.5 text-ink-muted" aria-hidden />{g.phone}</div>}
+                        {g.email && <div className="flex items-center gap-2"><Mail className="h-3.5 w-3.5 text-ink-muted" aria-hidden />{g.email}</div>}
+                        {g.address && <div className="flex items-center gap-2"><MapPin className="h-3.5 w-3.5 text-ink-muted" aria-hidden />{g.address}</div>}
+                      </dl>
+                    </div>
                   </div>
-                </div>
-                {g.otherChildren.length > 0 && (
-                  <div className="mt-4 rounded-xl bg-alabaster p-3 text-sm">
-                    <p className="text-[12px] font-semibold uppercase tracking-wide text-ink-muted">Also guardian of</p>
-                    {g.otherChildren.map((c) => (
-                      <p key={c.id} className="mt-1">
-                        {isAdmin ? <Link href={`/admin/students/${c.id}`} className="font-medium text-lagoon hover:underline">{c.name}</Link> : <span className="font-medium text-ink">{c.name}</span>}
-                        <span className="text-ink-muted"> · Class {c.classLabel}</span>
-                      </p>
-                    ))}
-                  </div>
-                )}
-              </Card>
-            ))}
-          </div>
+                  {g.otherChildren.length > 0 && (
+                    <div className="mt-4 rounded-xl bg-alabaster p-3 text-sm">
+                      <p className="text-[12px] font-semibold uppercase tracking-wide text-ink-muted">Also guardian of</p>
+                      {g.otherChildren.map((c) => (
+                        <p key={c.id} className="mt-1">
+                          {isAdmin
+                            ? <Link href={`/admin/students/${c.id}`} className="font-medium text-lagoon hover:underline">{c.name}</Link>
+                            : <span className="font-medium text-ink">{c.name}</span>}
+                          {c.classLabel && <span className="text-ink-muted"> · Class {c.classLabel}</span>}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </Card>
+              ))}
+            </div>
+          )}
         </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+function FeesTab({ fees }: { fees: FeesVM }) {
+  const payments = fees.payments.map((x: any) => ({
+    ...x,
+    receiptNo: fees.receipts.find((r: any) => r.id === x.receiptId)?.receiptNo ?? "",
+  }));
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 sm:grid-cols-4">
+        <Metric boxed label="Total fees" value={formatCurrency(fees.totals.gross)} />
+        <Metric boxed label="Concession" value={formatCurrency(fees.totals.concession)} />
+        <Metric boxed label="Paid" value={formatCurrency(fees.totals.paid)} />
+        <Metric boxed label="Outstanding" value={formatCurrency(fees.totals.outstanding)} tone={fees.totals.overdue > 0 ? "warn" : undefined} />
+      </div>
+      <Card>
+        <CardHeader title="Installments" />
+        <div className="p-5">
+          {fees.obligations.length === 0 ? <EmptyState title="No installments" /> : <FeeObligationsTable obligations={fees.obligations} />}
+        </div>
+      </Card>
+      <Card>
+        <CardHeader title="Payment history" />
+        <div className="p-5">
+          {payments.length === 0 ? <EmptyState title="No payments recorded" /> : <PaymentsTable payments={payments} />}
+        </div>
+      </Card>
     </div>
   );
 }

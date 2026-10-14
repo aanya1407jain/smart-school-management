@@ -54,7 +54,7 @@ export function StudentForm({ studentId }: { studentId?: string }) {
   const opts = useAcademicOptions();
   const editable = useQuery(() => services.students.getEditable(studentId!), [studentId], { enabled: !!studentId });
   const [serverError, setServerError] = useState<Error | null>(null);
-  const [created, setCreated] = useState<{ id: string; email: string; feeAssigned: boolean } | null>(null);
+  const [created, setCreated] = useState<any>(null);
 
   // Convex Mutation for Student Creation & Enrollment
   const createStudentWithEnrollment = useMutation(api.academics.createStudentWithEnrollment);
@@ -178,15 +178,36 @@ export function StudentForm({ studentId }: { studentId?: string }) {
         </Card>
       </form>
 
-      <Modal
+     <Modal
         open={!!created}
-        onOpenChange={(o) => { if (!o && created) router.push(`/admin/students/${created.id}`); }}
+        onOpenChange={(o) => {
+          if (!o && created) {
+            const sid = created._id ?? created.studentId ?? created.id ?? created;
+            router.push(`/admin/students/${sid}`);
+          }
+        }}
         title="Student enrolled"
         size="sm"
         footer={
           <>
-            <LinkButton href="/admin/students/new" onClick={() => { setCreated(null); reset(EMPTY); }} variant="outline">Add another</LinkButton>
-            <Button onClick={() => created && router.push(`/admin/students/${created.id}`)}>Open profile</Button>
+            <LinkButton
+              href="/admin/students/new"
+              onClick={() => {
+                setCreated(null);
+                reset(EMPTY);
+              }}
+              variant="outline"
+            >
+              Add another
+            </LinkButton>
+            <Button
+              onClick={() => {
+                const sid = created?._id ?? created?.studentId ?? created?.id ?? created;
+                router.push(`/admin/students/${sid}`);
+              }}
+            >
+              Open profile
+            </Button>
           </>
         }
       >

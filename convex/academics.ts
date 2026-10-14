@@ -28,6 +28,84 @@ import { notifyUsers } from "./model/notifications";
 const byLabel = (a: { displayName: string }, b: { displayName: string }) => a.displayName.localeCompare(b.displayName, undefined, { numeric: true });
 
 // ================================================================ reads
+
+/** Single student full profile for admin view */
+export const getStudentProfile = schoolQuery({
+  args: { studentId: v.string() },
+  handler: async (ctx, args) => {
+    let student = null;
+    try {
+      student = await ctx.db.get(args.studentId as Id<"students">);
+    } catch {
+      // Fallback if an admissionNo was passed
+    }
+
+    if (!student) {
+      student = await ctx.db
+        .query("students")
+        .withIndex("by_school_admission", (q) =>
+          q.eq("schoolId", ctx.actor.schoolId).eq("admissionNo", args.studentId)
+        )
+        .first();
+    }
+
+    if (!student || student.schoolId !== ctx.actor.schoolId) {
+      return null;
+    }
+
+    const enrollment = await ctx.db
+      .query("enrollments")
+      .withIndex("by_student_year", (q) => q.eq("studentId", student._id))
+      .filter((q) => q.eq(q.field("status"), "active"))
+      .first();
+
+    let section = null;
+    let cls = null;
+    if (enrollment) {
+      section = await ctx.db.get(enrollment.sectionId);
+      if (section) {
+        cls = await ctx.db.get(section.classId);
+      }
+    }
+
+    const link = await ctx.db
+      .query("guardianLinks")
+      .filter((q) => q.eq(q.field("studentId"), student._id))
+      .first();
+
+    let guardian = null;
+    if (link) {
+      guardian = await ctx.db.get(link.guardianId);
+    }
+
+    return {
+      student: {
+        ...student,
+        id: student._id,
+        documents: [],
+      },
+      enrollment: enrollment
+        ? {
+            ...enrollment,
+            className: cls?.name ?? "N/A",
+            sectionName: section?.name ?? "N/A",
+            rollNo: enrollment.rollNo ?? null,
+          }
+        : null,
+      guardian: guardian
+        ? {
+            ...guardian,
+            relationship: link?.relationship ?? "Guardian",
+          }
+        : null,
+        homework: [],
+        results: [],
+        attendance: [],
+        fees: null,
+    };
+  },
+});
+
 export const listAcademicYears = schoolQuery({
   args: {},
   handler: async (ctx) => {
@@ -411,6 +489,7 @@ export const endEnrollment = schoolMutation({
     return { ok: true as const };
   },
 });
+
 /**
  * Create a student, auto-generate server-side admission number, link guardian,
  * and enroll them in a section for the active academic year.
