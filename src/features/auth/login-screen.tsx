@@ -3,7 +3,6 @@ import { forwardRef, useEffect, useState, type InputHTMLAttributes } from "react
 import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import { motion } from "framer-motion";
 import { AlertCircle, Eye, EyeOff, ChevronDown, ArrowRight, KeyRound } from "lucide-react";
 import { LogoMark } from "@/components/brand/logo";
@@ -12,18 +11,14 @@ import { Checkbox, FormField, Input } from "@/components/ui/form";
 import { Modal } from "@/components/ui/modal";
 import { useSession } from "./session-provider";
 import { canAccessRoute, homeRouteFor } from "@/lib/permissions";
-import { canonicalLoginId } from "@convex/model/loginIds";
+import { loginFormSchema, type LoginFormValues } from "./login-form";
 import { cn } from "@/lib/utils/cn";
 import { DEMO_ACCOUNTS } from "./demo-accounts";
 import { useSchoolProfile } from "@/lib/hooks/use-school-profile";
 import { PRODUCT } from "@/lib/constants/product";
 
-const schema = z.object({
-  loginId: z.string().trim().min(1, "Enter your Login ID").refine((v) => canonicalLoginId(v) !== null, "Enter the Login ID given by your school (e.g. TCH-00124)"),
-  password: z.string().min(1, "Enter your password"),
-  remember: z.boolean(),
-});
-type FormValues = z.infer<typeof schema>;
+const schema = loginFormSchema;
+type FormValues = LoginFormValues;
 
 export function LoginScreen() {
   const school = useSchoolProfile();

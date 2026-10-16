@@ -21,7 +21,7 @@
  * concurrent mutation that touches the same section is retried by Convex on
  * conflict — so a half-renumbered roster can never be observed.
  */
-import type { MutationCtx } from "../_generated/server";
+import type { MutationCtx, QueryCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
 import { AppError } from "../core/errors";
 
@@ -42,7 +42,7 @@ export function nameSortKey(value: string | undefined): string {
     .trim();
 }
 
-type RosterEntry = { enrollmentId: string; studentId: string; firstName: string; lastName: string };
+export type RosterEntry = { enrollmentId: string; studentId: string; firstName: string; lastName: string };
 
 /** Deterministic roster order (exported for tests). Plain code-point comparison — identical in every runtime. */
 export function compareRosterEntries(a: RosterEntry, b: RosterEntry): number {
@@ -55,6 +55,54 @@ export function compareRosterEntries(a: RosterEntry, b: RosterEntry): number {
   );
 }
 
+/** One active enrollment of a section with its alphabetical position (1-based) and stored number. */
+export type RosterPlanRow = {
+  enrollment: Doc<"enrollments">;
+  student: Doc<"students">;
+  entry: RosterEntry;
+  currentRollNo: number | null;
+  proposedRollNo: number;
+};
+
+/**
+ * READ-ONLY: the section's active roster in the documented alphabetical order,
+ * with the roll number each enrollment has now and the one the policy assigns.
+ * Shared by `renumberSection` (writes), the reconciliation dry run (reads only)
+ * and roster reads, so all of them use exactly one ordering.
+ *
+ * Enrollments whose school/year differ from the section's, or whose student is
+ * missing or belongs to another school, are excluded (defence in depth) and
+ * returned in `excluded`.
+ */
+export async function planSectionRoster(ctx: QueryCtx, section: Doc<"sections">): Promise<{ rows: RosterPlanRow[]; excluded: { enrollmentId: Id<"enrollments">; reason: string }[] }> {
+  const enrollments = await ctx.db
+    .query("enrollments")
+    .withIndex("by_section_status", (q) => q.eq("sectionId", section._id).eq("status", "active"))
+    .take(MAX_SECTION_ROSTER + 1);
+  if (enrollments.length > MAX_SECTION_ROSTER) {
+    throw new AppError("CONFLICT", `${section.displayName} has more than ${MAX_SECTION_ROSTER} active students; roll numbers cannot be assigned automatically.`);
+  }
+  const rows: Omit<RosterPlanRow, "proposedRollNo">[] = [];
+  const excluded: { enrollmentId: Id<"enrollments">; reason: string }[] = [];
+  for (const enrollment of enrollments) {
+    if (enrollment.schoolId !== section.schoolId || enrollment.academicYearId !== section.academicYearId) {
+      excluded.push({ enrollmentId: enrollment._id, reason: "enrollment_school_or_year_mismatch" });
+      continue;
+    }
+    const student = await ctx.db.get(enrollment.studentId);
+    if (!student || student.schoolId !== section.schoolId) {
+      excluded.push({ enrollmentId: enrollment._id, reason: "student_missing_or_other_school" });
+      continue;
+    }
+    rows.push({
+      enrollment, student, currentRollNo: enrollment.rollNo ?? null,
+      entry: { enrollmentId: enrollment._id, studentId: student._id, firstName: student.firstName, lastName: student.lastName },
+    });
+  }
+  rows.sort((a, b) => compareRosterEntries(a.entry, b.entry));
+  return { rows: rows.map((r, i) => ({ ...r, proposedRollNo: i + 1 })), excluded };
+}
+
 /**
  * Renumber one section's active roster 1..n. Only rows whose number changes
  * are written. Returns the roster size and how many enrollments changed.
@@ -62,26 +110,11 @@ export function compareRosterEntries(a: RosterEntry, b: RosterEntry): number {
 export async function renumberSection(ctx: MutationCtx, sectionId: Id<"sections">): Promise<{ size: number; changed: number }> {
   const section = await ctx.db.get(sectionId);
   if (!section) return { size: 0, changed: 0 };
-  const enrollments = await ctx.db
-    .query("enrollments")
-    .withIndex("by_section_status", (q) => q.eq("sectionId", sectionId).eq("status", "active"))
-    .take(MAX_SECTION_ROSTER + 1);
-  if (enrollments.length > MAX_SECTION_ROSTER) {
-    throw new AppError("CONFLICT", `${section.displayName} has more than ${MAX_SECTION_ROSTER} active students; roll numbers cannot be assigned automatically.`);
-  }
-  const rows: { enrollment: Doc<"enrollments">; entry: RosterEntry }[] = [];
-  for (const enrollment of enrollments) {
-    // Defence in depth: only this section's school/year counts.
-    if (enrollment.schoolId !== section.schoolId || enrollment.academicYearId !== section.academicYearId) continue;
-    const student = await ctx.db.get(enrollment.studentId);
-    if (!student || student.schoolId !== section.schoolId) continue;
-    rows.push({ enrollment, entry: { enrollmentId: enrollment._id, studentId: student._id, firstName: student.firstName, lastName: student.lastName } });
-  }
-  rows.sort((a, b) => compareRosterEntries(a.entry, b.entry));
+  const { rows } = await planSectionRoster(ctx, section);
   let changed = 0;
-  for (let i = 0; i < rows.length; i++) {
-    if (rows[i].enrollment.rollNo !== i + 1) {
-      await ctx.db.patch(rows[i].enrollment._id, { rollNo: i + 1 });
+  for (const row of rows) {
+    if (row.currentRollNo !== row.proposedRollNo) {
+      await ctx.db.patch(row.enrollment._id, { rollNo: row.proposedRollNo });
       changed++;
     }
   }

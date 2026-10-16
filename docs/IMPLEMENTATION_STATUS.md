@@ -287,3 +287,21 @@ returns `{ page, isDone, continueCursor }`; `studentHistory` returns `range`; ti
   build ✅.
 - **Still demo-only:** admin/teacher Students list, My Classes, timetable/homework/exams/fees management and the
   demo student portal; homework submission and online fee payment have no backend yet.
+
+---
+
+## 17. Roster ordering, roll-number reconciliation and demo attendance (16 Oct 2026, uncommitted)
+- **Root cause (audit 16 Oct):** the register/roster sorted by the STORED `rollNo`; numbers written before
+  alphabetical renumbering (seed order, older imports, admissions without a number) were never reconciled.
+- **Reads:** `activeRoster` uses the roll-number comparator (first name, last name, ids) instead of stored numbers.
+  `accounts.listPeople` (students) sorts before paginating, first-name rule for the all-students view, complete
+  duplicate-free pages (`model/sortedPagination.ts`).
+- **Existing data:** explicit, internal, dry-run-first `rollNumberMaintenance:dryRun` / `:apply` (see BACKEND.md).
+  Not run against any deployment.
+- **Demo "My Attendance"** (`src/features/attendance/my-attendance.tsx`, d78a25d layout kept): reads the demo dataset
+  again (no hard-coded records), late counts per school setting, excused days excluded (`attendance-summary.ts`),
+  calendar opens on the latest record's month, empty states when there is no data. Live accounts keep
+  `LiveMyAttendance`.
+- **Still demo-only:** My Classes / admin Students list rosters and student renames use the in-browser demo data
+  (demo roll numbers are not renumbered on rename).
+

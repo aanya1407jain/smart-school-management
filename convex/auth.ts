@@ -42,6 +42,14 @@ const LoginIdPassword = Password({
   // Account identifier = canonical Login ID. Unknown/malformed IDs map to ""
   // which matches no account (sign-in fails like a wrong password).
   profile(params) {
+    // A request without `loginId` comes from an outdated, email-based sign-in
+    // page (e.g. a stale `next build`). Never look an email up as an account
+    // id: before this check it silently became "" and Convex Auth reported the
+    // misleading "InvalidAccountId". The error depends only on the request's
+    // shape, so it reveals nothing about which accounts exist.
+    if (params.loginId === undefined) {
+      throw new AppError("LOGIN_ID_REQUIRED", "This sign-in page is out of date. Reload the page and sign in with your Login ID.");
+    }
     return { email: canonicalLoginId(params.loginId) ?? "" };
   },
   validatePasswordRequirements() {

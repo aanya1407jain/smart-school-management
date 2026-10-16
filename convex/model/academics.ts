@@ -3,11 +3,22 @@
  */
 import type { QueryCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
+import { compareRosterEntries } from "./rollNumbers";
 
 export const fullName = (p: { firstName: string; lastName: string }) => `${p.firstName} ${p.lastName}`;
 export const teacherDisplayName = (t: Doc<"teachers">) => [t.title, t.firstName, t.lastName].filter(Boolean).join(" ");
 
-/** Students actively enrolled in a section, ordered by roll number then name. */
+/**
+ * Students actively enrolled in a section, in the documented alphabetical order
+ * (model/rollNumbers.ts compareRosterEntries: first name, last name — case-,
+ * accent- and whitespace-insensitive — then student id, then enrollment id).
+ *
+ * The order does NOT depend on the stored `rollNo`: legacy rosters whose numbers
+ * predate alphabetical renumbering still list alphabetically. Each row keeps its
+ * STORED roll number for display; stale numbers are corrected only by the
+ * explicit reconciliation (convex/rollNumberMaintenance.ts) or the next roster
+ * change of that section.
+ */
 export async function activeRoster(ctx: QueryCtx, sectionId: Id<"sections">) {
   const enrollments = await ctx.db
     .query("enrollments")
@@ -18,7 +29,10 @@ export async function activeRoster(ctx: QueryCtx, sectionId: Id<"sections">) {
     const student = await ctx.db.get(enrollment.studentId);
     if (student && student.schoolId === enrollment.schoolId) rows.push({ enrollment, student });
   }
-  rows.sort((a, b) => (a.enrollment.rollNo ?? 1e9) - (b.enrollment.rollNo ?? 1e9) || fullName(a.student).localeCompare(fullName(b.student)));
+  rows.sort((a, b) => compareRosterEntries(
+    { enrollmentId: a.enrollment._id, studentId: a.student._id, firstName: a.student.firstName, lastName: a.student.lastName },
+    { enrollmentId: b.enrollment._id, studentId: b.student._id, firstName: b.student.firstName, lastName: b.student.lastName },
+  ));
   return rows;
 }
 
