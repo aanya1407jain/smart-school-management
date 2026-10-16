@@ -4,7 +4,11 @@ import { Printer, Receipt as ReceiptIcon } from "lucide-react";
 import type { Payment } from "@/types/domain";
 import type { ObligationView } from "@/lib/services/derive";
 import { services } from "@/lib/services";
-import { useQuery } from "@/lib/hooks/use-query";
+import { useQuery, type QueryState } from "@/lib/hooks/use-query";
+import { useSchoolQuery } from "@/lib/convex/membership";
+import { api } from "@convex/_generated/api";
+import { useSession } from "@/features/auth/session-provider";
+import { useMemo } from "react";
 import { Button, DataTable, EmptyState, Modal, QueryView, StatusBadge } from "@/components/ui";
 import { LogoMark } from "@/components/brand/logo";
 import { formatCurrency } from "@/lib/utils/format";
@@ -48,7 +52,7 @@ export function PaymentsTable({ payments }: { payments: PaymentRow[] }) {
           { key: "method", header: "Method", cell: (p) => PAYMENT_METHOD_LABELS[p.method] },
           { key: "ref", header: "Reference", cell: (p) => <span className="font-mono text-[12.5px]">{p.reference}</span> },
         ]}
-        rowActions={(p) => <Button variant="ghost" size="sm" onClick={() => setReceiptId(p.receiptId)}><ReceiptIcon className="h-4 w-4" /> Receipt</Button>}
+        rowActions={(p) => <Button variant="ghost" size="sm" onClick={() => setReceiptId(p.receiptId ?? p.id)}><ReceiptIcon className="h-4 w-4" /> Receipt</Button>}
       />
       <ReceiptModal receiptId={receiptId} onClose={() => setReceiptId(null)} />
     </>
@@ -56,7 +60,61 @@ export function PaymentsTable({ payments }: { payments: PaymentRow[] }) {
 }
 
 export function ReceiptModal({ receiptId, onClose }: { receiptId: string | null; onClose: () => void }) {
-  const q = useQuery(() => services.fees.getReceipt(receiptId!), [receiptId], { enabled: !!receiptId });
+  const { dataSource } = useSession();
+  const live = dataSource === "live";
+
+  // Live Convex queries
+  const liveReceipt = useSchoolQuery(
+    api.fees.getReceipt,
+    live && receiptId ? { receiptId: receiptId as any } : "skip"
+  );
+  const livePaymentReceipt = useSchoolQuery(
+    api.fees.getReceipt,
+    live && receiptId && !liveReceipt ? { paymentId: receiptId as any } : "skip"
+  );
+  const resolvedLive = liveReceipt ?? livePaymentReceipt;
+
+  // Demo fallback query
+  const q = useQuery(() => (live ? Promise.resolve(null as any) : services.fees.getReceipt(receiptId!)), [live, receiptId], { enabled: !!receiptId && !live });
+
+  const adaptedLive = useMemo(() => {
+    if (!resolvedLive) return undefined;
+    return {
+      school: {
+        name: resolvedLive.school.name,
+        address: resolvedLive.school.address ?? "",
+      },
+      receipt: {
+        receiptNo: resolvedLive.receiptNo,
+      },
+      student: {
+        name: resolvedLive.studentName,
+        admissionNo: resolvedLive.admissionNo,
+      },
+      payment: {
+        paidOn: resolvedLive.paidOn,
+        method: resolvedLive.method,
+        reference: resolvedLive.reference ?? "—",
+        amount: resolvedLive.amountMinor / 100,
+      },
+      allocations: resolvedLive.allocations.map((a) => ({
+        label: a.label,
+        amount: a.amountMinor / 100,
+      })),
+    };
+  }, [resolvedLive]);
+
+  const queryState = useMemo<QueryState<any>>(
+    () => ({
+      isLoading: live ? resolvedLive === undefined : q.isLoading,
+      isRefreshing: false,
+      data: live ? adaptedLive : q.data,
+      error: live ? null : q.error,
+      refetch: live ? () => {} : q.refetch,
+    }),
+    [live, resolvedLive, adaptedLive, q.isLoading, q.data, q.error, q.refetch]
+  );
+
   return (
     <Modal
       open={!!receiptId}
@@ -74,7 +132,7 @@ export function ReceiptModal({ receiptId, onClose }: { receiptId: string | null;
         </>
       }
     >
-      <QueryView query={q} loading="inline">
+      <QueryView query={queryState} loading="inline">
         {(r) => (
           <>
             <style>{`
@@ -156,7 +214,7 @@ export function ReceiptModal({ receiptId, onClose }: { receiptId: string | null;
                 <dd className="text-right text-ink">{formatDate(r.payment.paidOn)}</dd>
                 <dt className="text-ink-muted">Method</dt>
                 <dd className="text-right text-ink">
-                  {PAYMENT_METHOD_LABELS[r.payment.method]} · <span className="font-mono">{r.payment.reference}</span>
+                  {(PAYMENT_METHOD_LABELS as Record<string, string>)[r.payment.method] ?? r.payment.method} · <span className="font-mono">{r.payment.reference}</span>
                 </dd>
                 <dt className="text-ink-muted">Recorded by</dt>
                 <dd className="text-right text-ink">{r.recordedBy}</dd>

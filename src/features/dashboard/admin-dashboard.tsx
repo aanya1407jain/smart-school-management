@@ -3,7 +3,9 @@ import Link from "next/link";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { BookOpenCheck, CalendarCheck2, ClipboardCheck, GraduationCap, Megaphone, UserPlus, Users, Wallet, ArrowRight, CalendarClock, AlertCircle } from "lucide-react";
 import { services } from "@/lib/services";
-import { useQuery } from "@/lib/hooks/use-query";
+import { useQuery, type QueryState } from "@/lib/hooks/use-query";
+import { useSchoolQuery } from "@/lib/convex/membership";
+import { api } from "@convex/_generated/api";
 import { useSession } from "@/features/auth/session-provider";
 import { Button, CardHeader, GlassCard, Card, QueryView, StatCard, StatusBadge, ProgressBar, EmptyState, LinkButton } from "@/components/ui";
 import { ChartCard, ChartTooltip, axisProps } from "@/components/charts/chart-card";
@@ -11,6 +13,7 @@ import { CHART, CHART_GRID } from "@/lib/constants/theme";
 import { formatCurrency, formatNumber, formatPercent } from "@/lib/utils/format";
 import { formatDate, formatShortDate, greeting, formatLongDate, todayISO } from "@/lib/utils/dates";
 import { NoticeListItem } from "@/features/notices/notice-list-item";
+import { useMemo } from "react";
 
 const QUICK_ACTIONS = [
   { label: "Add student", href: "/admin/students/new", Icon: UserPlus },
@@ -20,12 +23,93 @@ const QUICK_ACTIONS = [
   { label: "Post notice", href: "/admin/notices?action=new", Icon: Megaphone },
 ];
 
+type AdminDashboardData = NonNullable<Awaited<ReturnType<typeof services.dashboard.getAdminDashboard>>>;
+
 export function AdminDashboard() {
-  const { user } = useSession();
-  const q = useQuery(() => services.dashboard.getAdminDashboard(), []);
+  const { user, dataSource } = useSession();
+  const live = dataSource === "live";
+
+  // Live Convex query
+  const liveData = useSchoolQuery(api.reports.adminDashboard, live ? {} : "skip");
+
+  // Demo fallback query
+  const q = useQuery(() => (live ? Promise.resolve(null as any) : services.dashboard.getAdminDashboard()), [live]);
+
+  const adaptedLive = useMemo(() => {
+    if (!liveData) return undefined;
+    const today = todayISO();
+    const attDate = liveData.latestAttendanceDate ?? today;
+    const attPct = liveData.attendancePercentage ?? 100;
+    const sectionsCount = liveData.fees.feeByClass.length || 1;
+
+    return {
+      school: {
+        name: liveData.school.name,
+        shortName: liveData.school.shortName,
+        code: liveData.school.code,
+      },
+      stats: {
+        students: liveData.studentCount,
+        sections: sectionsCount,
+        teachers: liveData.teacherCount,
+        teachersOnLeave: 0,
+        attendance: {
+          date: attDate,
+          isToday: attDate === today,
+          percentage: attPct,
+          absent: 0,
+          marked: liveData.attendancePercentage !== null ? 1 : 0,
+          totalSections: sectionsCount,
+          delta: null,
+        },
+        fees: {
+          outstanding: liveData.fees.totalOutstandingMinor / 100,
+          overdue: liveData.fees.totalOverdueMinor / 100,
+          overdueStudents: liveData.fees.overdueStudentsCount,
+          collected: liveData.fees.totalCollectedMinor / 100,
+          collectionRate: liveData.fees.feeCollectionRate,
+        },
+      },
+      attendanceTrend: [
+        { date: attDate, percentage: attPct },
+      ],
+      feeByClass: liveData.fees.feeByClass.map((c) => ({
+        name: c.name,
+        collected: c.collected / 100,
+        outstanding: c.outstanding / 100,
+      })),
+      performance: { examName: null, rows: [] },
+      upcomingExams: [],
+      notices: liveData.recentNotices.map((n) => ({
+        id: n.id,
+        title: n.title,
+        type: n.type as any,
+        priority: n.priority as any,
+        publishDate: n.publishDate,
+        eventDate: null,
+        audienceLabel: n.audienceKind === "all" ? "School-wide" : `Audience: ${n.audienceKind}`,
+        body: "",
+        createdBy: "",
+        status: "published" as const,
+        audience: { scope: "all" as const },
+      })),
+      tasks: { unmarkedToday: 0, pendingLeave: 0, isSchoolDay: true },
+    };
+  }, [liveData]);
+
+  const queryState = useMemo<QueryState<AdminDashboardData>>(
+    () => ({
+      isLoading: live ? liveData === undefined : q.isLoading,
+      isRefreshing: false,
+      data: (live ? adaptedLive : q.data) as AdminDashboardData,
+      error: live ? null : q.error,
+      refetch: live ? () => {} : q.refetch,
+    }),
+    [live, liveData, adaptedLive, q.isLoading, q.data, q.error, q.refetch]
+  );
 
   return (
-    <QueryView query={q}>
+    <QueryView query={queryState}>
       {(d) => {
         const att = d.stats.attendance;
         return (

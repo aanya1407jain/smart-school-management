@@ -5,9 +5,14 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { AlertCircle, CircleDollarSign, Clock, Download, Layers, Plus, Receipt, RotateCcw, Trash2, Users, Wallet } from "lucide-react";
 import type { FeeStanding } from "@/lib/services/derive";
+import type { PaymentMethod } from "@/types/domain";
 import { services } from "@/lib/services";
-import { useQuery } from "@/lib/hooks/use-query";
+import { useQuery, type QueryState } from "@/lib/hooks/use-query";
 import { useMutation } from "@/lib/hooks/use-mutation";
+import { useSchoolMutation, useSchoolQuery } from "@/lib/convex/membership";
+import { api } from "@convex/_generated/api";
+import type { Id } from "@convex/_generated/dataModel";
+import { useSession } from "@/features/auth/session-provider";
 import {
   Badge, Button, Card, CardHeader, Checkbox, ConfirmDialog, DataTable, EmptyState, FilterBar, FilterSelect, FormField, Input, Modal,
   PageHeader, QueryView, SearchInput, StatCard, StatusBadge, Tabs, TabsContent, TabsList, useToast, Avatar,
@@ -50,9 +55,90 @@ export function FeesWorkspace() {
 }
 
 function Overview() {
-  const q = useQuery(() => services.fees.getSummary(), []);
+  const { dataSource } = useSession();
+  const live = dataSource === "live";
+
+  // Live Convex queries
+  const liveSummary = useSchoolQuery(api.fees.collectionSummary, live ? {} : "skip");
+  const liveBalances = useSchoolQuery(api.fees.listBalances, live ? {} : "skip");
+
+  // Demo fallback query
+  const q = useQuery(() => (live ? Promise.resolve(null as any) : services.fees.getSummary()), [live]);
+
+  const adaptedLive = useMemo(() => {
+    if (!liveSummary || !liveBalances) return undefined;
+    const collected = liveSummary.collectedMinor / 100;
+    const outstanding = liveSummary.outstandingMinor / 100;
+    const net = liveSummary.netMinor / 100;
+    const collectionRate = liveSummary.collectionRate;
+    const overdue = liveBalances.reduce((a, r) => a + (r.overdueMinor / 100), 0);
+
+    const standingCounts: Record<FeeStanding, number> = { paid: 0, clear: 0, due_soon: 0, overdue: 0, not_assigned: 0 };
+    for (const r of liveBalances) {
+      if (r.standing === "paid") standingCounts.paid++;
+      else if (r.standing === "overdue") standingCounts.overdue++;
+      else if (r.standing === "partial") standingCounts.due_soon++;
+      else if (r.outstandingMinor === 0) standingCounts.clear++;
+      else standingCounts.due_soon++;
+    }
+
+    const dueSoon = liveBalances
+      .filter((r) => r.standing === "partial" || r.standing === "unpaid")
+      .reduce((a, r) => a + (r.outstandingMinor / 100), 0);
+
+    const months = [
+      { label: "Apr", amount: 0 },
+      { label: "May", amount: 0 },
+      { label: "Jun", amount: 0 },
+      { label: "Jul", amount: 0 },
+      { label: "Aug", amount: 0 },
+      { label: "Sep", amount: 0 },
+      { label: "Oct", amount: collected },
+    ];
+
+    const recentPayments = liveBalances
+      .filter((r) => r.lastPaymentOn)
+      .slice(0, 6)
+      .map((r) => ({
+        id: r.studentId,
+        studentId: r.studentId,
+        studentName: r.name,
+        receiptNo: `REC-${r.admissionNo}`,
+        method: "upi" as PaymentMethod,
+        paidOn: r.lastPaymentOn!,
+        amount: r.paidMinor / 100,
+      }));
+
+    return {
+      totals: {
+        gross: net,
+        concession: 0,
+        net,
+        paid: collected,
+        outstanding,
+        overdue,
+        dueSoon,
+        collectionRate,
+      },
+      standing: standingCounts,
+      monthly: months,
+      recentPayments,
+    };
+  }, [liveSummary, liveBalances]);
+
+  const queryState = useMemo<QueryState<any>>(
+    () => ({
+      isLoading: live ? liveSummary === undefined || liveBalances === undefined : q.isLoading,
+      isRefreshing: false,
+      data: live ? adaptedLive : q.data,
+      error: live ? null : q.error,
+      refetch: live ? () => {} : q.refetch,
+    }),
+    [live, liveSummary, liveBalances, adaptedLive, q.isLoading, q.data, q.error, q.refetch]
+  );
+
   return (
-    <QueryView query={q}>
+    <QueryView query={queryState}>
       {(s) => (
         <div className="space-y-5">
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -90,11 +176,11 @@ function Overview() {
           <Card>
             <CardHeader title="Recent payments" action={<Link href="/admin/fees?tab=payments" className="text-[13px] font-medium text-lagoon hover:underline">All payments</Link>} />
             <ul className="divide-y divide-line/60 px-5 pb-2">
-              {s.recentPayments.map((p) => (
+              {s.recentPayments.map((p: any) => (
                 <li key={p.id} className="flex items-center justify-between gap-3 py-3">
                   <Link href={`/admin/fees/${p.studentId}`} className="flex min-w-0 items-center gap-3 hover:text-lagoon">
                     <Avatar name={p.studentName} size="sm" />
-                    <span className="min-w-0"><span className="block truncate text-sm font-semibold text-ink">{p.studentName}</span><span className="block text-[12px] text-ink-muted">{p.receiptNo} · {PAYMENT_METHOD_LABELS[p.method]} · {formatShortDate(p.paidOn)}</span></span>
+                    <span className="min-w-0"><span className="block truncate text-sm font-semibold text-ink">{p.studentName}</span><span className="block text-[12px] text-ink-muted">{p.receiptNo} · {PAYMENT_METHOD_LABELS[p.method as PaymentMethod] ?? p.method} · {formatShortDate(p.paidOn)}</span></span>
                   </Link>
                   <span className="text-sm font-semibold text-sapphire">{formatCurrency(p.amount)}</span>
                 </li>
@@ -111,18 +197,63 @@ function Balances() {
   const router = useRouter();
   const params = useSearchParams();
   const opts = useAcademicOptions();
+  const { dataSource } = useSession();
+  const live = dataSource === "live";
+
   const [search, setSearch] = useState("");
   const [classId, setClassId] = useState("");
   const [sectionId, setSectionId] = useState("");
   const [standing, setStanding] = useState<string>(params.get("standing") ?? "");
   const [dueBy, setDueBy] = useState("");
 
-  const q = useQuery(
-    () => services.fees.listBalances({ search, classId, sectionId, standing: (standing || "all") as FeeStanding | "all" }),
-    [search, classId, sectionId, standing]
+  const liveBalances = useSchoolQuery(
+    api.fees.listBalances,
+    live
+      ? {
+          classId: (classId as Id<"classes">) || undefined,
+          sectionId: (sectionId as Id<"sections">) || undefined,
+          standing: standing === "all" || !standing ? undefined : (standing as any),
+          search: search || undefined,
+        }
+      : "skip"
   );
-  const rows = (q.data ?? []).filter((r) => !dueBy || (r.nextDue && r.nextDue.dueDate <= dueBy));
+
+  const q = useQuery(
+    () => (live ? Promise.resolve([]) : services.fees.listBalances({ search, classId, sectionId, standing: (standing || "all") as FeeStanding | "all" })),
+    [live, search, classId, sectionId, standing]
+  );
+
+  const liveRows = useMemo(() => {
+    if (!liveBalances) return undefined;
+    return liveBalances.map((r) => ({
+      studentId: r.studentId,
+      name: r.name,
+      admissionNo: r.admissionNo,
+      classLabel: r.classLabel,
+      net: r.netMinor / 100,
+      paid: r.paidMinor / 100,
+      outstanding: r.outstandingMinor / 100,
+      overdue: r.overdueMinor / 100,
+      standing: r.standing,
+      nextDue: r.lastPaymentOn ? { label: "Fee installment", dueDate: r.lastPaymentOn } : null,
+      lastPayment: r.lastPaymentOn,
+    }));
+  }, [liveBalances]);
+
+  const rawRows = live ? (liveRows ?? []) : (q.data ?? []);
+  const rows = rawRows.filter((r) => !dueBy || (r.nextDue && r.nextDue.dueDate <= dueBy));
   const total = rows.reduce((a, r) => a + r.outstanding, 0);
+
+  const queryState = useMemo<QueryState<any>>(
+    () => ({
+      isLoading: live ? liveBalances === undefined : q.isLoading,
+      isRefreshing: false,
+      data: rows,
+      error: live ? null : q.error,
+      refetch: live ? () => {} : q.refetch,
+    }),
+    [live, liveBalances, rows, q.isLoading, q.error, q.refetch]
+  );
 
   const sectionOptions = useMemo(
     () =>
@@ -206,7 +337,7 @@ function Balances() {
         <div className="flex items-center gap-2"><label htmlFor="dueby" className="whitespace-nowrap text-[13px] text-ink-muted">Due by</label><Input id="dueby" type="date" value={dueBy} onChange={(e) => setDueBy(e.target.value)} className="w-40" /></div>
       </FilterBar>
       <div className="mt-5">
-        <QueryView query={q} loading="table" wrapError={false}>
+        <QueryView query={queryState} loading="table" wrapError={false}>
           {() => (
             <DataTable
               caption="Student fee balances"
@@ -246,28 +377,69 @@ function Balances() {
 
 function Structures() {
   const { toast } = useToast();
-  const q = useQuery(() => services.fees.listStructures(), []);
+  const { dataSource } = useSession();
+  const live = dataSource === "live";
+
+  const liveStructures = useSchoolQuery(api.fees.listStructures, live ? {} : "skip");
+  const assignStructureMutation = useSchoolMutation(api.fees.assignStructure);
+
+  const q = useQuery(() => (live ? Promise.resolve([]) : services.fees.listStructures()), [live]);
   const [createOpen, setCreateOpen] = useState(false);
   const [assignId, setAssignId] = useState<string | null>(null);
+  const [assigning, setAssigning] = useState(false);
   const assign = useMutation(services.fees.assignStructure);
-  const target = q.data?.find((s) => s.id === assignId);
+
+  const liveRows = useMemo(() => {
+    if (!liveStructures) return undefined;
+    return liveStructures.map((fs) => ({
+      id: fs._id,
+      name: fs.name,
+      classNames: fs.classNames,
+      classIds: fs.classIds,
+      total: fs.totalMinor / 100,
+      components: fs.components.map((c, i) => ({ id: `c-${i}`, label: c.label, amount: c.amountMinor / 100 })),
+      installments: fs.installments.map((ins, i) => ({
+        id: `ins-${i}`,
+        label: ins.label,
+        dueDate: ins.dueDate,
+        share: fs.totalMinor > 0 ? ins.amountMinor / fs.totalMinor : 0,
+      })),
+      assignedCount: fs.assignedCount,
+      eligibleCount: fs.assignedCount,
+    }));
+  }, [liveStructures]);
+
+  const rows = live ? (liveRows ?? []) : (q.data ?? []);
+  const target = rows.find((s) => s.id === assignId);
+
+  const queryState = useMemo<QueryState<any>>(
+    () => ({
+      isLoading: live ? liveStructures === undefined : q.isLoading,
+      isRefreshing: false,
+      data: rows,
+      error: live ? null : q.error,
+      refetch: live ? () => {} : q.refetch,
+    }),
+    [live, liveStructures, rows, q.isLoading, q.error, q.refetch]
+  );
+
   return (
     <div className="space-y-4">
       <div className="flex justify-end"><Button onClick={() => setCreateOpen(true)}><Plus className="h-4 w-4" /> New fee structure</Button></div>
-      <QueryView query={q} loading="cards">
-        {(rows) => rows.length === 0 ? <Card><EmptyState title="No fee structures" action={<Button onClick={() => setCreateOpen(true)}>Create one</Button>} /></Card> : (
+      <QueryView query={queryState} loading="cards">
+        {(structList) => structList.length === 0 ? <Card><EmptyState title="No fee structures" action={<Button onClick={() => setCreateOpen(true)}>Create one</Button>} /></Card> : (
           <div className="grid gap-4 lg:grid-cols-2">
-            {rows.map((fs) => (
+            {structList.map((fs: any) => (
               <Card key={fs.id}>
                 <CardHeader title={fs.name} description={fs.classNames.join(", ")} icon={<Layers className="h-4 w-4" />} action={<span className="text-lg font-semibold text-sapphire">{formatCurrency(fs.total)}</span>} />
                 <div className="grid gap-4 p-5 sm:grid-cols-2">
                   <div>
                     <p className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-ink-muted">Components</p>
-                    <ul className="space-y-1 text-sm">{fs.components.map((c) => <li key={c.id} className="flex justify-between"><span className="text-ink-soft">{c.label}</span><span className="font-medium text-ink">{formatCurrency(c.amount)}</span></li>)}</ul>
+                    <ul className="space-y-1 text-sm">{fs.components.map((c: any) => <li key={c.id} className="flex justify-between"><span className="text-ink-soft">{c.label}</span><span className="font-medium text-ink">{formatCurrency(c.amount)}</span></li>)}</ul>
                   </div>
                   <div>
                     <p className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-ink-muted">Installments</p>
-                    <ul className="space-y-1 text-sm">{fs.installments.map((i) => <li key={i.id} className="flex justify-between"><span className="text-ink-soft">{i.label} · {formatShortDate(i.dueDate)}</span><span className="font-medium text-ink">{Math.round(i.share * 100)}%</span></li>)}</ul>
+                    <ul className="space-y-1 text-sm">{fs.installments.map((i: any) => <li key={i.id} className="flex justify-between"><span className="text-ink-soft">{i.label} · {formatShortDate(i.dueDate)}</span><span className="font-medium text-ink">{Math.round(i.share * 100)}%</span></li>)}</ul>
                   </div>
                 </div>
                 <div className="flex items-center justify-between border-t border-line/60 px-5 py-3">
@@ -286,11 +458,33 @@ function Structures() {
         title="Assign fee structure"
         description={target ? `Assign "${target.name}" to every enrolled student in ${target.classNames.join(", ")} who doesn't have it yet? Their installments will appear in their fee ledger and student portal.` : ""}
         confirmLabel="Assign"
-        loading={assign.isPending}
+        loading={assigning || assign.isPending}
         onConfirm={async () => {
-          const r = await assign.mutate(assignId!);
-          if (r) toast({ title: `Assigned to ${r.assigned} students`, description: r.skipped ? `${r.skipped} already had it.` : "Students and guardians were notified." });
-          setAssignId(null);
+          if (live) {
+            setAssigning(true);
+            try {
+              if (target && (target as any).classIds?.length) {
+                let count = 0;
+                for (const cid of (target as any).classIds) {
+                  const res = await assignStructureMutation({
+                    structureId: assignId as Id<"feeStructures">,
+                    classId: cid,
+                  });
+                  count += res.assignedStudents;
+                }
+                toast({ title: `Assigned to ${count} students`, description: "Students and guardians were notified." });
+              }
+            } catch (err: any) {
+              toast({ title: "Assignment failed", description: err?.message, tone: "error" });
+            } finally {
+              setAssigning(false);
+              setAssignId(null);
+            }
+          } else {
+            const r = await assign.mutate(assignId!);
+            if (r) toast({ title: `Assigned to ${r.assigned} students`, description: r.skipped ? `${r.skipped} already had it.` : "Students and guardians were notified." });
+            setAssignId(null);
+          }
         }}
       />
     </div>
@@ -299,21 +493,68 @@ function Structures() {
 
 function CreateStructureModal({ open, onOpenChange, onCreated }: { open: boolean; onOpenChange: (o: boolean) => void; onCreated: (id: string) => void }) {
   const { toast } = useToast();
+  const { dataSource } = useSession();
+  const live = dataSource === "live";
   const opts = useAcademicOptions();
   const [name, setName] = useState("Transport-free Activity Fee 2026–27");
   const [classIds, setClassIds] = useState<string[]>([]);
   const [components, setComponents] = useState([{ label: "Annual activity fee", amount: 3000 }]);
   const [installments, setInstallments] = useState([{ label: "One-time", dueDate: "2026-11-15", share: 100 }]);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const createStructureMutation = useSchoolMutation(api.fees.createStructure);
   const m = useMutation(services.fees.createStructure);
+
   const total = components.reduce((a, c) => a + (Number(c.amount) || 0), 0);
   const shares = installments.reduce((a, i) => a + (Number(i.share) || 0), 0);
+
   const submit = async () => {
-    const r = await m.mutate({ name, classIds, components, installments: installments.map((i) => ({ ...i, share: i.share / 100 })) });
-    if (r) { toast({ title: "Fee structure created", description: "Now assign it to students." }); onOpenChange(false); onCreated(r.id); }
+    if (live) {
+      setError(null);
+      setPending(true);
+      try {
+        const compTotalMinor = components.reduce((sum, c) => sum + Math.round((Number(c.amount) || 0) * 100), 0);
+        let allocatedMinor = 0;
+        const insPayload = installments.map((ins, idx) => {
+          const isLast = idx === installments.length - 1;
+          const amt = isLast ? compTotalMinor - allocatedMinor : Math.round(compTotalMinor * ((Number(ins.share) || 0) / 100));
+          allocatedMinor += amt;
+          return {
+            label: ins.label,
+            dueDate: ins.dueDate,
+            amountMinor: amt,
+          };
+        });
+        const compPayload = components.map((c) => ({
+          label: c.label,
+          amountMinor: Math.round((Number(c.amount) || 0) * 100),
+        }));
+        const res = await createStructureMutation({
+          name,
+          classIds: classIds as Id<"classes">[],
+          components: compPayload,
+          installments: insPayload,
+        });
+        if (res?.structureId) {
+          toast({ title: "Fee structure created", description: "Now assign it to students." });
+          onOpenChange(false);
+          onCreated(res.structureId);
+        }
+      } catch (err: any) {
+        setError(err?.message ?? "Failed to create fee structure");
+      } finally {
+        setPending(false);
+      }
+    } else {
+      const r = await m.mutate({ name, classIds, components, installments: installments.map((i) => ({ ...i, share: i.share / 100 })) });
+      if (r) { toast({ title: "Fee structure created", description: "Now assign it to students." }); onOpenChange(false); onCreated(r.id); }
+    }
   };
+
   return (
     <Modal open={open} onOpenChange={onOpenChange} title="New fee structure" description="Define components and how the total is split into installments." size="lg"
-      footer={<><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button loading={m.isPending} onClick={submit}>Create structure</Button></>}>
+      footer={<><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button loading={pending || m.isPending} onClick={submit}>Create structure</Button></>}>
       <div className="space-y-5">
         <FormField label="Name" required error={m.fieldErrors.name}><Input value={name} onChange={(e) => setName(e.target.value)} /></FormField>
         <fieldset>
@@ -347,13 +588,15 @@ function CreateStructureModal({ open, onOpenChange, onCreated }: { open: boolean
             <Button size="sm" variant="ghost" onClick={() => setInstallments([...installments, { label: `Installment ${installments.length + 1}`, dueDate: "", share: 0 }])}><Plus className="h-4 w-4" /> Add installment</Button>
           </div>
         </div>
-        <FormError error={m.error} />
+        <FormError error={error ? new Error(error) : m.error} />
       </div>
     </Modal>
   );
 }
 
 function Payments() {
+  const { dataSource } = useSession();
+  const live = dataSource === "live";
   const opts = useAcademicOptions();
   const [search, setSearch] = useState("");
   const [classId, setClassId] = useState("");
@@ -361,8 +604,59 @@ function Payments() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [receiptId, setReceiptId] = useState<string | null>(null);
-  const q = useQuery(() => services.fees.listPayments({ search, classId, method, from: from || undefined, to: to || undefined }), [search, classId, method, from, to]);
 
+  // Live Convex query
+  const livePayments = useSchoolQuery(
+    api.fees.listPayments,
+    live
+      ? {
+          classId: classId ? (classId as Id<"classes">) : undefined,
+          method: method || undefined,
+          from: from || undefined,
+          to: to || undefined,
+          search: search || undefined,
+        }
+      : "skip"
+  );
+
+  // Demo fallback query
+  const q = useQuery(
+    () => (live ? Promise.resolve(null as any) : services.fees.listPayments({ search, classId, method, from: from || undefined, to: to || undefined })),
+    [live, search, classId, method, from, to]
+  );
+
+  const adaptedLive = useMemo(() => {
+    if (!livePayments) return undefined;
+    return livePayments.map((p) => ({
+      id: p.id,
+      paymentId: p.paymentId,
+      receiptId: p.receiptId,
+      receiptNo: p.receiptNo,
+      paidOn: p.paidOn,
+      studentId: p.studentId,
+      studentName: p.studentName,
+      admissionNo: p.admissionNo,
+      classId: p.classId ?? "",
+      classLabel: p.classLabel,
+      method: p.method,
+      reference: p.reference,
+      amount: p.amountMinor / 100,
+      status: p.status,
+    }));
+  }, [livePayments]);
+
+  const queryState = useMemo<QueryState<any>>(
+    () => ({
+      isLoading: live ? livePayments === undefined : q.isLoading,
+      isRefreshing: false,
+      data: live ? adaptedLive : q.data,
+      error: live ? null : q.error,
+      refetch: live ? () => {} : q.refetch,
+    }),
+    [live, livePayments, adaptedLive, q.isLoading, q.data, q.error, q.refetch]
+  );
+
+  const rows = queryState.data ?? [];
   const hasActiveFilters = Boolean(search || classId || method || from || to);
   const resetFilters = () => {
     setSearch("");
@@ -373,7 +667,7 @@ function Payments() {
   };
 
   const handleExport = () => {
-    if (!q.data?.length) return;
+    if (!rows.length) return;
     const filename = `fee-payments-${todayISO()}`;
     const headers = [
       "Receipt No",
@@ -384,12 +678,12 @@ function Payments() {
       "Reference",
       "Amount (INR)",
     ];
-    const dataRows = q.data.map((p) => [
+    const dataRows = rows.map((p: any) => [
       p.receiptNo,
       p.paidOn,
       p.studentName,
       p.classLabel,
-      PAYMENT_METHOD_LABELS[p.method] ?? p.method,
+      (PAYMENT_METHOD_LABELS as Record<string, string>)[p.method] ?? p.method,
       p.reference,
       p.amount,
     ]);
@@ -401,9 +695,9 @@ function Payments() {
       <FilterBar
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            {q.data && (
+            {queryState.data && (
               <p className="text-[13px] text-ink-muted">
-                {q.data.length} payments · <span className="font-semibold text-ink">{formatCurrency(q.data.reduce((a, p) => a + p.amount, 0))}</span>
+                {rows.length} payments · <span className="font-semibold text-ink">{formatCurrency(rows.reduce((a: number, p: any) => a + (p.amount || 0), 0))}</span>
               </p>
             )}
             {hasActiveFilters && (
@@ -415,7 +709,7 @@ function Payments() {
               variant="outline"
               size="sm"
               onClick={handleExport}
-              disabled={!q.data?.length}
+              disabled={!rows.length}
               aria-label="Export payments to CSV"
             >
               <Download className="h-4 w-4" /> Export CSV
@@ -430,12 +724,12 @@ function Payments() {
         <Input type="date" aria-label="To date" value={to} onChange={(e) => setTo(e.target.value)} className="sm:w-40" />
       </FilterBar>
       <div className="mt-5">
-        <QueryView query={q} loading="table" wrapError={false}>
-          {(rows) => (
+        <QueryView query={queryState} loading="table" wrapError={false}>
+          {() => (
             <DataTable
               caption="Payments"
               rows={rows}
-              getRowId={(p) => p.id}
+              getRowId={(p: any) => p.id}
               empty={
                 <EmptyState
                   title="No payments found"
@@ -450,13 +744,13 @@ function Payments() {
                 />
               }
               columns={[
-                { key: "receipt", header: "Receipt", primary: true, cell: (p) => <div><p className="font-mono text-[13px] font-semibold text-ink">{p.receiptNo}</p><p className="text-[12px] text-ink-muted">{formatDate(p.paidOn)}</p></div> },
-                { key: "student", header: "Student", cell: (p) => <Link href={`/admin/fees/${p.studentId}`} className="hover:text-lagoon"><span className="font-medium text-ink">{p.studentName}</span> <span className="text-[12px] text-ink-muted">· {p.classLabel}</span></Link> },
-                { key: "method", header: "Method", cell: (p) => PAYMENT_METHOD_LABELS[p.method] },
-                { key: "ref", header: "Reference", cell: (p) => <span className="font-mono text-[12.5px]">{p.reference}</span> },
-                { key: "amount", header: "Amount", align: "right", cell: (p) => <span className="font-semibold text-ink">{formatCurrency(p.amount)}</span> },
+                { key: "receipt", header: "Receipt", primary: true, cell: (p: any) => <div><p className="font-mono text-[13px] font-semibold text-ink">{p.receiptNo}</p><p className="text-[12px] text-ink-muted">{formatDate(p.paidOn)}</p></div> },
+                { key: "student", header: "Student", cell: (p: any) => <Link href={`/admin/fees/${p.studentId}`} className="hover:text-lagoon"><span className="font-medium text-ink">{p.studentName}</span> <span className="text-[12px] text-ink-muted">· {p.classLabel}</span></Link> },
+                { key: "method", header: "Method", cell: (p: any) => (PAYMENT_METHOD_LABELS as Record<string, string>)[p.method] ?? p.method },
+                { key: "ref", header: "Reference", cell: (p: any) => <span className="font-mono text-[12.5px]">{p.reference}</span> },
+                { key: "amount", header: "Amount", align: "right", cell: (p: any) => <span className="font-semibold text-ink">{formatCurrency(p.amount)}</span> },
               ]}
-              rowActions={(p) => <Button size="sm" variant="ghost" onClick={() => setReceiptId(p.receiptId)}><Receipt className="h-4 w-4" /> View</Button>}
+              rowActions={(p: any) => <Button size="sm" variant="ghost" onClick={() => setReceiptId(p.receiptId)}><Receipt className="h-4 w-4" /> View</Button>}
             />
           )}
         </QueryView>

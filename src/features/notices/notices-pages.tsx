@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Archive,
@@ -17,7 +17,11 @@ import {
 import type { Notice, NoticeAudienceScope, NoticePriority, NoticeType } from "@/types/domain";
 import type { NoticeInput } from "@/lib/services/notices.service";
 import { services } from "@/lib/services";
-import { useQuery } from "@/lib/hooks/use-query";
+import { useQuery, type QueryState } from "@/lib/hooks/use-query";
+import { useSchoolMutation, useSchoolQuery } from "@/lib/convex/membership";
+import { api } from "@convex/_generated/api";
+import type { Id } from "@convex/_generated/dataModel";
+import { useSession } from "@/features/auth/session-provider";
 import {
   Badge,
   Button,
@@ -47,6 +51,47 @@ import { useAcademicOptions } from "@/features/shared/use-academic-options";
 import { AUDIENCE_LABELS, NOTICE_TYPE_LABELS, PRIORITY_LABELS } from "@/lib/constants/labels";
 import { formatDate, formatLongDate, todayISO } from "@/lib/utils/dates";
 import { NoticeListItem } from "./notice-list-item";
+
+export function toConvexAudience(audience: Notice["audience"]) {
+  if (audience.scope === "school") {
+    return { kind: "all" as const };
+  }
+  if (audience.scope === "teachers") {
+    return { kind: "roles" as const, roles: ["teacher" as const] };
+  }
+  if (audience.scope === "students") {
+    return { kind: "roles" as const, roles: ["student" as const] };
+  }
+  if (audience.scope === "classes") {
+    return { kind: "classes" as const, classIds: ((audience.classIds ?? []) as unknown) as Id<"classes">[] };
+  }
+  if (audience.scope === "sections") {
+    return { kind: "sections" as const, sectionIds: ((audience.sectionIds ?? []) as unknown) as Id<"sections">[] };
+  }
+  return { kind: "all" as const };
+}
+
+export function fromConvexAudience(audience: any): Notice["audience"] {
+  if (!audience || audience.kind === "all") {
+    return { scope: "school" };
+  }
+  if (audience.kind === "roles") {
+    if (audience.roles?.includes("teacher") && !audience.roles?.includes("student")) {
+      return { scope: "teachers" };
+    }
+    if (audience.roles?.includes("student") && !audience.roles?.includes("teacher")) {
+      return { scope: "students" };
+    }
+    return { scope: "school" };
+  }
+  if (audience.kind === "classes") {
+    return { scope: "classes", classIds: audience.classIds };
+  }
+  if (audience.kind === "sections") {
+    return { scope: "sections", sectionIds: audience.sectionIds };
+  }
+  return { scope: "school" };
+}
 
 type NoticeView = Notice & { audienceLabel: string; author: string; isUpcoming: boolean };
 
@@ -183,8 +228,28 @@ export function NoticesManager() {
   const { toast } = useToast();
   const params = useSearchParams();
   const router = useRouter();
+  const { dataSource } = useSession();
+  const live = dataSource === "live";
+
   const { filters, bar, hasActiveFilters, resetFilters, deps } = useNoticeFilters(true);
-  const q = useQuery(() => services.notices.list(filters), deps);
+
+  // Live Convex query & mutations
+  const liveNotices = useSchoolQuery(
+    api.notices.list,
+    live
+      ? {
+          status: filters.status !== "all" ? (filters.status as any) : undefined,
+          type: filters.type !== "all" ? (filters.type as any) : undefined,
+        }
+      : "skip"
+  );
+  const q = useQuery(() => (live ? Promise.resolve([]) : services.notices.list(filters)), deps);
+
+  const archiveMutation = useSchoolMutation(api.notices.archive);
+  const restoreMutation = useSchoolMutation(api.notices.restore);
+  const removeMutation = useSchoolMutation(api.notices.remove);
+  const updateMutation = useSchoolMutation(api.notices.update);
+
   const [compose, setCompose] = useState<NoticeView | "new" | null>(params.get("action") === "new" ? "new" : null);
   const [del, setDel] = useState<NoticeView | null>(null);
   const [view, setView] = useState<NoticeView | null>(null);
@@ -192,6 +257,68 @@ export function NoticesManager() {
   useEffect(() => {
     if (params.get("action") === "new") setCompose("new");
   }, [params]);
+
+  const today = todayISO();
+  const liveRows = useMemo(() => {
+    if (!liveNotices) return undefined;
+    let list: NoticeView[] = liveNotices.map((n) => {
+      const aud = fromConvexAudience(n.audience);
+      let audLabel = "Whole school";
+      if (n.audience.kind === "roles") {
+        audLabel = n.audience.roles.map((r: string) => r.charAt(0).toUpperCase() + r.slice(1)).join(", ");
+      } else if (n.audience.kind === "classes") {
+        audLabel = `${n.audience.classIds.length} class(es)`;
+      } else if (n.audience.kind === "sections") {
+        audLabel = `${n.audience.sectionIds.length} section(s)`;
+      }
+      return {
+        id: n._id,
+        title: n.title,
+        body: n.body,
+        type: n.type as NoticeType,
+        audience: aud,
+        audienceLabel: audLabel,
+        publishDate: n.publishDate,
+        eventDate: n.eventDate ?? null,
+        priority: n.priority as NoticePriority,
+        status: n.status as "draft" | "published" | "archived",
+        author: "School office",
+        isUpcoming: !!n.eventDate && n.eventDate >= today,
+        createdBy: n.createdByUserId,
+      };
+    });
+
+    if (filters.search) {
+      const kw = filters.search.toLowerCase();
+      list = list.filter((r) => r.title.toLowerCase().includes(kw) || r.body.toLowerCase().includes(kw));
+    }
+    if (filters.priority !== "all") {
+      list = list.filter((r) => r.priority === filters.priority);
+    }
+    if (filters.audience !== "all") {
+      list = list.filter((r) => r.audience.scope === filters.audience);
+    }
+    if (filters.from) {
+      list = list.filter((r) => (r.eventDate ?? r.publishDate) >= filters.from!);
+    }
+    if (filters.to) {
+      list = list.filter((r) => (r.eventDate ?? r.publishDate) <= filters.to!);
+    }
+    return list;
+  }, [liveNotices, filters, today]);
+
+  const rows = live ? (liveRows ?? []) : (q.data ?? []);
+
+  const queryState = useMemo<QueryState<any>>(
+    () => ({
+      isLoading: live ? liveNotices === undefined : q.isLoading,
+      isRefreshing: false,
+      data: rows,
+      error: live ? null : q.error,
+      refetch: live ? () => {} : q.refetch,
+    }),
+    [live, liveNotices, rows, q.isLoading, q.error, q.refetch]
+  );
 
   return (
     <div>
@@ -205,9 +332,9 @@ export function NoticesManager() {
         }
       />
       <Card className="mb-5 p-4">{bar}</Card>
-      <QueryView query={q} loading="table">
-        {(rows) =>
-          rows.length === 0 ? (
+      <QueryView query={queryState} loading="table">
+        {(noticeList) =>
+          noticeList.length === 0 ? (
             <Card>
               <EmptyState
                 icon={<Megaphone className="h-6 w-6" />}
@@ -232,18 +359,18 @@ export function NoticesManager() {
             <Card>
               <div className="border-b border-line/60 px-5 py-3">
                 <p className="text-[13px] text-ink-muted">
-                  Showing <span className="font-semibold text-ink">{rows.length}</span> notice
-                  {rows.length === 1 ? "" : "s"} ·{" "}
-                  <span>{rows.filter((r) => r.status === "published").length} published</span> ·{" "}
+                  Showing <span className="font-semibold text-ink">{noticeList.length}</span> notice
+                  {noticeList.length === 1 ? "" : "s"} ·{" "}
+                  <span>{noticeList.filter((r: any) => r.status === "published").length} published</span> ·{" "}
                   <span>
-                    {rows.filter((r) => r.status === "draft").length} draft
-                    {rows.filter((r) => r.status === "draft").length === 1 ? "" : "s"}
+                    {noticeList.filter((r: any) => r.status === "draft").length} draft
+                    {noticeList.filter((r: any) => r.status === "draft").length === 1 ? "" : "s"}
                   </span>{" "}
-                  · <span>{rows.filter((r) => r.status === "archived").length} archived</span>
+                  · <span>{noticeList.filter((r: any) => r.status === "archived").length} archived</span>
                 </p>
               </div>
               <ul className="divide-y divide-line/60 px-5">
-                {rows.map((n) => (
+                {noticeList.map((n: any) => (
                   <NoticeListItem
                     key={n.id}
                     className="py-4"
@@ -266,7 +393,14 @@ export function NoticesManager() {
                           {n.status === "draft" && (
                             <DropdownItem
                               onSelect={async () => {
-                                await services.notices.update(n.id, toEditableNoticeInput(n, "published"));
+                                if (live) {
+                                  await updateMutation({
+                                    noticeId: n.id as Id<"notices">,
+                                    status: "published",
+                                  });
+                                } else {
+                                  await services.notices.update(n.id, toEditableNoticeInput(n, "published"));
+                                }
                                 toast({
                                   title: "Notice published",
                                   description: "Notice is now visible to its target audience.",
@@ -279,7 +413,11 @@ export function NoticesManager() {
                           {n.status === "published" && (
                             <DropdownItem
                               onSelect={async () => {
-                                await services.notices.archive(n.id);
+                                if (live) {
+                                  await archiveMutation({ noticeId: n.id as Id<"notices"> });
+                                } else {
+                                  await services.notices.archive(n.id);
+                                }
                                 toast({ title: "Notice archived" });
                               }}
                             >
@@ -289,7 +427,11 @@ export function NoticesManager() {
                           {n.status === "archived" && (
                             <DropdownItem
                               onSelect={async () => {
-                                await services.notices.restore(n.id);
+                                if (live) {
+                                  await restoreMutation({ noticeId: n.id as Id<"notices"> });
+                                } else {
+                                  await services.notices.restore(n.id);
+                                }
                                 toast({ title: "Notice restored to published" });
                               }}
                             >
@@ -326,7 +468,11 @@ export function NoticesManager() {
           setView(null);
         }}
         onPublish={async (n) => {
-          await services.notices.update(n.id, toEditableNoticeInput(n, "published"));
+          if (live) {
+            await updateMutation({ noticeId: n.id as Id<"notices">, status: "published" });
+          } else {
+            await services.notices.update(n.id, toEditableNoticeInput(n, "published"));
+          }
           toast({ title: "Notice published", description: "Notice is now visible to its audience." });
           setView(null);
         }}
@@ -340,7 +486,11 @@ export function NoticesManager() {
         confirmLabel="Delete"
         onConfirm={async () => {
           if (del) {
-            await services.notices.remove(del.id);
+            if (live) {
+              await removeMutation({ noticeId: del.id as Id<"notices"> });
+            } else {
+              await services.notices.remove(del.id);
+            }
             toast({ title: "Notice deleted" });
           }
           setDel(null);
@@ -352,7 +502,13 @@ export function NoticesManager() {
 
 function ComposeModal({ existing, onClose }: { existing?: NoticeView; onClose: () => void }) {
   const { toast } = useToast();
+  const { dataSource } = useSession();
+  const live = dataSource === "live";
   const opts = useAcademicOptions();
+
+  const createNoticeMutation = useSchoolMutation(api.notices.create);
+  const updateNoticeMutation = useSchoolMutation(api.notices.update);
+
   const [form, setForm] = useState<NoticeInput>(
     existing
       ? {
@@ -425,20 +581,54 @@ function ComposeModal({ existing, onClose }: { existing?: NoticeView; onClose: (
     setError(null);
     setErrors({});
     try {
-      const payload = toEditableNoticeInput(form, status);
-      if (existing) {
-        await services.notices.update(existing.id, payload);
-        toast({ title: status === "draft" ? "Draft saved" : "Notice updated" });
+      if (live) {
+        const convAudience = toConvexAudience(form.audience);
+        const convPriority: "normal" | "high" | "urgent" = form.priority === "low" ? "normal" : form.priority;
+        if (existing) {
+          await updateNoticeMutation({
+            noticeId: existing.id as Id<"notices">,
+            title: form.title.trim(),
+            body: form.body.trim(),
+            type: form.type as any,
+            priority: convPriority,
+            audience: convAudience,
+            status,
+            publishDate: form.publishDate,
+            eventDate: form.eventDate || undefined,
+          });
+          toast({ title: status === "draft" ? "Draft saved" : "Notice updated" });
+        } else {
+          await createNoticeMutation({
+            title: form.title.trim(),
+            body: form.body.trim(),
+            type: form.type as any,
+            priority: convPriority,
+            audience: convAudience,
+            status,
+            publishDate: form.publishDate,
+            eventDate: form.eventDate || undefined,
+          });
+          toast({
+            title: status === "draft" ? "Draft saved" : "Notice published",
+          });
+        }
+        onClose();
       } else {
-        const r = await services.notices.create(payload);
-        toast({
-          title: status === "draft" ? "Draft saved" : "Notice published",
-          description: status === "published" ? `Delivered to ${r.reached} accounts.` : undefined,
-        });
+        const payload = toEditableNoticeInput(form, status);
+        if (existing) {
+          await services.notices.update(existing.id, payload);
+          toast({ title: status === "draft" ? "Draft saved" : "Notice updated" });
+        } else {
+          const r = await services.notices.create(payload);
+          toast({
+            title: status === "draft" ? "Draft saved" : "Notice published",
+            description: status === "published" ? `Delivered to ${r.reached} accounts.` : undefined,
+          });
+        }
+        onClose();
       }
-      onClose();
-    } catch (e) {
-      setError(e as Error);
+    } catch (e: any) {
+      setError(e instanceof Error ? e : new Error(e?.message ?? "Failed to save notice"));
       setErrors((e as { fieldErrors?: Record<string, string> }).fieldErrors ?? {});
     }
     setBusy(false);
@@ -670,18 +860,88 @@ function NoticeDetail({
 // ------------------------------------------------------------------ Teacher / Student board
 
 export function NoticeBoard() {
+  const { dataSource } = useSession();
+  const live = dataSource === "live";
+
   const { filters, bar, hasActiveFilters, resetFilters, deps } = useNoticeFilters(false);
-  const q = useQuery(() => services.notices.list(filters), deps);
+
+  const liveNotices = useSchoolQuery(
+    api.notices.list,
+    live ? { type: filters.type !== "all" ? (filters.type as any) : undefined } : "skip"
+  );
+  const q = useQuery(() => (live ? Promise.resolve([]) : services.notices.list(filters)), deps);
   const [view, setView] = useState<NoticeView | null>(null);
+
+  const today = todayISO();
+  const liveRows = useMemo(() => {
+    if (!liveNotices) return undefined;
+    let list: NoticeView[] = liveNotices.map((n) => {
+      const aud = fromConvexAudience(n.audience);
+      let audLabel = "Whole school";
+      if (n.audience.kind === "roles") {
+        audLabel = n.audience.roles.map((r: string) => r.charAt(0).toUpperCase() + r.slice(1)).join(", ");
+      } else if (n.audience.kind === "classes") {
+        audLabel = `${n.audience.classIds.length} class(es)`;
+      } else if (n.audience.kind === "sections") {
+        audLabel = `${n.audience.sectionIds.length} section(s)`;
+      }
+      return {
+        id: n._id,
+        title: n.title,
+        body: n.body,
+        type: n.type as NoticeType,
+        audience: aud,
+        audienceLabel: audLabel,
+        publishDate: n.publishDate,
+        eventDate: n.eventDate ?? null,
+        priority: n.priority as NoticePriority,
+        status: n.status as "draft" | "published" | "archived",
+        author: "School office",
+        isUpcoming: !!n.eventDate && n.eventDate >= today,
+        createdBy: n.createdByUserId,
+      };
+    });
+
+    if (filters.search) {
+      const kw = filters.search.toLowerCase();
+      list = list.filter((r) => r.title.toLowerCase().includes(kw) || r.body.toLowerCase().includes(kw));
+    }
+    if (filters.priority !== "all") {
+      list = list.filter((r) => r.priority === filters.priority);
+    }
+    if (filters.audience !== "all") {
+      list = list.filter((r) => r.audience.scope === filters.audience);
+    }
+    if (filters.from) {
+      list = list.filter((r) => (r.eventDate ?? r.publishDate) >= filters.from!);
+    }
+    if (filters.to) {
+      list = list.filter((r) => (r.eventDate ?? r.publishDate) <= filters.to!);
+    }
+    return list;
+  }, [liveNotices, filters, today]);
+
+  const rows = live ? (liveRows ?? []) : (q.data ?? []);
+
+  const queryState = useMemo<QueryState<any>>(
+    () => ({
+      isLoading: live ? liveNotices === undefined : q.isLoading,
+      isRefreshing: false,
+      data: rows,
+      error: live ? null : q.error,
+      refetch: live ? () => {} : q.refetch,
+    }),
+    [live, liveNotices, rows, q.isLoading, q.error, q.refetch]
+  );
 
   return (
     <div>
       <PageHeader title="Notices" description="Announcements, events and holidays relevant to you." />
       <Card className="mb-5 p-4">{bar}</Card>
-      <QueryView query={q} loading="table">
-        {(rows) => {
-          const upcoming = rows.filter((n) => n.isUpcoming && n.type !== "notice");
-          return rows.length === 0 ? (
+      <QueryView query={queryState} loading="table">
+        {(noticeList) => {
+          const upcoming = noticeList.filter((n: any) => n.isUpcoming && n.type !== "notice");
+          return noticeList.length === 0 ? (
             <Card>
               <EmptyState
                 icon={<Megaphone className="h-6 w-6" />}
@@ -704,7 +964,7 @@ export function NoticeBoard() {
             <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
               <Card>
                 <ul className="divide-y divide-line/60 px-5">
-                  {rows.map((n) => (
+                  {noticeList.map((n: any) => (
                     <NoticeListItem key={n.id} className="py-4" notice={n} onClick={() => setView(n)} />
                   ))}
                 </ul>
@@ -716,8 +976,8 @@ export function NoticeBoard() {
                 ) : (
                   <ul className="space-y-3">
                     {upcoming
-                      .sort((a, b) => (a.eventDate ?? "").localeCompare(b.eventDate ?? ""))
-                      .map((n) => (
+                      .sort((a: any, b: any) => (a.eventDate ?? "").localeCompare(b.eventDate ?? ""))
+                      .map((n: any) => (
                         <li key={n.id} className="flex items-start gap-3">
                           <div className="grid w-12 shrink-0 rounded-xl bg-sapphire py-1.5 text-center text-white">
                             <span className="text-[10px] font-semibold uppercase">
@@ -727,7 +987,7 @@ export function NoticeBoard() {
                           </div>
                           <div className="min-w-0">
                             <p className="text-sm font-semibold text-ink">{n.title}</p>
-                            <p className="text-[12px] text-ink-muted">{NOTICE_TYPE_LABELS[n.type]}</p>
+                            <p className="text-[12px] text-ink-muted">{NOTICE_TYPE_LABELS[n.type as NoticeType]}</p>
                           </div>
                         </li>
                       ))}

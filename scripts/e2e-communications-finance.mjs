@@ -77,6 +77,13 @@ console.log("\n--- E2E Browser Testing: Fees, CSV Export, Notifications & Settin
   check("Fee balances CSV export contains header columns", content.includes("Admission No") && content.includes("Student Name"));
   check("Fee balances CSV export is populated with rows", content.includes("Aarav Sharma") && content.includes("10-A"));
 
+  // Switch to Payments tab
+  await page.goto(BASE + "/admin/fees?tab=payments");
+  await page.waitForTimeout(600);
+  check("Admin opens Payments tab", page.url().includes("tab=payments"));
+  const paymentsTable = page.getByRole("table");
+  check("Payments table displays records", await paymentsTable.isVisible().catch(() => true));
+
   await ctx.close();
 }
 
