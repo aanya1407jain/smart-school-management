@@ -3,30 +3,141 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { BadgePercent, CheckCircle2, Layers, Plus, Wallet } from "lucide-react";
-import type { PaymentMethod } from "@/types/domain";
 import { services } from "@/lib/services";
-import { useQuery } from "@/lib/hooks/use-query";
+import { useQuery, type QueryState } from "@/lib/hooks/use-query";
 import { useMutation } from "@/lib/hooks/use-mutation";
+import { useSchoolMutation, useSchoolQuery } from "@/lib/convex/membership";
+import { api } from "@convex/_generated/api";
+import type { Id } from "@convex/_generated/dataModel";
+import type { PaymentMethod } from "@/types/domain";
+import { useSession } from "@/features/auth/session-provider";
 import { Avatar, Button, Card, CardHeader, EmptyState, FormField, GlassCard, Input, Modal, ProgressBar, QueryView, Select, StatusBadge, Textarea, useToast } from "@/components/ui";
 import { FormError } from "@/features/shared/form-error";
 import { formatCurrency, formatPercent } from "@/lib/utils/format";
 import { formatDate, todayISO } from "@/lib/utils/dates";
 import { PAYMENT_METHOD_LABELS } from "@/lib/constants/labels";
 import { FeeObligationsTable, PaymentsTable, ReceiptModal } from "./fee-tables";
+import { useMemo } from "react";
 
 export function StudentLedger({ studentId }: { studentId: string }) {
   const params = useSearchParams();
   const { toast } = useToast();
-  const q = useQuery(() => services.fees.getStudentLedger(studentId), [studentId]);
+  const { dataSource } = useSession();
+  const live = dataSource === "live";
+
+  // Live Convex queries & mutations
+  const liveLedger = useSchoolQuery(api.fees.getStudentLedger, live ? { studentId: studentId as Id<"students"> } : "skip");
+  const profile = useSchoolQuery(api.academics.getStudentProfile, live ? { studentId: studentId as Id<"students"> } : "skip");
+  const liveStructures = useSchoolQuery(api.fees.listStructures, live ? {} : "skip");
+  const assignStructureMutation = useSchoolMutation(api.fees.assignStructure);
+
+  // Demo fallback query
+  const q = useQuery(() => (live ? Promise.resolve(null as any) : services.fees.getStudentLedger(studentId)), [live, studentId]);
+
   const [payOpen, setPayOpen] = useState(false);
   const [concOpen, setConcOpen] = useState(false);
   const [receiptId, setReceiptId] = useState<string | null>(null);
+  const [assigning, setAssigning] = useState(false);
   const assign = useMutation(services.fees.assignStructure);
 
-  useEffect(() => { if (params.get("pay") === "1" && q.data && q.data.totals.outstanding > 0) setPayOpen(true); }, [params, q.data]);
+  const adaptedLive = useMemo(() => {
+    if (!liveLedger) return undefined;
+    const sName = profile ? `${profile.student.firstName} ${profile.student.lastName}` : "Student";
+    const sAdm = profile?.student.admissionNo ?? "";
+    const sClass = profile?.enrollment ? (profile.enrollment.sectionDisplayName ?? profile.enrollment.className ?? "") : "";
+
+    const gross = liveLedger.totals.grossMinor / 100;
+    const concession = liveLedger.totals.concessionMinor / 100;
+    const paid = liveLedger.totals.paidMinor / 100;
+    const outstanding = liveLedger.totals.outstandingMinor / 100;
+    const net = gross - concession;
+
+    const today = todayISO();
+    let overdue = 0;
+    let nextDue: { dueDate: string; outstanding: number } | null = null;
+
+    const obligations = liveLedger.obligations.map((o) => {
+      const obOut = o.outstandingMinor / 100;
+      if (obOut > 0 && o.dueDate < today) {
+        overdue += obOut;
+      }
+      if (obOut > 0 && (!nextDue || o.dueDate < nextDue.dueDate)) {
+        nextDue = { dueDate: o.dueDate, outstanding: obOut };
+      }
+      const status = obOut === 0 ? "paid" : o.dueDate < today ? "overdue" : o.paidMinor > 0 ? "partial" : "unpaid";
+      return {
+        id: o.obligationId,
+        label: o.label,
+        dueDate: o.dueDate,
+        amount: o.amountMinor / 100,
+        concession: o.concessionMinor / 100,
+        net: o.netMinor / 100,
+        paid: o.paidMinor / 100,
+        outstanding: obOut,
+        status: status as any,
+      };
+    });
+
+    const payments = liveLedger.payments.map((p) => ({
+      id: p.paymentId,
+      receiptId: p.paymentId,
+      receiptNo: p.receiptNo ?? "—",
+      amount: p.amountMinor / 100,
+      method: p.method as PaymentMethod,
+      reference: `REF-${p.paymentId.slice(-6)}`,
+      paidOn: p.paidOn,
+    }));
+
+    const standing = outstanding === 0 && net > 0 ? "paid" : overdue > 0 ? "overdue" : paid > 0 ? "partial" : "unpaid";
+
+    return {
+      student: {
+        id: studentId,
+        name: sName,
+        admissionNo: sAdm,
+        classLabel: sClass,
+      },
+      totals: {
+        gross,
+        concession,
+        net,
+        paid,
+        outstanding,
+        overdue,
+      },
+      standing,
+      assignments: liveLedger.obligations.length > 0 ? [{ id: "assigned" }] : [],
+      availableStructures: (liveStructures ?? []).map((fs) => ({
+        id: fs._id,
+        name: fs.name,
+        total: fs.totalMinor / 100,
+      })),
+      structures: (liveStructures ?? []).filter((fs) => fs.assignedCount > 0),
+      obligations,
+      concessions: [],
+      payments,
+      nextDue,
+    };
+  }, [liveLedger, profile, liveStructures, studentId]);
+
+  const queryState = useMemo<QueryState<any>>(
+    () => ({
+      isLoading: live ? liveLedger === undefined : q.isLoading,
+      isRefreshing: false,
+      data: live ? adaptedLive : q.data,
+      error: live ? null : q.error,
+      refetch: live ? () => {} : q.refetch,
+    }),
+    [live, liveLedger, adaptedLive, q.isLoading, q.data, q.error, q.refetch]
+  );
+
+  useEffect(() => {
+    const dataObj = live ? adaptedLive : q.data;
+    if (params.get("pay") === "1" && dataObj && dataObj.totals.outstanding > 0) setPayOpen(true);
+  }, [params, live, adaptedLive, q.data]);
 
   return (
-    <QueryView query={q}>
+    <QueryView query={queryState}>
       {(l) => {
         const pct = l.totals.net ? (l.totals.paid / l.totals.net) * 100 : 0;
         return (
@@ -64,8 +175,30 @@ export function StudentLedger({ studentId }: { studentId: string }) {
                   icon={<Layers className="h-6 w-6" />}
                   title="No fee structure assigned"
                   description="Assign a fee structure to generate this student's installments."
-                  action={l.availableStructures.map((s) => (
-                    <Button key={s.id} variant="outline" loading={assign.isPending} onClick={async () => { if (await assign.mutate(s.id, [studentId])) toast({ title: "Fee assigned", description: s.name }); }}>
+                  action={l.availableStructures.map((s: any) => (
+                    <Button
+                      key={s.id}
+                      variant="outline"
+                      loading={assigning || assign.isPending}
+                      onClick={async () => {
+                        if (live) {
+                          setAssigning(true);
+                          try {
+                            await assignStructureMutation({
+                              structureId: s.id as Id<"feeStructures">,
+                              studentId: studentId as Id<"students">,
+                            });
+                            toast({ title: "Fee assigned", description: s.name });
+                          } catch (err: any) {
+                            toast({ title: "Assignment failed", description: err?.message, tone: "error" });
+                          } finally {
+                            setAssigning(false);
+                          }
+                        } else {
+                          if (await assign.mutate(s.id, [studentId])) toast({ title: "Fee assigned", description: s.name });
+                        }
+                      }}
+                    >
                       <Plus className="h-4 w-4" /> {s.name} · {formatCurrency(s.total)}
                     </Button>
                   ))}
@@ -74,14 +207,14 @@ export function StudentLedger({ studentId }: { studentId: string }) {
             ) : (
               <>
                 <Card>
-                  <CardHeader title="Installments" description={l.structures.map((s) => s.name).join(", ")} />
+                  <CardHeader title="Installments" description={l.structures.map((s: any) => s.name).join(", ")} />
                   <div className="p-5"><FeeObligationsTable obligations={l.obligations} /></div>
                 </Card>
                 {l.concessions.length > 0 && (
                   <Card>
                     <CardHeader title="Concessions" />
                     <ul className="divide-y divide-line/60 px-5 pb-2">
-                      {l.concessions.map((c) => <li key={c.id} className="flex justify-between py-3 text-sm"><span className="text-ink-soft">{c.reason} · {formatDate(c.createdAt.slice(0, 10))}</span><span className="font-semibold text-ink">− {formatCurrency(c.amount)}</span></li>)}
+                      {l.concessions.map((c: any) => <li key={c.id} className="flex justify-between py-3 text-sm"><span className="text-ink-soft">{c.reason} · {formatDate(c.createdAt.slice(0, 10))}</span><span className="font-semibold text-ink">− {formatCurrency(c.amount)}</span></li>)}
                     </ul>
                   </Card>
                 )}
@@ -113,20 +246,54 @@ export function StudentLedger({ studentId }: { studentId: string }) {
 }
 
 function PaymentModal({ open, onOpenChange, studentId, outstanding, suggested, onPaid }: { open: boolean; onOpenChange: (o: boolean) => void; studentId: string; outstanding: number; suggested: number; onPaid: (receiptId: string, receiptNo: string, amount: number) => void }) {
+  const { dataSource } = useSession();
+  const live = dataSource === "live";
   const [amount, setAmount] = useState(suggested);
   const [method, setMethod] = useState<PaymentMethod>("upi");
   const [reference, setReference] = useState("");
   const [paidOn, setPaidOn] = useState(todayISO());
   const [note, setNote] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const liveRecordPayment = useSchoolMutation(api.fees.recordPayment);
   const m = useMutation(services.fees.recordPayment);
-  useEffect(() => { if (open) { setAmount(suggested); m.reset(); } }, [open, suggested]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => { if (open) { setAmount(suggested); m.reset(); setError(null); } }, [open, suggested]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const submit = async () => {
-    const r = await m.mutate({ studentId, amount, method, reference, paidOn, note });
-    if (r) { onOpenChange(false); onPaid(r.receiptId, r.receiptNo, amount); setReference(""); setNote(""); }
+    setError(null);
+    setPending(true);
+    try {
+      if (live) {
+        const r = await liveRecordPayment({
+          studentId: studentId as Id<"students">,
+          amountMinor: Math.round(amount * 100),
+          method,
+          paidOn,
+          reference: reference.trim() || undefined,
+          note: note.trim() || undefined,
+        });
+        if (r) {
+          onOpenChange(false);
+          onPaid(r.receiptId, r.receiptNo, amount);
+          setReference("");
+          setNote("");
+        }
+      } else {
+        const r = await m.mutate({ studentId, amount, method, reference, paidOn, note });
+        if (r) { onOpenChange(false); onPaid(r.receiptId, r.receiptNo, amount); setReference(""); setNote(""); }
+      }
+    } catch (err: any) {
+      setError(err?.message ?? "Payment failed");
+    } finally {
+      setPending(false);
+    }
   };
+
   return (
     <Modal open={open} onOpenChange={onOpenChange} title="Record payment" description={`Outstanding balance: ${formatCurrency(outstanding)}`} size="sm"
-      footer={<><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button loading={m.isPending} onClick={submit}><CheckCircle2 className="h-4 w-4" /> Record & generate receipt</Button></>}>
+      footer={<><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button loading={pending || m.isPending} onClick={submit}><CheckCircle2 className="h-4 w-4" /> Record & generate receipt</Button></>}>
       <div className="space-y-4">
         <FormField label="Amount (₹)" required error={m.fieldErrors.amount} hint="Payments are applied to the earliest unpaid installment first.">
           <Input type="number" min={1} max={outstanding} value={amount} onChange={(e) => setAmount(Number(e.target.value))} />
@@ -140,7 +307,7 @@ function PaymentModal({ open, onOpenChange, studentId, outstanding, suggested, o
         </div>
         <FormField label="Reference / transaction ID" required={method !== "cash"} error={m.fieldErrors.reference}><Input value={reference} onChange={(e) => setReference(e.target.value)} placeholder={method === "cash" ? "Optional" : "e.g. UPI ref 4061 2231"} /></FormField>
         <FormField label="Note"><Textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional" /></FormField>
-        <FormError error={m.error && !Object.keys(m.fieldErrors).length ? m.error : null} />
+        <FormError error={error ? new Error(error) : (m.error && !Object.keys(m.fieldErrors).length ? m.error : null)} />
       </div>
     </Modal>
   );
@@ -148,15 +315,51 @@ function PaymentModal({ open, onOpenChange, studentId, outstanding, suggested, o
 
 function ConcessionModal({ open, onOpenChange, studentId, max }: { open: boolean; onOpenChange: (o: boolean) => void; studentId: string; max: number }) {
   const { toast } = useToast();
+  const { dataSource } = useSession();
+  const live = dataSource === "live";
   const [amount, setAmount] = useState(1000);
   const [reason, setReason] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const liveCreateConcession = useSchoolMutation(api.fees.createConcession);
   const m = useMutation(services.fees.addConcession);
+
+  const handleSubmit = async () => {
+    setError(null);
+    setPending(true);
+    try {
+      if (live) {
+        await liveCreateConcession({
+          studentId: studentId as Id<"students">,
+          kind: "fixed",
+          value: Math.round(amount * 100),
+          reason: reason.trim(),
+        });
+        toast({ title: "Concession applied" });
+        onOpenChange(false);
+        setReason("");
+      } else {
+        if (await m.mutate(studentId, amount, reason)) {
+          toast({ title: "Concession applied" });
+          onOpenChange(false);
+          setReason("");
+        }
+      }
+    } catch (err: any) {
+      setError(err?.message ?? "Failed to apply concession");
+    } finally {
+      setPending(false);
+    }
+  };
+
   return (
     <Modal open={open} onOpenChange={onOpenChange} title="Apply concession" description={`Reduces the outstanding balance (max ${formatCurrency(max)}).`} size="sm"
-      footer={<><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button loading={m.isPending} onClick={async () => { if (await m.mutate(studentId, amount, reason)) { toast({ title: "Concession applied" }); onOpenChange(false); setReason(""); } }}>Apply</Button></>}>
+      footer={<><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button loading={pending || m.isPending} onClick={handleSubmit}>Apply</Button></>}>
       <div className="space-y-4">
         <FormField label="Amount (₹)" required error={m.fieldErrors.amount}><Input type="number" min={1} value={amount} onChange={(e) => setAmount(Number(e.target.value))} /></FormField>
         <FormField label="Reason" required error={m.fieldErrors.reason}><Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Sibling concession" /></FormField>
+        <FormError error={error ? new Error(error) : null} />
       </div>
     </Modal>
   );

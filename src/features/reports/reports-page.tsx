@@ -5,7 +5,10 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, ReferenceLine } from "recharts";
 import { AlertCircle, Award, Download, GraduationCap, RotateCcw, Users, Wallet } from "lucide-react";
 import { services } from "@/lib/services";
-import { useQuery } from "@/lib/hooks/use-query";
+import { useQuery, type QueryState } from "@/lib/hooks/use-query";
+import { useSchoolQuery } from "@/lib/convex/membership";
+import { api } from "@convex/_generated/api";
+import { useSession } from "@/features/auth/session-provider";
 import type { FeeStanding } from "@/lib/services/derive";
 import {
   Avatar, Badge, Button, Card, CardHeader, DataTable, EmptyState, FilterBar, FilterSelect,
@@ -43,13 +46,52 @@ const pctTick = (v: number) => `${v}%`;
 const barCursor = { fill: "rgba(188,197,204,0.18)" };
 
 function StudentStats() {
-  const q = useQuery(() => services.reports.getStudentStatistics(), []);
+  const { dataSource } = useSession();
+  const live = dataSource === "live";
+
+  // Live Convex query
+  const liveStats = useSchoolQuery(api.reports.studentStatistics, live ? {} : "skip");
+
+  // Demo fallback query
+  const q = useQuery(() => (live ? Promise.resolve(null as any) : services.reports.getStudentStatistics()), [live]);
+
+  const adaptedLive = useMemo(() => {
+    if (!liveStats) return undefined;
+    return {
+      total: liveStats.totalEnrolled,
+      status: { active: liveStats.totalEnrolled, inactive: 0, transferred: 0, alumni: 0 },
+      bySection: liveStats.sectionStats.map((s) => ({
+        label: s.name,
+        students: s.studentsCount,
+        capacity: s.capacity,
+      })),
+      guardians: liveStats.uniqueGuardians,
+      byClass: liveStats.classStats.map((c) => ({
+        name: c.name,
+        male: c.male,
+        female: c.female,
+        total: c.total,
+      })),
+    };
+  }, [liveStats]);
+
+  const queryState = useMemo<QueryState<any>>(
+    () => ({
+      isLoading: live ? liveStats === undefined : q.isLoading,
+      isRefreshing: false,
+      data: live ? adaptedLive : q.data,
+      error: live ? null : q.error,
+      refetch: live ? () => {} : q.refetch,
+    }),
+    [live, liveStats, adaptedLive, q.isLoading, q.data, q.error, q.refetch]
+  );
+
   return (
-    <QueryView query={q}>
+    <QueryView query={queryState}>
       {(d) => (
         <div className="space-y-5">
           <div className="grid gap-4 sm:grid-cols-3">
-            <StatCard label="Enrolled students" value={d.total} icon={<GraduationCap className="h-5 w-5" />} hint={`${d.status.active} active`} />
+            <StatCard label="Enrolled students" value={d.total} icon={<GraduationCap className="h-5 w-5" />} hint={`${d.status?.active ?? d.total} active`} />
             <StatCard label="Sections" value={d.bySection.length} icon={<Users className="h-5 w-5" />} tone="sapphire" hint={`Avg ${(d.total / Math.max(1, d.bySection.length)).toFixed(1)} per section`} />
             <StatCard label="Linked guardians" value={d.guardians} icon={<Users className="h-5 w-5" />} tone="purple" hint="Guardians can see only their linked students" />
           </div>
@@ -86,9 +128,54 @@ function StudentStats() {
 }
 
 function AttendanceReport() {
-  const q = useQuery(() => services.reports.getAttendanceReport(), []);
+  const { dataSource } = useSession();
+  const live = dataSource === "live";
+
+  // Live Convex query
+  const liveAtt = useSchoolQuery(api.reports.attendanceReport, live ? {} : "skip");
+
+  // Demo fallback query
+  const q = useQuery(() => (live ? Promise.resolve(null as any) : services.reports.getAttendanceReport()), [live]);
+
+  const adaptedLive = useMemo(() => {
+    if (!liveAtt) return undefined;
+    const bands = [
+      { band: "95–100%", students: liveAtt.bySection.filter((s) => s.percentage >= 95).length },
+      { band: "90–95%", students: liveAtt.bySection.filter((s) => s.percentage >= 90 && s.percentage < 95).length },
+      { band: "85–90%", students: liveAtt.bySection.filter((s) => s.percentage >= 85 && s.percentage < 90).length },
+      { band: "75–85%", students: liveAtt.bySection.filter((s) => s.percentage >= 75 && s.percentage < 85).length },
+      { band: "Below 75%", students: liveAtt.bySection.filter((s) => s.percentage < 75).length },
+    ];
+    return {
+      monthly: liveAtt.monthly.map((m) => ({
+        month: m.month,
+        percentage: m.percentage,
+        late: m.lateCount,
+        absent: m.absentCount,
+      })),
+      bySection: liveAtt.bySection.map((s) => ({
+        label: s.label,
+        percentage: s.percentage,
+      })),
+      bands,
+      lowAttendance: [],
+      threshold: liveAtt.threshold,
+    };
+  }, [liveAtt]);
+
+  const queryState = useMemo<QueryState<any>>(
+    () => ({
+      isLoading: live ? liveAtt === undefined : q.isLoading,
+      isRefreshing: false,
+      data: live ? adaptedLive : q.data,
+      error: live ? null : q.error,
+      refetch: live ? () => {} : q.refetch,
+    }),
+    [live, liveAtt, adaptedLive, q.isLoading, q.data, q.error, q.refetch]
+  );
+
   return (
-    <QueryView query={q}>
+    <QueryView query={queryState}>
       {(d) => (
         <div className="space-y-5">
           <div className="grid gap-4 lg:grid-cols-2">
@@ -130,12 +217,12 @@ function AttendanceReport() {
           <Card>
             <CardHeader title={`Students below ${d.threshold}%`} description="Follow up with these students and their guardians" />
             <div className="p-5">
-              <DataTable rows={d.lowAttendance} getRowId={(s) => s.id} empty={<EmptyState title="No students below the threshold" />}
+              <DataTable rows={d.lowAttendance as any[]} getRowId={(s: any) => s.id} empty={<EmptyState title="No students below the threshold" />}
                 columns={[
-                  { key: "n", header: "Student", primary: true, cell: (s) => <Link href={`/admin/students/${s.id}`} className="flex items-center gap-2.5 hover:text-lagoon"><Avatar name={s.name} size="sm" /><span className="font-semibold text-ink">{s.name}</span></Link> },
-                  { key: "c", header: "Class", cell: (s) => s.classLabel },
-                  { key: "a", header: "Absent days", cell: (s) => s.absent },
-                  { key: "p", header: "Attendance", align: "right", cell: (s) => <span className="font-semibold text-plum">{formatPercent(s.percentage, 1)}</span> },
+                  { key: "n", header: "Student", primary: true, cell: (s: any) => <Link href={`/admin/students/${s.id}`} className="flex items-center gap-2.5 hover:text-lagoon"><Avatar name={s.name} size="sm" /><span className="font-semibold text-ink">{s.name}</span></Link> },
+                  { key: "c", header: "Class", cell: (s: any) => s.classLabel },
+                  { key: "a", header: "Absent days", cell: (s: any) => s.absent },
+                  { key: "p", header: "Attendance", align: "right", cell: (s: any) => <span className="font-semibold text-plum">{formatPercent(s.percentage, 1)}</span> },
                 ]} />
             </div>
           </Card>
@@ -146,6 +233,8 @@ function AttendanceReport() {
 }
 
 function FeeReport() {
+  const { dataSource } = useSession();
+  const live = dataSource === "live";
   const opts = useAcademicOptions();
   const [search, setSearch] = useState("");
   const [academicYearId, setAcademicYearId] = useState("");
@@ -155,19 +244,69 @@ function FeeReport() {
   const [paidFrom, setPaidFrom] = useState("");
   const [paidTo, setPaidTo] = useState("");
 
-  const q = useQuery(() => services.fees.getSummary(), []);
-  const payments = useQuery(() => services.fees.listPayments({}), []);
+  // Live Convex queries
+  const liveSummary = useSchoolQuery(api.fees.collectionSummary, live ? {} : "skip");
+  const liveBalances = useSchoolQuery(
+    api.fees.listBalances,
+    live
+      ? {
+          search: search || undefined,
+          classId: (classId || undefined) as any,
+          sectionId: (sectionId || undefined) as any,
+          standing: (standing || "all") as any,
+        }
+      : "skip"
+  );
+
+  // Demo fallback queries
+  const q = useQuery(() => (live ? Promise.resolve(null as any) : services.fees.getSummary()), [live]);
+  const payments = useQuery(() => (live ? Promise.resolve([] as any) : services.fees.listPayments({})), [live]);
   const balances = useQuery(
     () =>
-      services.fees.listBalances({
-        search,
-        classId,
-        sectionId,
-        academicYearId: academicYearId || undefined,
-        standing: (standing || "all") as FeeStanding | "all",
-      }),
-    [search, classId, sectionId, academicYearId, standing]
+      live
+        ? Promise.resolve([] as any)
+        : services.fees.listBalances({
+            search,
+            classId,
+            sectionId,
+            academicYearId: academicYearId || undefined,
+            standing: (standing || "all") as FeeStanding | "all",
+          }),
+    [live, search, classId, sectionId, academicYearId, standing]
   );
+
+  interface FeeReportRow {
+    id: string;
+    studentId: string;
+    name: string;
+    admissionNo: string;
+    classLabel: string;
+    net: number;
+    paid: number;
+    outstanding: number;
+    overdue: number;
+    standing: any;
+    lastPayment?: string | null;
+  }
+
+  const liveRows = useMemo<FeeReportRow[] | undefined>(() => {
+    if (!liveBalances) return undefined;
+    return liveBalances.map((r) => ({
+      id: r.studentId,
+      studentId: r.studentId,
+      name: r.name,
+      admissionNo: r.admissionNo,
+      classLabel: r.classLabel,
+      net: r.netMinor / 100,
+      paid: r.paidMinor / 100,
+      outstanding: r.outstandingMinor / 100,
+      overdue: r.overdueMinor / 100,
+      standing: r.standing,
+      lastPayment: r.lastPaymentOn,
+    }));
+  }, [liveBalances]);
+
+  const rawBalancesData: FeeReportRow[] | undefined = (live ? liveRows : (balances.data as any)) as FeeReportRow[] | undefined;
 
   const sectionOptions = useMemo(
     () =>
@@ -177,8 +316,8 @@ function FeeReport() {
     [opts.data, classId]
   );
 
-  const filteredRows = useMemo(() => {
-    let rows = balances.data ?? [];
+  const filteredRows: FeeReportRow[] = useMemo(() => {
+    let rows: FeeReportRow[] = rawBalancesData ?? [];
     if (paidFrom) {
       rows = rows.filter((r) => r.lastPayment && r.lastPayment >= paidFrom);
     }
@@ -186,7 +325,7 @@ function FeeReport() {
       rows = rows.filter((r) => r.lastPayment && r.lastPayment <= paidTo);
     }
     return rows;
-  }, [balances.data, paidFrom, paidTo]);
+  }, [rawBalancesData, paidFrom, paidTo]);
 
   const hasActiveFilters = Boolean(
     search || academicYearId || classId || sectionId || standing || paidFrom || paidTo
@@ -203,27 +342,62 @@ function FeeReport() {
   };
 
   const filteredTotals = useMemo(() => {
-    const net = filteredRows.reduce((a, r) => a + r.net, 0);
-    const paid = filteredRows.reduce((a, r) => a + r.paid, 0);
-    const outstanding = filteredRows.reduce((a, r) => a + r.outstanding, 0);
-    const overdue = filteredRows.reduce((a, r) => a + r.overdue, 0);
+    const net = filteredRows.reduce((a: number, r: FeeReportRow) => a + r.net, 0);
+    const paid = filteredRows.reduce((a: number, r: FeeReportRow) => a + r.paid, 0);
+    const outstanding = filteredRows.reduce((a: number, r: FeeReportRow) => a + r.outstanding, 0);
+    const overdue = filteredRows.reduce((a: number, r: FeeReportRow) => a + r.overdue, 0);
     const collectionRate = net > 0 ? (paid / net) * 100 : 0;
     return { net, paid, outstanding, overdue, collectionRate };
   }, [filteredRows]);
 
+  const adaptedSummary = useMemo(() => {
+    if (!liveSummary) return undefined;
+    return {
+      totals: {
+        paid: liveSummary.collectedMinor / 100,
+        outstanding: liveSummary.outstandingMinor / 100,
+        net: liveSummary.netMinor / 100,
+        concession: 0,
+        collectionRate: liveSummary.collectionRate,
+        overdue: 0,
+        dueSoon: 0,
+      },
+      standing: {
+        overdue: 0,
+        due_soon: 0,
+        clear: 0,
+        paid: 0,
+      },
+      monthly: [],
+      recentPayments: [],
+    };
+  }, [liveSummary]);
+
+  const queryState = useMemo<QueryState<any>>(
+    () => ({
+      isLoading: live ? liveSummary === undefined : q.isLoading,
+      isRefreshing: false,
+      data: live ? adaptedSummary : q.data,
+      error: live ? null : q.error,
+      refetch: live ? () => {} : q.refetch,
+    }),
+    [live, liveSummary, adaptedSummary, q.isLoading, q.data, q.error, q.refetch]
+  );
+
   const byMethod = useMemo(
-    () =>
-      Object.entries(
-        (payments.data ?? []).reduce<Record<string, number>>((acc, p) => {
-          acc[p.method] = (acc[p.method] ?? 0) + p.amount;
-          return acc;
-        }, {})
-      )
+    () => {
+      const payList: any[] = payments.data ?? [];
+      const record: Record<string, number> = {};
+      for (const p of payList) {
+        record[p.method] = (record[p.method] ?? 0) + Number(p.amount || 0);
+      }
+      return Object.entries(record)
         .map(([m, amount]) => ({
-          method: PAYMENT_METHOD_LABELS[m as keyof typeof PAYMENT_METHOD_LABELS],
+          method: PAYMENT_METHOD_LABELS[m as keyof typeof PAYMENT_METHOD_LABELS] ?? m,
           amount,
         }))
-        .sort((a, b) => b.amount - a.amount),
+        .sort((a, b) => b.amount - a.amount);
+    },
     [payments.data]
   );
 
@@ -255,7 +429,7 @@ function FeeReport() {
   };
 
   return (
-    <QueryView query={q}>
+    <QueryView query={queryState}>
       {(s) => (
         <div className="space-y-6">
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -438,13 +612,13 @@ function FeeReport() {
                     <DataTable
                       caption="Student fee report"
                       rows={filteredRows}
-                      getRowId={(r) => r.studentId}
+                      getRowId={(r: FeeReportRow) => r.studentId}
                       columns={[
                         {
                           key: "student",
                           header: "Student",
                           primary: true,
-                          cell: (r) => (
+                          cell: (r: FeeReportRow) => (
                             <div className="flex items-center gap-3">
                               <Avatar name={r.name} size="sm" />
                               <div>
@@ -454,14 +628,14 @@ function FeeReport() {
                             </div>
                           ),
                         },
-                        { key: "class", header: "Class", cell: (r) => r.classLabel },
-                        { key: "net", header: "Net fees", align: "right", cell: (r) => formatCurrency(r.net) },
-                        { key: "paid", header: "Amount paid", align: "right", cell: (r) => formatCurrency(r.paid) },
+                        { key: "class", header: "Class", cell: (r: FeeReportRow) => r.classLabel },
+                        { key: "net", header: "Net fees", align: "right", cell: (r: FeeReportRow) => formatCurrency(r.net) },
+                        { key: "paid", header: "Amount paid", align: "right", cell: (r: FeeReportRow) => formatCurrency(r.paid) },
                         {
                           key: "outstanding",
                           header: "Outstanding",
                           align: "right",
-                          cell: (r) => (
+                          cell: (r: FeeReportRow) => (
                             <span
                               className={
                                 r.overdue > 0
@@ -475,14 +649,14 @@ function FeeReport() {
                             </span>
                           ),
                         },
-                        { key: "status", header: "Status", cell: (r) => <StatusBadge status={r.standing} /> },
+                        { key: "status", header: "Status", cell: (r: FeeReportRow) => <StatusBadge status={r.standing} /> },
                         {
                           key: "lastPayment",
                           header: "Last payment",
-                          cell: (r) => (r.lastPayment ? formatDate(r.lastPayment) : "—"),
+                          cell: (r: FeeReportRow) => (r.lastPayment ? formatDate(r.lastPayment) : "—"),
                         },
                       ]}
-                      rowActions={(r) => (
+                      rowActions={(r: FeeReportRow) => (
                         <Link
                           href={`/admin/fees/${r.studentId}`}
                           className="inline-flex items-center text-[12.5px] font-medium text-lagoon hover:underline"

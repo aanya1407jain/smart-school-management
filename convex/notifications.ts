@@ -52,3 +52,25 @@ export const markAllRead = schoolMutation({
     return { updated: unread.length };
   },
 });
+
+export const remove = schoolMutation({
+  args: { notificationId: v.id("notifications") },
+  handler: async (ctx, { notificationId }) => {
+    const n = await getInSchool(ctx, "notifications", notificationId, "Notification");
+    if (n.userId !== ctx.actor.userId) throw notFound("Notification");
+    await ctx.db.delete(n._id);
+    return { ok: true };
+  },
+});
+
+export const clearAll = schoolMutation({
+  args: {},
+  handler: async (ctx) => {
+    const all = await ctx.db
+      .query("notifications")
+      .withIndex("by_user_school", (q) => q.eq("userId", ctx.actor.userId).eq("schoolId", ctx.actor.schoolId))
+      .take(500);
+    for (const n of all) await ctx.db.delete(n._id);
+    return { ok: true, deleted: all.length };
+  },
+});

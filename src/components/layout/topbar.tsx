@@ -92,7 +92,16 @@ function LiveNotificationBell() {
           {open && recent === undefined && <p className="px-3 py-6 text-center text-sm text-ink-muted">Loading…</p>}
         </div>
         <DropdownSeparator />
-        <DropdownItem onSelect={() => router.push("/student/notifications")} className="mx-1.5 mb-1.5 justify-center font-medium text-lagoon">View all notifications</DropdownItem>
+        <DropdownItem
+          onSelect={() => {
+            const role = user.role as string;
+            const path = role === "student" || role === "guardian" ? "/student/notifications" : `/${user.role}/notifications`;
+            router.push(path);
+          }}
+          className="mx-1.5 mb-1.5 justify-center font-medium text-lagoon"
+        >
+          View all notifications
+        </DropdownItem>
       </DropdownContent>
     </DropdownMenu>
   );
