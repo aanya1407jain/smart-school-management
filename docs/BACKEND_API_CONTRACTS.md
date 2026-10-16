@@ -166,7 +166,7 @@ validators; return shapes are the handler return values (use
 | `notices.update({ noticeId, … })` | Author or `notices:manage` | Drafts only |
 | `notices.publish({ noticeId })` | Author or `notices:manage` | Idempotent; re-validates the audience; rejects an expired notice; notifies the audience once — now when `publishDate` ≤ today (school timezone), otherwise by a scheduled job on the publish date. Returns `{ notified, scheduled }` |
 | `notices.archive({ noticeId })` | Author or `notices:manage` | |
-| `notices.restore({ noticeId })` | Author or `notices:manage` | Archived only: back to `published` if it was ever published (no second notification; not if expired), else back to `draft` |
+| `notices.restore({ noticeId })` | Author or `notices:manage` | Archived only: always back to `draft`; it must be published again (`publish` re-validates audience and dates; a notice published before is not notified twice — same dedupe key) |
 | `notices.listManaged({ status? })` | Managers see all; teachers see their own | Includes `authorName` and a readable `audienceLabel` |
 | `notices.feed()` | Any member | Published, current notices addressed to the caller |
 | `notices.get({ noticeId })` | Author or `notices:manage`, or the audience while published and current | Otherwise `NOT_FOUND` |
@@ -176,7 +176,7 @@ validators; return shapes are the handler return values (use
 | `events.list({ from, to })` | Any member | Events addressed to the caller; at most 400 days |
 
 - `audience` is `{kind:"all"} | {kind:"roles", roles} | {kind:"classes", classIds} | {kind:"sections", sectionIds}`. Every class / section id is loaded inside the caller's school (another school's id is `NOT_FOUND`).
-- **Lifecycle:** draft → published → archived → (restore) published / draft. Published notices are immutable. **Notices are never hard-deleted** (no retention rule allows it yet).
+- **Lifecycle:** draft → published → archived → (restore) draft → (publish) published. Published notices are immutable. **Notices are never hard-deleted** (no retention rule allows it yet).
 - A holiday must be school-wide. It cannot cover a date that already has an attendance register, because holidays make the day a non-school day for attendance.
 - Students use `studentPortal.myNotices({ today })`.
 
@@ -243,6 +243,7 @@ Existing and now used by the admin screen: `setClassTeacher`, `assignSubjectTeac
 | Function | Who | Notes |
 |---|---|---|
 | `remove({ notificationId })` | The notification's own recipient | Deletes that personal inbox copy only; another user's notification is `NOT_FOUND` |
+| `clearAll({})` | Any member (own inbox) | Deletes the caller's own notifications in this school, 500 per call (`remaining: true` → call again); never touches other users (from PR #11) |
 
 ## Not provided (explicit)
 

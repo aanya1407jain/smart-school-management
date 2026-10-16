@@ -172,3 +172,152 @@ describe("authorization and isolation", () => {
     expect(r.receiptNo).toMatch(/\/0001$/);
   });
 });
+
+/**
+ * PR #11 (AP-01) scenarios, adapted to the final fees API: structures are
+ * activated before assignment, assignment takes a `target`, payments carry a
+ * `clientRequestId`, the ledger is `studentLedger`, receipts are read by
+ * `receiptId`, and list queries return `{ rows }`.
+ */
+describe("AP-01 scenarios from PR #11 (final API)", () => {
+  let req = 0;
+  const rid = () => `ap01-request-${++req}`;
+
+  test("admin creates a fee structure, amounts are validated, and it is assigned to a class", async () => {
+    const t = makeTest();
+    const f = await createSchool(t, "school-a");
+    const admin = await as(t, f.users.admin);
+    const teacher = await as(t, f.users.classTeacher);
+    const base = { classIds: [f.classId], components: [{ label: "Tuition", amountMinor: 500000 }] };
+
+    expect(await errorCode(teacher.mutation(api.fees.createStructure, { ...base, name: "Tuition 2026", installments: [{ label: "Term 1", dueDate: "2026-05-01", amountMinor: 500000 }] }))).toBe("FORBIDDEN");
+    expect(await errorCode(admin.mutation(api.fees.createStructure, { ...base, name: "Tuition 2026", installments: [{ label: "Term 1", dueDate: "2026-05-01", amountMinor: 400000 }] }))).toBe("INVALID_ARGUMENT");
+
+    const { structureId } = await admin.mutation(api.fees.createStructure, {
+      name: "Annual Tuition", classIds: [f.classId], activate: true,
+      components: [{ label: "Tuition", amountMinor: 600000 }, { label: "Activity", amountMinor: 100000 }],
+      installments: [{ label: "Term 1", dueDate: "2026-05-01", amountMinor: 350000 }, { label: "Term 2", dueDate: "2026-10-01", amountMinor: 350000 }],
+    });
+    const first = await admin.mutation(api.fees.assignStructure, { structureId, target: { kind: "class", classId: f.classId } });
+    expect(first.assigned).toBe(2); // studentA (8-A) and studentB (8-B)
+    const obligations = await t.run(async (ctx) => (await ctx.db.query("studentFees").collect()).filter((o) => o.feeStructureId === structureId).length);
+    expect(obligations).toBe(4); // 2 students × 2 installments
+
+    const again = await admin.mutation(api.fees.assignStructure, { structureId, target: { kind: "class", classId: f.classId } });
+    expect(again.assigned).toBe(0);
+    expect(again.skipped.every((s) => s.reason === "already_assigned")).toBe(true);
+
+    const structures = await admin.query(api.fees.listStructures, {});
+    expect(structures).toHaveLength(1);
+    expect(structures[0].totalMinor).toBe(700000);
+    expect(structures[0].classNames).toContain("Grade 8");
+    expect(structures[0].assignedCount).toBe(2);
+  });
+
+  test("payments issue sequential receipts, update the ledger, notify student and guardian, and reverse once", async () => {
+    const t = makeTest();
+    const f = await createSchool(t, "school-b");
+    const admin = await as(t, f.users.admin);
+    const student = await as(t, f.users.student);
+    const guardian = await as(t, f.users.guardian);
+    const { structureId } = await admin.mutation(api.fees.createStructure, {
+      name: "Standard Fee", classIds: [f.classId], activate: true, components: [{ label: "Tuition", amountMinor: 400000 }],
+      installments: [{ label: "Installment 1", dueDate: "2026-05-01", amountMinor: 200000 }, { label: "Installment 2", dueDate: "2026-09-01", amountMinor: 200000 }],
+    });
+    await admin.mutation(api.fees.assignStructure, { structureId, target: { kind: "students", studentIds: [f.studentA] } });
+
+    const initial = await student.query(api.fees.studentLedger, { studentId: f.studentA });
+    expect(initial.totals).toMatchObject({ grossMinor: 400000, outstandingMinor: 400000, paidMinor: 0 });
+
+    const p1 = await admin.mutation(api.fees.recordPayment, { studentId: f.studentA, amountMinor: 150000, method: "upi", paidOn: "2026-05-02", reference: "UPI/123456", note: "Partial installment 1", clientRequestId: rid() });
+    const p2 = await admin.mutation(api.fees.recordPayment, { studentId: f.studentA, amountMinor: 100000, method: "cash", paidOn: "2026-05-03", clientRequestId: rid() });
+    expect(p1.receiptNo).toMatch(/\/0001$/);
+    expect(p2.receiptNo).toMatch(/\/0002$/);
+
+    const ledger = await student.query(api.fees.studentLedger, { studentId: f.studentA });
+    expect(ledger.totals).toMatchObject({ paidMinor: 250000, outstandingMinor: 150000 });
+    expect(ledger.payments).toHaveLength(2);
+
+    const receipt = await admin.query(api.fees.receipt, { receiptId: p1.receiptId });
+    expect(receipt.receiptNo).toBe(p1.receiptNo);
+    expect(receipt.payment).toMatchObject({ amountMinor: 150000, method: "upi", reversed: false });
+    expect(receipt.student.name).toBe("Asha S");
+    expect(receipt.school.name).toBe("School school-b");
+
+    const studentFees = (await student.query(api.notifications.list, {})).filter((n) => n.type === "fees");
+    expect(studentFees).toHaveLength(2);
+    expect(studentFees.some((n) => n.message.includes(p1.receiptNo))).toBe(true);
+    expect(studentFees.some((n) => n.message.includes(p2.receiptNo))).toBe(true);
+    expect((await guardian.query(api.notifications.list, {})).some((n) => n.type === "fees")).toBe(true);
+
+    await admin.mutation(api.fees.reversePayment, { paymentId: p2.paymentId, reason: "Cheque bounce / duplicate" });
+    const after = await student.query(api.fees.studentLedger, { studentId: f.studentA });
+    expect(after.totals).toMatchObject({ paidMinor: 150000, outstandingMinor: 250000 });
+    expect(await errorCode(admin.mutation(api.fees.reversePayment, { paymentId: p2.paymentId, reason: "Try again" }))).toBe("CONFLICT");
+  });
+
+  test("a percentage concession reduces the balance listing; nothing collected yet", async () => {
+    const t = makeTest();
+    const f = await createSchool(t, "school-c");
+    const admin = await as(t, f.users.admin);
+    const { structureId } = await admin.mutation(api.fees.createStructure, {
+      name: "Annual Fee", classIds: [f.classId], activate: true, components: [{ label: "Tuition", amountMinor: 500000 }],
+      installments: [{ label: "Full", dueDate: "2026-04-15", amountMinor: 500000 }],
+    });
+    await admin.mutation(api.fees.assignStructure, { structureId, target: { kind: "class", classId: f.classId } });
+    await admin.mutation(api.fees.addConcession, { studentId: f.studentA, kind: "percent", value: 2000, reason: "Sibling scholarship" });
+
+    const { rows } = await admin.query(api.fees.listBalances, {});
+    const a = rows.find((r) => r.studentId === f.studentA);
+    expect(a).toMatchObject({ netMinor: 400000, outstandingMinor: 400000, standing: "overdue" });
+    const b = rows.find((r) => r.studentId === f.studentB);
+    expect(b?.outstandingMinor).toBe(500000);
+    const overdue = await admin.query(api.fees.listBalances, { standing: "overdue" });
+    expect(overdue.rows.map((r) => r.studentId).sort()).toEqual([f.studentA, f.studentB].sort());
+
+    const summary = await admin.query(api.fees.collectionSummary, { from: "2026-04-01", to: "2026-10-01" });
+    expect(summary).toMatchObject({ totalMinor: 0, payments: 0 });
+  });
+
+  test("listPayments: fee managers only, school-isolated, with method / date / search / class filters", async () => {
+    const t = makeTest();
+    const f1 = await createSchool(t, "school-x");
+    const f2 = await createSchool(t, "school-y");
+    const admin1 = await as(t, f1.users.admin);
+    const admin2 = await as(t, f2.users.admin);
+    expect(await errorCode((await as(t, f1.users.classTeacher)).query(api.fees.listPayments, {}))).toBe("FORBIDDEN");
+    expect(await errorCode((await as(t, f1.users.student)).query(api.fees.listPayments, {}))).toBe("FORBIDDEN");
+
+    const setupFee = async (admin: typeof admin1, f: School, amountMinor: number) => {
+      const { structureId } = await admin.mutation(api.fees.createStructure, {
+        name: "Standard Fee", classIds: [f.classId], activate: true, components: [{ label: "Tuition", amountMinor }],
+        installments: [{ label: "Term 1", dueDate: "2026-05-01", amountMinor }],
+      });
+      await admin.mutation(api.fees.assignStructure, { structureId, target: { kind: "class", classId: f.classId } });
+    };
+    await setupFee(admin1, f1, 500000);
+    await setupFee(admin2, f2, 300000);
+    const pay1 = await admin1.mutation(api.fees.recordPayment, { studentId: f1.studentA, amountMinor: 200000, method: "upi", paidOn: "2026-05-02", reference: "UPI/TXN/999", clientRequestId: rid() });
+    const pay2 = await admin1.mutation(api.fees.recordPayment, { studentId: f1.studentB, amountMinor: 150000, method: "cash", paidOn: "2026-05-10", reference: "CASH-RECEIPT-01", clientRequestId: rid() });
+    const payS2 = await admin2.mutation(api.fees.recordPayment, { studentId: f2.studentA, amountMinor: 300000, method: "online", paidOn: "2026-05-05", reference: "NETBANK/S2/001", clientRequestId: rid() });
+
+    const s1 = (await admin1.query(api.fees.listPayments, {})).rows;
+    expect(s1.map((p) => p.paymentId).sort()).toEqual([pay1.paymentId, pay2.paymentId].sort());
+    const s2 = (await admin2.query(api.fees.listPayments, {})).rows;
+    expect(s2.map((p) => p.paymentId)).toEqual([payS2.paymentId]);
+    expect(s2[0].method).toBe("online");
+
+    expect(s1[0]).toMatchObject({ paidOn: "2026-05-10", method: "cash", amountMinor: 150000 });
+    expect(s1[0].receiptNo).toBeTruthy();
+    expect(s1[0].studentName).toBeTruthy();
+    expect(s1[0].admissionNo).toBeTruthy();
+    expect(s1[0].classLabel).toBe("8-B");
+
+    expect((await admin1.query(api.fees.listPayments, { method: "upi" })).rows.map((p) => p.paymentId)).toEqual([pay1.paymentId]);
+    expect((await admin1.query(api.fees.listPayments, { from: "2026-05-05", to: "2026-05-15" })).rows.map((p) => p.paymentId)).toEqual([pay2.paymentId]);
+    expect((await admin1.query(api.fees.listPayments, { search: "TXN/999" })).rows.map((p) => p.paymentId)).toEqual([pay1.paymentId]);
+    expect((await admin1.query(api.fees.listPayments, { classId: f1.classId })).rows).toHaveLength(2);
+    // A class id from another school is rejected, not silently empty.
+    expect(await errorCode(admin1.query(api.fees.listPayments, { classId: f2.classId }))).toBe("NOT_FOUND");
+  });
+});

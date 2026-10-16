@@ -358,3 +358,18 @@ returns `{ page, isDone, continueCursor }`; `studentHistory` returns `range`; ti
   (incl. leave), teacher Dashboard, the academic-trend report tab and per-student attendance bands.
 - **Schema (additive):** `studentFees.by_school_year`, `feeConcessions.by_school_year`,
   `feePayments.by_school_year`, optional `notices.publishedAt`.
+
+## 20. PR #12 made mergeable with `main` (PR #11 merged there) (17 Oct 2026)
+
+- `origin/main` (fddb52c, PR #11) merged into `feat/convex-backend-foundation`; 17 conflicts resolved file by file.
+  One backend per module is kept (the A-0x versions: retry-safe payments, overpayment rejection, FIFO allocation,
+  school/student/fee/payment ownership checks, school-timezone dates, indexed queries). PR #11's screens were
+  already ported onto this backend, so its UI calls to `notices.create/list/remove`, `fees.getStudentLedger/getReceipt/
+  createConcession` are not reintroduced.
+- Kept from PR #11: `notifications.clearAll` (own inbox only, batched), `vitest` `testTimeout: 20000`, its notice,
+  fee, guardian and reports tests (rewritten against the final API — none deleted).
+- Not kept: notice hard delete (`notices.remove`; notices are archived, never deleted), caller-supplied payment
+  allocations (FIFO is the rule), `read-excel-file` caret (dependencies stay pinned), `next-env.d.ts` dev path.
+- **Behaviour change:** `notices.restore` now always returns an archived notice to **draft**; it must be published
+  again (re-validated; no second notification thanks to the per-notice dedupe key). Demo service matches.
+- Removed the accidental tracked file `"\357\200\233OA"` (terminal `git log` output).

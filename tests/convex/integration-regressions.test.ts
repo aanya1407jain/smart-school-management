@@ -209,7 +209,7 @@ describe("notices", () => {
     expect(await count()).toBe(after);
   });
 
-  test("lifecycle: restore returns an archived notice to its previous state, never re-notifies, and nothing can hard-delete", async () => {
+  test("lifecycle: restore returns an archived notice to draft, republishing never re-notifies, and nothing can hard-delete", async () => {
     const t = makeTest();
     const A = await createSchool(t, "alpha");
     const admin = await as(t, A.users.admin);
@@ -218,7 +218,9 @@ describe("notices", () => {
     const before = await t.run(async (ctx) => (await ctx.db.query("notifications").collect()).length);
     await admin.mutation(api.notices.archive, { noticeId: pub.noticeId });
     expect(await errorCode(admin.mutation(api.notices.publish, { noticeId: pub.noticeId }))).toBe("CONFLICT");
-    expect((await admin.mutation(api.notices.restore, { noticeId: pub.noticeId })).status).toBe("published");
+    expect((await admin.mutation(api.notices.restore, { noticeId: pub.noticeId })).status).toBe("draft");
+    expect((await admin.query(api.notices.feed, {})).some((n) => n.noticeId === pub.noticeId)).toBe(false); // off the board until republished
+    await admin.mutation(api.notices.publish, { noticeId: pub.noticeId });
     expect(await t.run(async (ctx) => (await ctx.db.query("notifications").collect()).length)).toBe(before);
     const d = await admin.mutation(api.notices.createDraft, { ...draft, audience: { kind: "all" } });
     await admin.mutation(api.notices.archive, { noticeId: d.noticeId });

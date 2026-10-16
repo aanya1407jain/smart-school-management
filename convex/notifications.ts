@@ -40,6 +40,8 @@ export const markRead = schoolMutation({
   },
 });
 
+const CLEAR_BATCH = 500;
+
 export const markAllRead = schoolMutation({
   args: {},
   handler: async (ctx) => {
@@ -66,5 +68,23 @@ export const remove = schoolMutation({
     if (n.userId !== ctx.actor.userId) throw notFound("Notification");
     await ctx.db.delete(n._id);
     return { ok: true };
+  },
+});
+
+/**
+ * Remove ALL of the caller's own notifications in this school (bounded batch;
+ * `remaining: true` means call again). Other users' inboxes are never touched.
+ */
+export const clearAll = schoolMutation({
+  args: {},
+  handler: async (ctx) => {
+    requirePermission(ctx.actor, "notifications:read");
+    const batch = await ctx.db
+      .query("notifications")
+      .withIndex("by_user_school", (q) => q.eq("userId", ctx.actor.userId).eq("schoolId", ctx.actor.schoolId))
+      .take(CLEAR_BATCH + 1);
+    const rows = batch.slice(0, CLEAR_BATCH);
+    for (const n of rows) await ctx.db.delete(n._id);
+    return { ok: true, deleted: rows.length, remaining: batch.length > CLEAR_BATCH };
   },
 });

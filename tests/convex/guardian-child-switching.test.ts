@@ -272,5 +272,13 @@ describe("AP-05: Guardian child switching and notifications", () => {
     // Removing is limited to the caller's own notifications.
     const studentNote = (await student.query(api.notifications.list, {}))[0];
     expect(await errorCode(guardian.mutation(api.notifications.remove, { notificationId: studentNote._id }))).toBe("NOT_FOUND");
+
+    // Clearing the inbox (PR #11's clearAll) empties only the caller's own notifications.
+    const studentCountBefore = (await student.query(api.notifications.list, {})).length;
+    const cleared = await guardian.mutation(api.notifications.clearAll, {});
+    expect(cleared.deleted).toBe(listAfterDelete.length);
+    expect(cleared.remaining).toBe(false);
+    expect(await guardian.query(api.notifications.list, {})).toHaveLength(0);
+    expect(await student.query(api.notifications.list, {})).toHaveLength(studentCountBefore);
   });
 });

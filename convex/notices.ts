@@ -14,8 +14,8 @@
  * publish time when the notice is already visible (publishDate ≤ today in the
  * school's timezone), otherwise by a scheduled job on its publish date.
  *
- * Lifecycle: draft → published → archived, and archived → restored to the
- * state it had (published if it had ever been published, otherwise draft).
+ * Lifecycle: draft → published → archived, and archived → restored to DRAFT
+ * (republishing is required to show it again).
  * Notices are never hard-deleted (no retention rule permits it yet).
  */
 import { v, type Infer } from "convex/values";
@@ -219,7 +219,7 @@ export const publish = schoolMutation({
   handler: async (ctx, { noticeId }) => {
     const n = await editable(ctx, noticeId);
     if (n.status === "published") return { ok: true, notified: 0, scheduled: false };
-    if (n.status === "archived") throw conflict("Restore the notice instead of publishing it again.");
+    if (n.status === "archived") throw conflict("Restore the notice to draft before publishing it again.");
     // Re-validate: the author's scope may have changed since the draft.
     await validateAudience(ctx, n.audience);
     const t = await today(ctx);
@@ -270,20 +270,20 @@ export const archive = schoolMutation({
   },
 });
 
-/** Undo an archive: back to published if it had ever been published (no second notification), otherwise to draft. */
+/**
+ * Undo an archive: the notice always returns to DRAFT. It disappears from every
+ * feed until someone publishes it again (re-validating its audience and dates);
+ * a notice that was published before keeps its dedupe key, so republishing does
+ * not notify the same people twice.
+ */
 export const restore = schoolMutation({
   args: { noticeId: v.id("notices") },
   handler: async (ctx, { noticeId }) => {
     const n = await editable(ctx, noticeId);
     if (n.status !== "archived") throw conflict("Only archived notices can be restored.");
-    const status = n.publishedAt ? ("published" as const) : ("draft" as const);
-    if (status === "published") {
-      await validateAudience(ctx, n.audience);
-      if (n.expiresOn && n.expiresOn < (await today(ctx))) throw conflict("This notice has expired; it cannot be restored to the board.");
-    }
-    await ctx.db.patch(n._id, { status });
-    await writeAudit(ctx, { schoolId: ctx.actor.schoolId, actor: ctx.actor, action: "notice.restored", entity: { table: "notices", id: n._id }, summary: `Restored notice "${n.title}" (${status})` });
-    return { ok: true, status };
+    await ctx.db.patch(n._id, { status: "draft" });
+    await writeAudit(ctx, { schoolId: ctx.actor.schoolId, actor: ctx.actor, action: "notice.restored", entity: { table: "notices", id: n._id }, summary: `Restored notice "${n.title}" to draft` });
+    return { ok: true, status: "draft" as const };
   },
 });
 

@@ -406,13 +406,9 @@ export function NoticesManager() {
                             <DropdownItem
                               onSelect={async () => {
                                 try {
-                                  if (live) {
-                                    const r = await restoreMutation({ noticeId: n.id as Id<"notices"> });
-                                    toast({ title: r.status === "published" ? "Notice restored to published" : "Notice restored as a draft" });
-                                  } else {
-                                    await services.notices.restore(n.id);
-                                    toast({ title: "Notice restored to published" });
-                                  }
+                                  if (live) await restoreMutation({ noticeId: n.id as Id<"notices"> });
+                                  else await services.notices.restore(n.id);
+                                  toast({ title: "Notice restored as a draft", description: "Publish it again to put it back on the board." });
                                 } catch (e) { fail(e); }
                               }}
                             >
