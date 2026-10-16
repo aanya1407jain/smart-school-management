@@ -170,6 +170,30 @@ async function main() {
   const b5 = services.auth.bindIdentity({ loginId: idOf("student@asteracademy.edu"), email: "student@asteracademy.edu", role: "student", displayName: "Aarav Sharma", permissionSets: [], school: { slug: "another-school" }, students: [{ studentId: "cvx_aarav", name: "Aarav Sharma" }] });
   const b6 = services.auth.bindIdentity({ loginId: idOf("admin@asteracademy.edu"), email: "admin@asteracademy.edu", role: "admin", displayName: "x", permissionSets: [], school: { slug: "another-school" }, students: [] });
   check("21. Accounts of a non-demo school are never bound to demo personas", !b5.ok && !b6.ok && services.auth.getSessionSnapshot().user === null);
+
+  // ---------------- Demo "My Attendance" (src/features/attendance/my-attendance.tsx renders exactly this data)
+  const { summarizeAttendance } = await import("../src/features/attendance/attendance-summary");
+  /** Independent expectation: the student's entries in their current section's registers, newest first. */
+  const ownRecords = (sid: string) => {
+    const d = readDb();
+    const enr = d.enrollments.find((e) => e.studentId === sid && e.academicYearId === d.school.currentAcademicYearId && e.status === "active");
+    return d.attendance.filter((a) => a.sectionId === enr?.sectionId && a.entries[sid]).map((a) => ({ date: a.date, status: a.entries[sid] })).sort((a, b) => b.date.localeCompare(a.date));
+  };
+  login("guardian@asteracademy.edu", "student");
+  const gAarav = await services.attendance.getStudentAttendance("stu_aarav");
+  const gAnanya = await services.attendance.getStudentAttendance("stu_ananya");
+  check("22. Guardian sees each linked child's OWN demo attendance (not a shared fixed list)",
+    JSON.stringify(gAarav.records) === JSON.stringify(ownRecords("stu_aarav")) && JSON.stringify(gAnanya.records) === JSON.stringify(ownRecords("stu_ananya"))
+      && JSON.stringify(gAarav.records) !== JSON.stringify(gAnanya.records) && gAarav.records.length > 7,
+    `aarav ${gAarav.records.length} days, ananya ${gAnanya.records.length} days`);
+  login("student@asteracademy.edu", "student");
+  const own = await services.attendance.getStudentAttendance("stu_aarav");
+  const r23 = await rejects(() => services.attendance.getStudentAttendance("stu_ananya"));
+  check("23. Student sees own demo attendance; another student's is rejected", JSON.stringify(own.records) === JSON.stringify(ownRecords("stu_aarav")) && r23.rejected, r23.code);
+  const sum = summarizeAttendance(own.records, { lateCountsAsPresent: own.lateCountsAsPresent });
+  check("24. Page totals match the service (late per school setting)",
+    sum.present === own.stats.present && sum.late === own.stats.late && sum.absent === own.stats.absent && sum.percentage === (own.stats.percentage === null ? null : Math.round(own.stats.percentage * 10) / 10),
+    `${sum.percentage}% vs ${own.stats.percentage}`);
   services.auth.clearIdentity();
 
   const passed = results.filter((r) => r.ok).length;

@@ -289,6 +289,10 @@ async function serverAnswer(ctx, path) {
   await login(page, "STU-2026-00001", "Student@123");
   await page.goto(BASE + "/student/attendance");
   check("A10 Student can view own attendance", await waitText(page, /Attendance calendar/));
+  const daysShown = async () => Number(await page.locator('dt:text-is("Days") + dd').first().innerText());
+  const markedCells = async () => (await page.locator('[role="gridcell"]').evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")))).filter((l) => l && !l.endsWith("no record"));
+  const aaravDays = await daysShown();
+  check("A10a Demo attendance comes from the demo registers (not a fixed 7-day list)", aaravDays > 7 && (await markedCells()).length > 0, `${aaravDays} days`);
   check("A11 Student has no attendance edit controls", (await page.getByRole("radiogroup", { name: /^Attendance for / }).count()) === 0 && (await page.getByRole("button", { name: /save attendance|update attendance|mark all/i }).count()) === 0);
   await page.goto(BASE + "/teacher/attendance?section=10-A");
   check("A11b Student blocked from the register route", await waitText(page, /don't have access/i));
@@ -296,9 +300,11 @@ async function serverAnswer(ctx, path) {
   await login(page, "GRD-00001", "Guardian@123");
   await page.goto(BASE + "/student/attendance");
   await waitText(page, /Attendance calendar/);
+  const guardianAaravCells = await markedCells();
   await page.getByRole("button", { name: /switch student/i }).click();
   await page.getByRole("menuitem", { name: /Ananya Sharma/ }).click();
   await page.waitForTimeout(800);
+  check("A12a Each linked child shows their own demo records", JSON.stringify(await markedCells()) !== JSON.stringify(guardianAaravCells) && (await daysShown()) > 7);
   check("A12 Guardian views linked student's attendance (switch to Ananya)", await waitText(page, /Attendance calendar/) && (await page.getByRole("button", { name: /switch student/i }).innerText()).includes("Ananya"));
   check("A13 Guardian has no attendance edit controls", (await page.getByRole("radiogroup", { name: /^Attendance for / }).count()) === 0 && (await page.getByRole("button", { name: /save attendance|update attendance|mark all/i }).count()) === 0);
   await page.goto(BASE + "/admin/attendance");

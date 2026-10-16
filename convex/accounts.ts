@@ -22,10 +22,12 @@ import { internalAction, internalMutation, type ActionCtx, type QueryCtx } from 
 import { schoolAction, schoolQuery } from "./core/functions";
 import { requireActor, type Actor } from "./core/actor";
 import { getCurrentAcademicYearId, getInSchool, requirePermission } from "./core/authorization";
-import { forbidden, invalid } from "./core/errors";
+import { AppError, forbidden, invalid } from "./core/errors";
 import { fullName, teacherDisplayName } from "./model/academics";
 import { generateTemporaryPassword, PASSWORD_PROVIDER, provisionAccount, reserveAccount, temporaryPasswordFields } from "./model/accounts";
 import { accountTarget, writeAudit } from "./model/audit";
+import { MAX_SECTION_ROSTER } from "./model/rollNumbers";
+import { paginateSorted, sortKeyOf } from "./model/sortedPagination";
 
 const vPersonRef = v.union(
   v.object({ kind: v.literal("student"), studentId: v.id("students") }),
@@ -227,10 +229,22 @@ async function accountFor(ctx: QueryCtx, actor: Actor, field: "studentId" | "tea
   return m ? { membershipId: m._id, loginId: m.loginId ?? null, state: accountState(m) } : null;
 }
 
+/** Largest active-student list sorted for the all-students view (one bounded read; filter by section above this). */
+export const MAX_SCHOOL_STUDENT_LIST = 5000;
+
 /**
  * Students or teachers of the caller's school with their account state
- * (paginated). Students can be narrowed to one section (current roster, in
- * roll-number order); `rollNo` is the system-assigned roll number.
+ * (paginated). `rollNo` is the stored, system-assigned roll number.
+ *
+ * Students are listed in the documented roster order (model/rollNumbers.ts):
+ * first name, then last name — case-, accent- and whitespace-insensitive —
+ * then student id (and enrollment id). That order cannot be expressed by an
+ * index, so the bounded list is read, filtered (active students only), sorted
+ * and then paginated by sort-key cursors (model/sortedPagination.ts: complete
+ * and duplicate-free across pages). Bounds: a section ≤ MAX_SECTION_ROSTER
+ * (1,000) active enrollments; the whole school ≤ MAX_SCHOOL_STUDENT_LIST
+ * (5,000) active students — above that the caller is asked to filter by section.
+ * Teachers keep the index order.
  */
 export const listPeople = schoolQuery({
   args: { kind: v.union(v.literal("student"), v.literal("teacher")), sectionId: v.optional(v.id("sections")), paginationOpts: paginationOptsValidator },
@@ -238,31 +252,43 @@ export const listPeople = schoolQuery({
     const { actor } = ctx;
     requirePermission(actor, "users:manage");
     if (kind === "student") {
-      const yearId = await getCurrentAcademicYearId(ctx, actor.schoolId);
-      const row = async (s: Doc<"students">) => {
-        const enr = (await ctx.db.query("enrollments").withIndex("by_student_year", (q) => q.eq("studentId", s._id).eq("academicYearId", yearId)).collect()).find((e) => e.status === "active");
-        const section = enr ? await ctx.db.get(enr.sectionId) : null;
-        return {
-          personId: s._id as string, name: fullName(s), number: s.admissionNo, detail: section ? `Class ${section.displayName}` : "Not enrolled",
-          rollNo: enr?.rollNo ?? null,
-          account: await accountFor(ctx, actor, "studentId", s._id),
-        };
-      };
       if (sectionId) {
-        await getInSchool({ ...ctx, actor }, "sections", sectionId, "Section");
-        const result = await ctx.db.query("enrollments").withIndex("by_section_status", (q) => q.eq("sectionId", sectionId).eq("status", "active")).paginate(paginationOpts);
-        const page = [];
-        for (const e of result.page) {
+        const section = await getInSchool({ ...ctx, actor }, "sections", sectionId, "Section");
+        const enrollments = await ctx.db.query("enrollments").withIndex("by_section_status", (q) => q.eq("sectionId", section._id).eq("status", "active")).take(MAX_SECTION_ROSTER + 1);
+        if (enrollments.length > MAX_SECTION_ROSTER) throw new AppError("CONFLICT", `${section.displayName} has more than ${MAX_SECTION_ROSTER} active students.`);
+        const rows: { s: Doc<"students">; e: Doc<"enrollments"> }[] = [];
+        for (const e of enrollments) {
+          if (e.schoolId !== actor.schoolId) continue;
           const s = await ctx.db.get(e.studentId);
-          if (s && s.schoolId === actor.schoolId && s.status === "active") page.push(await row(s));
+          if (s && s.schoolId === actor.schoolId && s.status === "active") rows.push({ s, e });
+        }
+        const result = paginateSorted(rows, ({ s, e }) => sortKeyOf({ firstName: s.firstName, lastName: s.lastName, studentId: s._id, enrollmentId: e._id }), paginationOpts);
+        const page = [];
+        for (const { s, e } of result.page) {
+          page.push({
+            personId: s._id as string, name: fullName(s), number: s.admissionNo, detail: `Class ${section.displayName}`,
+            rollNo: e.rollNo ?? null,
+            account: await accountFor(ctx, actor, "studentId", s._id),
+          });
         }
         return { ...result, page };
       }
-      const result = await ctx.db.query("students")
+      const students = await ctx.db.query("students")
         .withIndex("by_school_status_name", (q) => q.eq("schoolId", actor.schoolId).eq("status", "active"))
-        .paginate(paginationOpts);
+        .take(MAX_SCHOOL_STUDENT_LIST + 1);
+      if (students.length > MAX_SCHOOL_STUDENT_LIST) throw new AppError("CONFLICT", `More than ${MAX_SCHOOL_STUDENT_LIST} active students — filter the list by section.`);
+      const result = paginateSorted(students, (s) => sortKeyOf({ firstName: s.firstName, lastName: s.lastName, studentId: s._id }), paginationOpts);
+      const yearId = await getCurrentAcademicYearId(ctx, actor.schoolId);
       const page = [];
-      for (const s of result.page) page.push(await row(s));
+      for (const s of result.page) {
+        const enr = (await ctx.db.query("enrollments").withIndex("by_student_year", (q) => q.eq("studentId", s._id).eq("academicYearId", yearId)).collect()).find((e) => e.status === "active");
+        const section = enr ? await ctx.db.get(enr.sectionId) : null;
+        page.push({
+          personId: s._id as string, name: fullName(s), number: s.admissionNo, detail: section ? `Class ${section.displayName}` : "Not enrolled",
+          rollNo: enr?.rollNo ?? null,
+          account: await accountFor(ctx, actor, "studentId", s._id),
+        });
+      }
       return { ...result, page };
     }
     const result = await ctx.db.query("teachers")

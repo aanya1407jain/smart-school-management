@@ -28,12 +28,12 @@ import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import type { Viewer } from "@convex/users";
 import { services, type CurrentUser } from "@/lib/services";
+import { SIGN_IN_FAILED, signInErrorMessage } from "./login-form";
 import type { BindResult } from "@/lib/services/auth.service";
 import { purgeLegacySessionStorage } from "@/lib/services/session-store";
 import { subscribeDb } from "@/lib/store/db";
 import { permissionsFor, type Permission } from "@/lib/permissions";
 import { isConvexConfigured } from "@/lib/convex/config";
-import { getAppError } from "@/lib/convex/errors";
 import { useMembership } from "@/lib/convex/membership";
 import { liveStudentPortalUser } from "./live-user";
 
@@ -84,19 +84,6 @@ const SessionContext = createContext<SessionContextValue | null>(null);
 
 const UNAVAILABLE_PREVIEW =
   "You're signed in, but your school records aren't available in this preview yet. Please contact the school office.";
-const SIGN_IN_FAILED = "The Login ID or password you entered is incorrect.";
-
-function signInErrorMessage(error: unknown): string {
-  const app = getAppError(error);
-  if (app?.code === "NO_SCHOOL_ACCESS" || app?.code === "TEMPORARY_PASSWORD_EXPIRED") return app.message;
-  const raw = error instanceof Error ? error.message : String(error);
-  if (/TooManyFailedAttempts/.test(raw)) return "Too many incorrect attempts. Please wait a while and try again.";
-  if (/NO_SCHOOL_ACCESS/.test(raw)) return "Your account does not have active access to any school.";
-  if (/TEMPORARY_PASSWORD_EXPIRED/.test(raw)) return "This temporary password has expired. Ask your school office for a new one.";
-  if (/InvalidSecret|InvalidAccountId|Invalid credentials/i.test(raw)) return SIGN_IN_FAILED;
-  if (/Failed to fetch|NetworkError|network/i.test(raw)) return "We couldn't reach the server. Check your connection and try again.";
-  return SIGN_IN_FAILED;
-}
 
 
 // ------------------------------------------------------------------ no backend configured

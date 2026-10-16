@@ -18,7 +18,8 @@ export type AppErrorCode =
   | "INVALID_RELATIONSHIP" // ids exist but do not belong together (e.g. section of another class)
   | "CONFLICT" // uniqueness / state conflict
   | "PASSWORD_CHANGE_REQUIRED" // signed in with a temporary password: only the password change is allowed
-  | "TEMPORARY_PASSWORD_EXPIRED"; // the temporary password is too old; an administrator must issue a new one
+  | "TEMPORARY_PASSWORD_EXPIRED" // the temporary password is too old; an administrator must issue a new one
+  | "LOGIN_ID_REQUIRED"; // a sign-in request without a Login ID (e.g. an outdated email-based sign-in page)
 
 export type AppErrorData = {
   code: AppErrorCode;

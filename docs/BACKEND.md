@@ -150,6 +150,22 @@ Isolation is tested in `tests/convex/tenancy.test.ts` (two schools with identica
   section is touched; closed/historical enrollments keep their last number. Roll numbers in uploaded files are
   ignored. Limit: 1,000 active students per section (`MAX_SECTION_ROSTER`). There is no student-name editing in
   Convex yet; when it is added it must call `renumberSections` for the student's active section.
+- **Roster order on reads** (`model/academics.ts` `activeRoster` → `attendance.getByDate`, `academics.sectionRoster`):
+  always the same comparator as roll numbers (`compareRosterEntries`), NOT the stored `rollNo`, so legacy rosters
+  still list alphabetically; each row shows its STORED roll number. `accounts.listPeople` (students) sorts with the
+  same rule before paginating (`model/sortedPagination.ts`: sort-key cursors, pages pinned via `splitCursor`, no
+  duplicates/gaps when students are added, removed or renamed; inactive students are filtered before paging).
+  Bounds: a section ≤ 1,000 active enrollments; the all-students view ≤ 5,000 active students
+  (`MAX_SCHOOL_STUDENT_LIST`, above that filter by section).
+- **Reconciling existing roll numbers** (`convex/rollNumberMaintenance.ts`, internal only — CLI/dashboard): rosters
+  that have not changed since alphabetical numbering was introduced keep legacy numbers until reconciled. Nothing
+  runs automatically. Dry run (read-only query, chunked by `startAt`/`nextStartAt`):
+  `npx convex run rollNumberMaintenance:dryRun '{"schoolSlug":"…","academicYear":"2026-27"}'` → per section and
+  student: current vs proposed number, missing/duplicate numbers, a fingerprint, totals and `applyArgs`. Apply
+  (writes, only after review): `npx convex run rollNumberMaintenance:apply '<applyArgs>'` — confirmation string
+  `APPLY_ROLL_NUMBER_RECONCILIATION`, one transaction per section, school/year/section re-validated, a section whose
+  roster or names changed since the dry run is `stale` (not written), already-correct sections are
+  `already_reconciled` (idempotent). Each applied section writes an `enrollment.roll_numbers_reconciled` audit row.
 - **Audit semantics** (`auditLogs`): `actorUserId`/`actorRole` describe WHO acted (e.g. the administrator who
   created an account); `entity` is what changed. Account and membership events (`account.created`,
   `account.credentials_issued`, `account.disabled/enabled`, `membership.access_changed`) also record the AFFECTED
