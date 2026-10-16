@@ -35,7 +35,7 @@ import { subscribeDb } from "@/lib/store/db";
 import { permissionsFor, type Permission } from "@/lib/permissions";
 import { isConvexConfigured } from "@/lib/convex/config";
 import { useMembership } from "@/lib/convex/membership";
-import { liveStudentPortalUser } from "./live-user";
+import { liveStudentPortalUser, liveWorkspaceUser } from "./live-user";
 
 export { liveStudentPortalUser };
 
@@ -137,7 +137,7 @@ function ConvexSessionProvider({ children }: { children: ReactNode }) {
     return () => { a(); b(); };
   }, []);
 
-  const liveUser = useMemo(() => (viewer && viewer.role === "student" ? liveStudentPortalUser(viewer) : null), [viewer]);
+  const liveUser = useMemo(() => (viewer ? liveWorkspaceUser(viewer) : null), [viewer]);
 
   const base = useMemo(() => {
     void tick;
@@ -149,13 +149,13 @@ function ConvexSessionProvider({ children }: { children: ReactNode }) {
     if (session.status === "noSchool") return { status: "unavailable" as Status, ...none, notice: session.message };
     if (!bound || bound.viewer !== session.viewer) return { status: "loading" as Status, ...none };
     if (!bound.result.ok) {
-      // Student-portal accounts created by the school: the live (Convex) portal.
-      if (liveUser && session.viewer.role === "student") {
+      // Accounts created by the school (no demo persona): the live (Convex) workspace for
+      // their SERVER-derived role. Never mapped onto demo personas or demo data.
+      if (liveUser) {
         const ids = liveUser.studentIds ?? [];
         const active = liveActiveStudentId && ids.includes(liveActiveStudentId) ? liveActiveStudentId : ids[0] ?? null;
         return { status: "authenticated" as Status, notice: null, user: liveUser, activeStudentId: active, viewer: session.viewer, dataSource: "live" as DataSource };
       }
-      // Staff accounts outside the demo data: those workspaces still run on demo data only.
       return { status: "unavailable" as Status, ...none, notice: UNAVAILABLE_PREVIEW, viewer: session.viewer };
     }
     const snap = services.auth.getSessionSnapshot();

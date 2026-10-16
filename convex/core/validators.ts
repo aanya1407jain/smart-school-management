@@ -68,8 +68,12 @@ export const vNotificationType = v.union(
 );
 export const vFileKind = v.union(
   v.literal("student_document"), v.literal("profile_photo"), v.literal("receipt"), v.literal("report_card"), v.literal("school_document"),
+  v.literal("homework_attachment"), v.literal("submission_attachment"),
 );
-export const vFileOwnerType = v.union(v.literal("student"), v.literal("teacher"), v.literal("school"), v.literal("receipt"), v.literal("result"));
+export const vFileOwnerType = v.union(
+  v.literal("student"), v.literal("teacher"), v.literal("school"), v.literal("receipt"), v.literal("result"),
+  v.literal("homework"), v.literal("submission"),
+);
 
 /** Who a notice / event is addressed to. Resolved server-side, never trusted from the client for visibility. */
 export const vAudience = v.union(

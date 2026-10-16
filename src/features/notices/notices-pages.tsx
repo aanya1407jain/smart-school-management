@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Archive,
@@ -17,7 +17,12 @@ import {
 import type { Notice, NoticeAudienceScope, NoticePriority, NoticeType } from "@/types/domain";
 import type { NoticeInput } from "@/lib/services/notices.service";
 import { services } from "@/lib/services";
-import { useQuery } from "@/lib/hooks/use-query";
+import { useQuery, type QueryState } from "@/lib/hooks/use-query";
+import { useSchoolMutation, useSchoolQuery } from "@/lib/convex/membership";
+import { api } from "@convex/_generated/api";
+import type { Id } from "@convex/_generated/dataModel";
+import type { FunctionReturnType } from "convex/server";
+import { useSession } from "@/features/auth/session-provider";
 import {
   Badge,
   Button,
@@ -48,7 +53,83 @@ import { AUDIENCE_LABELS, NOTICE_TYPE_LABELS, PRIORITY_LABELS } from "@/lib/cons
 import { formatDate, formatLongDate, todayISO } from "@/lib/utils/dates";
 import { NoticeListItem } from "./notice-list-item";
 
+export function toConvexAudience(audience: Notice["audience"]) {
+  if (audience.scope === "school") {
+    return { kind: "all" as const };
+  }
+  if (audience.scope === "teachers") {
+    return { kind: "roles" as const, roles: ["teacher" as const] };
+  }
+  if (audience.scope === "students") {
+    return { kind: "roles" as const, roles: ["student" as const] };
+  }
+  if (audience.scope === "classes") {
+    return { kind: "classes" as const, classIds: ((audience.classIds ?? []) as unknown) as Id<"classes">[] };
+  }
+  if (audience.scope === "sections") {
+    return { kind: "sections" as const, sectionIds: ((audience.sectionIds ?? []) as unknown) as Id<"sections">[] };
+  }
+  return { kind: "all" as const };
+}
+
+export function fromConvexAudience(audience: any): Notice["audience"] {
+  if (!audience || audience.kind === "all") {
+    return { scope: "school" };
+  }
+  if (audience.kind === "roles") {
+    if (audience.roles?.includes("teacher") && !audience.roles?.includes("student")) {
+      return { scope: "teachers" };
+    }
+    if (audience.roles?.includes("student") && !audience.roles?.includes("teacher")) {
+      return { scope: "students" };
+    }
+    return { scope: "school" };
+  }
+  if (audience.kind === "classes") {
+    return { scope: "classes", classIds: audience.classIds };
+  }
+  if (audience.kind === "sections") {
+    return { scope: "sections", sectionIds: audience.sectionIds };
+  }
+  return { scope: "school" };
+}
+
 type NoticeView = Notice & { audienceLabel: string; author: string; isUpcoming: boolean };
+
+/** A notice from Convex (notices.listManaged / notices.feed) as the shared notice UI shows it. */
+type LiveNotice = FunctionReturnType<typeof api.notices.feed>[number];
+function liveNoticeView(n: LiveNotice, today: string): NoticeView {
+  return {
+    id: n.noticeId,
+    title: n.title,
+    body: n.body,
+    type: n.type as NoticeType,
+    audience: fromConvexAudience(n.audience),
+    audienceLabel: n.audienceLabel,
+    publishDate: n.publishDate,
+    eventDate: n.eventDate ?? null,
+    priority: n.priority as NoticePriority,
+    status: n.status,
+    author: n.authorName ?? "School office",
+    isUpcoming: !!n.eventDate && n.eventDate >= today,
+    createdBy: n.createdByUserId,
+  };
+}
+
+/** Client-side filters for live lists (the server already limits by audience / role). */
+function filterLive(list: NoticeView[], filters: { search?: string; priority: string; audience: string; type: string; from?: string; to?: string }) {
+  let out = list;
+  if (filters.search) {
+    const kw = filters.search.toLowerCase();
+    out = out.filter((r) => r.title.toLowerCase().includes(kw) || r.body.toLowerCase().includes(kw));
+  }
+  if (filters.type !== "all") out = out.filter((r) => r.type === filters.type);
+  if (filters.priority !== "all") out = out.filter((r) => r.priority === filters.priority);
+  if (filters.audience !== "all") out = out.filter((r) => r.audience.scope === filters.audience);
+  if (filters.from) out = out.filter((r) => (r.eventDate ?? r.publishDate) >= filters.from!);
+  if (filters.to) out = out.filter((r) => (r.eventDate ?? r.publishDate) <= filters.to!);
+  return out;
+}
 
 function toEditableNoticeInput(
   n: {
@@ -183,8 +264,27 @@ export function NoticesManager() {
   const { toast } = useToast();
   const params = useSearchParams();
   const router = useRouter();
+  const { dataSource } = useSession();
+  const live = dataSource === "live";
+
   const { filters, bar, hasActiveFilters, resetFilters, deps } = useNoticeFilters(true);
-  const q = useQuery(() => services.notices.list(filters), deps);
+
+  // Live: every notice of the school (managers) from Convex; lifecycle via publish / archive / restore.
+  const liveNotices = useSchoolQuery(
+    api.notices.listManaged,
+    live ? { status: filters.status !== "all" ? (filters.status as "draft" | "published" | "archived") : undefined } : "skip"
+  );
+  const q = useQuery(() => services.notices.list(filters), [...deps, live], { enabled: !live });
+
+  const publishMutation = useSchoolMutation(api.notices.publish);
+  const archiveMutation = useSchoolMutation(api.notices.archive);
+  const restoreMutation = useSchoolMutation(api.notices.restore);
+  const fail = (e: unknown) => toast({ title: "That didn't work", description: e instanceof Error ? e.message : "Please try again.", tone: "error" });
+  const publishLive = async (id: string) => {
+    const r = await publishMutation({ noticeId: id as Id<"notices"> });
+    toast({ title: "Notice published", description: r.scheduled ? "Its audience will be notified on the publish date." : `Notification sent to ${r.notified} account${r.notified === 1 ? "" : "s"}.` });
+  };
+
   const [compose, setCompose] = useState<NoticeView | "new" | null>(params.get("action") === "new" ? "new" : null);
   const [del, setDel] = useState<NoticeView | null>(null);
   const [view, setView] = useState<NoticeView | null>(null);
@@ -192,6 +292,14 @@ export function NoticesManager() {
   useEffect(() => {
     if (params.get("action") === "new") setCompose("new");
   }, [params]);
+
+  const today = todayISO();
+  const liveRows = useMemo(() => (liveNotices ? filterLive(liveNotices.map((n) => liveNoticeView(n, today)), filters) : undefined), [liveNotices, filters, today]);
+
+  const queryState = useMemo<QueryState<any>>(
+    () => (live ? { isLoading: liveRows === undefined, isRefreshing: false, data: liveRows, error: null, refetch: () => {} } : q),
+    [live, liveRows, q],
+  );
 
   return (
     <div>
@@ -205,9 +313,9 @@ export function NoticesManager() {
         }
       />
       <Card className="mb-5 p-4">{bar}</Card>
-      <QueryView query={q} loading="table">
-        {(rows) =>
-          rows.length === 0 ? (
+      <QueryView query={queryState} loading="table">
+        {(noticeList) =>
+          noticeList.length === 0 ? (
             <Card>
               <EmptyState
                 icon={<Megaphone className="h-6 w-6" />}
@@ -232,18 +340,18 @@ export function NoticesManager() {
             <Card>
               <div className="border-b border-line/60 px-5 py-3">
                 <p className="text-[13px] text-ink-muted">
-                  Showing <span className="font-semibold text-ink">{rows.length}</span> notice
-                  {rows.length === 1 ? "" : "s"} ·{" "}
-                  <span>{rows.filter((r) => r.status === "published").length} published</span> ·{" "}
+                  Showing <span className="font-semibold text-ink">{noticeList.length}</span> notice
+                  {noticeList.length === 1 ? "" : "s"} ·{" "}
+                  <span>{noticeList.filter((r: any) => r.status === "published").length} published</span> ·{" "}
                   <span>
-                    {rows.filter((r) => r.status === "draft").length} draft
-                    {rows.filter((r) => r.status === "draft").length === 1 ? "" : "s"}
+                    {noticeList.filter((r: any) => r.status === "draft").length} draft
+                    {noticeList.filter((r: any) => r.status === "draft").length === 1 ? "" : "s"}
                   </span>{" "}
-                  · <span>{rows.filter((r) => r.status === "archived").length} archived</span>
+                  · <span>{noticeList.filter((r: any) => r.status === "archived").length} archived</span>
                 </p>
               </div>
               <ul className="divide-y divide-line/60 px-5">
-                {rows.map((n) => (
+                {noticeList.map((n: any) => (
                   <NoticeListItem
                     key={n.id}
                     className="py-4"
@@ -260,17 +368,22 @@ export function NoticesManager() {
                           <DropdownItem onSelect={() => setView(n)}>
                             <Eye className="h-4 w-4" /> View
                           </DropdownItem>
-                          <DropdownItem onSelect={() => setCompose(n)}>
-                            <Pencil className="h-4 w-4" /> Edit
-                          </DropdownItem>
+                          {(!live || n.status === "draft") && (
+                            <DropdownItem onSelect={() => setCompose(n)}>
+                              <Pencil className="h-4 w-4" /> Edit
+                            </DropdownItem>
+                          )}
                           {n.status === "draft" && (
                             <DropdownItem
                               onSelect={async () => {
-                                await services.notices.update(n.id, toEditableNoticeInput(n, "published"));
-                                toast({
-                                  title: "Notice published",
-                                  description: "Notice is now visible to its target audience.",
-                                });
+                                try {
+                                  if (live) {
+                                    await publishLive(n.id);
+                                  } else {
+                                    await services.notices.update(n.id, toEditableNoticeInput(n, "published"));
+                                    toast({ title: "Notice published", description: "Notice is now visible to its target audience." });
+                                  }
+                                } catch (e) { fail(e); }
                               }}
                             >
                               <Send className="h-4 w-4" /> Publish now
@@ -279,8 +392,11 @@ export function NoticesManager() {
                           {n.status === "published" && (
                             <DropdownItem
                               onSelect={async () => {
-                                await services.notices.archive(n.id);
-                                toast({ title: "Notice archived" });
+                                try {
+                                  if (live) await archiveMutation({ noticeId: n.id as Id<"notices"> });
+                                  else await services.notices.archive(n.id);
+                                  toast({ title: "Notice archived" });
+                                } catch (e) { fail(e); }
                               }}
                             >
                               <Archive className="h-4 w-4" /> Archive
@@ -289,16 +405,26 @@ export function NoticesManager() {
                           {n.status === "archived" && (
                             <DropdownItem
                               onSelect={async () => {
-                                await services.notices.restore(n.id);
-                                toast({ title: "Notice restored to published" });
+                                try {
+                                  if (live) {
+                                    const r = await restoreMutation({ noticeId: n.id as Id<"notices"> });
+                                    toast({ title: r.status === "published" ? "Notice restored to published" : "Notice restored as a draft" });
+                                  } else {
+                                    await services.notices.restore(n.id);
+                                    toast({ title: "Notice restored to published" });
+                                  }
+                                } catch (e) { fail(e); }
                               }}
                             >
                               <RotateCcw className="h-4 w-4" /> Restore
                             </DropdownItem>
                           )}
-                          <DropdownItem tone="danger" onSelect={() => setDel(n)}>
-                            <Trash2 className="h-4 w-4" /> Delete
-                          </DropdownItem>
+                          {/* Live notices are never hard-deleted (archive keeps the record); delete is demo-only. */}
+                          {!live && (
+                            <DropdownItem tone="danger" onSelect={() => setDel(n)}>
+                              <Trash2 className="h-4 w-4" /> Delete
+                            </DropdownItem>
+                          )}
                         </DropdownContent>
                       </DropdownMenu>
                     }
@@ -326,9 +452,15 @@ export function NoticesManager() {
           setView(null);
         }}
         onPublish={async (n) => {
-          await services.notices.update(n.id, toEditableNoticeInput(n, "published"));
-          toast({ title: "Notice published", description: "Notice is now visible to its audience." });
-          setView(null);
+          try {
+            if (live) {
+              await publishLive(n.id);
+            } else {
+              await services.notices.update(n.id, toEditableNoticeInput(n, "published"));
+              toast({ title: "Notice published", description: "Notice is now visible to its audience." });
+            }
+            setView(null);
+          } catch (e) { fail(e); }
         }}
       />
       <ConfirmDialog
@@ -340,7 +472,7 @@ export function NoticesManager() {
         confirmLabel="Delete"
         onConfirm={async () => {
           if (del) {
-            await services.notices.remove(del.id);
+            await services.notices.remove(del.id); // demo data only
             toast({ title: "Notice deleted" });
           }
           setDel(null);
@@ -352,7 +484,14 @@ export function NoticesManager() {
 
 function ComposeModal({ existing, onClose }: { existing?: NoticeView; onClose: () => void }) {
   const { toast } = useToast();
+  const { dataSource } = useSession();
+  const live = dataSource === "live";
   const opts = useAcademicOptions();
+
+  const createNoticeMutation = useSchoolMutation(api.notices.createDraft);
+  const updateNoticeMutation = useSchoolMutation(api.notices.update);
+  const publishNoticeMutation = useSchoolMutation(api.notices.publish);
+
   const [form, setForm] = useState<NoticeInput>(
     existing
       ? {
@@ -376,7 +515,8 @@ function ComposeModal({ existing, onClose }: { existing?: NoticeView; onClose: (
           status: "published",
         }
   );
-  const reach = useQuery(() => services.notices.previewReach(form.audience), [JSON.stringify(form.audience)]);
+  // Reach preview is computed from demo data only; live notices report who was notified when published.
+  const reach = useQuery(() => services.notices.previewReach(form.audience), [JSON.stringify(form.audience), live], { enabled: !live });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<Error | null>(null);
   const [busy, setBusy] = useState(false);
@@ -425,20 +565,46 @@ function ComposeModal({ existing, onClose }: { existing?: NoticeView; onClose: (
     setError(null);
     setErrors({});
     try {
-      const payload = toEditableNoticeInput(form, status);
-      if (existing) {
-        await services.notices.update(existing.id, payload);
-        toast({ title: status === "draft" ? "Draft saved" : "Notice updated" });
+      if (live) {
+        // Server lifecycle: save as a draft (create or edit), then publish if asked. Published notices are immutable.
+        const fields = {
+          title: form.title.trim(),
+          body: form.body.trim(),
+          type: form.type as "notice" | "event" | "holiday",
+          priority: (form.priority === "low" ? "normal" : form.priority) as "normal" | "high" | "urgent",
+          audience: toConvexAudience(form.audience),
+          publishDate: form.publishDate,
+        };
+        let noticeId: Id<"notices">;
+        if (existing) {
+          noticeId = existing.id as Id<"notices">;
+          await updateNoticeMutation({ noticeId, ...fields, eventDate: form.eventDate || "" });
+        } else {
+          noticeId = (await createNoticeMutation({ ...fields, eventDate: form.eventDate || undefined })).noticeId;
+        }
+        if (status === "published") {
+          const r = await publishNoticeMutation({ noticeId });
+          toast({ title: "Notice published", description: r.scheduled ? "Its audience will be notified on the publish date." : `Notification sent to ${r.notified} account${r.notified === 1 ? "" : "s"}.` });
+        } else {
+          toast({ title: "Draft saved" });
+        }
+        onClose();
       } else {
-        const r = await services.notices.create(payload);
-        toast({
-          title: status === "draft" ? "Draft saved" : "Notice published",
-          description: status === "published" ? `Delivered to ${r.reached} accounts.` : undefined,
-        });
+        const payload = toEditableNoticeInput(form, status);
+        if (existing) {
+          await services.notices.update(existing.id, payload);
+          toast({ title: status === "draft" ? "Draft saved" : "Notice updated" });
+        } else {
+          const r = await services.notices.create(payload);
+          toast({
+            title: status === "draft" ? "Draft saved" : "Notice published",
+            description: status === "published" ? `Delivered to ${r.reached} accounts.` : undefined,
+          });
+        }
+        onClose();
       }
-      onClose();
-    } catch (e) {
-      setError(e as Error);
+    } catch (e: any) {
+      setError(e instanceof Error ? e : new Error(e?.message ?? "Failed to save notice"));
       setErrors((e as { fieldErrors?: Record<string, string> }).fieldErrors ?? {});
     }
     setBusy(false);
@@ -576,15 +742,19 @@ function ComposeModal({ existing, onClose }: { existing?: NoticeView; onClose: (
 
         <p className="flex items-center gap-2 rounded-xl bg-teal-soft/60 px-3 py-2 text-[13px] text-lagoon sm:col-span-2">
           <Users className="h-4 w-4 shrink-0" />
-          <span>
-            Will reach{" "}
-            <span className="font-semibold">
-              {reach.data
-                ? `${reach.data.studentAccounts} student/guardian accounts and ${reach.data.teachers} teachers`
-                : "…"}
+          {live ? (
+            <span>Only members of this audience will see it; they are notified in-app when it is published.</span>
+          ) : (
+            <span>
+              Will reach{" "}
+              <span className="font-semibold">
+                {reach.data
+                  ? `${reach.data.studentAccounts} student/guardian accounts and ${reach.data.teachers} teachers`
+                  : "…"}
+              </span>
+              . Accounts outside this scope will not see it.
             </span>
-            . Accounts outside this scope will not see it.
-          </span>
+          )}
         </p>
 
         <FormField label="Description" required error={errors.body} className="sm:col-span-2">
@@ -670,18 +840,32 @@ function NoticeDetail({
 // ------------------------------------------------------------------ Teacher / Student board
 
 export function NoticeBoard() {
+  const { dataSource } = useSession();
+  const live = dataSource === "live";
+
   const { filters, bar, hasActiveFilters, resetFilters, deps } = useNoticeFilters(false);
-  const q = useQuery(() => services.notices.list(filters), deps);
+
+  // Live: published notices addressed to this member (server-side audience check), visible today.
+  const liveNotices = useSchoolQuery(api.notices.feed, live ? {} : "skip");
+  const q = useQuery(() => services.notices.list(filters), [...deps, live], { enabled: !live });
   const [view, setView] = useState<NoticeView | null>(null);
+
+  const today = todayISO();
+  const liveRows = useMemo(() => (liveNotices ? filterLive(liveNotices.map((n) => liveNoticeView(n, today)), filters) : undefined), [liveNotices, filters, today]);
+
+  const queryState = useMemo<QueryState<any>>(
+    () => (live ? { isLoading: liveRows === undefined, isRefreshing: false, data: liveRows, error: null, refetch: () => {} } : q),
+    [live, liveRows, q],
+  );
 
   return (
     <div>
       <PageHeader title="Notices" description="Announcements, events and holidays relevant to you." />
       <Card className="mb-5 p-4">{bar}</Card>
-      <QueryView query={q} loading="table">
-        {(rows) => {
-          const upcoming = rows.filter((n) => n.isUpcoming && n.type !== "notice");
-          return rows.length === 0 ? (
+      <QueryView query={queryState} loading="table">
+        {(noticeList) => {
+          const upcoming = noticeList.filter((n: any) => n.isUpcoming && n.type !== "notice");
+          return noticeList.length === 0 ? (
             <Card>
               <EmptyState
                 icon={<Megaphone className="h-6 w-6" />}
@@ -704,7 +888,7 @@ export function NoticeBoard() {
             <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
               <Card>
                 <ul className="divide-y divide-line/60 px-5">
-                  {rows.map((n) => (
+                  {noticeList.map((n: any) => (
                     <NoticeListItem key={n.id} className="py-4" notice={n} onClick={() => setView(n)} />
                   ))}
                 </ul>
@@ -716,8 +900,8 @@ export function NoticeBoard() {
                 ) : (
                   <ul className="space-y-3">
                     {upcoming
-                      .sort((a, b) => (a.eventDate ?? "").localeCompare(b.eventDate ?? ""))
-                      .map((n) => (
+                      .sort((a: any, b: any) => (a.eventDate ?? "").localeCompare(b.eventDate ?? ""))
+                      .map((n: any) => (
                         <li key={n.id} className="flex items-start gap-3">
                           <div className="grid w-12 shrink-0 rounded-xl bg-sapphire py-1.5 text-center text-white">
                             <span className="text-[10px] font-semibold uppercase">
@@ -727,7 +911,7 @@ export function NoticeBoard() {
                           </div>
                           <div className="min-w-0">
                             <p className="text-sm font-semibold text-ink">{n.title}</p>
-                            <p className="text-[12px] text-ink-muted">{NOTICE_TYPE_LABELS[n.type]}</p>
+                            <p className="text-[12px] text-ink-muted">{NOTICE_TYPE_LABELS[n.type as NoticeType]}</p>
                           </div>
                         </li>
                       ))}

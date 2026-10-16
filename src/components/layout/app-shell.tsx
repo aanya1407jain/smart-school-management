@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { useSession } from "@/features/auth/session-provider";
 import { canAccessRoute, homeRouteFor } from "@/lib/permissions";
+import { isLiveRoute, liveNavItems } from "@/lib/permissions/navigation";
 import { UnauthorizedState } from "@/components/ui/states";
 import { LogoMark } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
@@ -24,9 +25,11 @@ const COLLAPSE_KEY = `${STORAGE_NAMESPACE}-sidebar-collapsed`;
  *  - signed in, no access → Unauthorized page inside the user's OWN shell
  *  - temporary password → /account (the server blocks school functions until it is changed)
  *  - allowed            → page content
+ *  - live account on a page that still runs on demo data → explanation + the
+ *    live pages it can use (never the demo school's data)
  */
 export function AppShell({ children }: { children: ReactNode }) {
-  const { status, user, viewer, notice, mustChangePassword, logout } = useSession();
+  const { status, user, viewer, notice, mustChangePassword, logout, dataSource } = useSession();
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -100,10 +103,35 @@ export function AppShell({ children }: { children: ReactNode }) {
                   message={`Your ${user.role} account can't open ${pathname}. Access is decided by your account's role, not by the link you followed.`}
                 />
               </div>
+            ) : dataSource === "live" && !isLiveRoute(pathname) ? (
+              <LiveNotConnected user={user} schoolName={viewer?.school.name ?? ""} />
             ) : children}
           </motion.div>
         </main>
       </div>
+    </div>
+  );
+}
+
+/**
+ * A school-created (live) account opened a page that is not connected to the
+ * school's records yet. Show what IS available instead of demo data.
+ */
+function LiveNotConnected({ user, schoolName }: { user: Parameters<typeof liveNavItems>[0]; schoolName: string }) {
+  const items = liveNavItems(user);
+  return (
+    <div className="solid-card mx-auto mt-6 max-w-xl p-8 text-center" role="status" data-testid="live-not-connected">
+      <h1 className="font-display text-xl text-ink">Not connected to {schoolName || "your school"}'s records yet</h1>
+      <p className="mt-2 text-sm text-ink-soft">
+        This page still runs on demonstration data, so it is hidden for school accounts. These pages already use your school&apos;s records:
+      </p>
+      <ul className="mt-4 flex flex-wrap justify-center gap-2">
+        {items.map((i) => (
+          <li key={i.href}>
+            <Link href={i.href} className="inline-flex h-9 items-center rounded-xl border border-line px-3 text-sm font-medium text-ink hover:bg-teal-soft/40">{i.label}</Link>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

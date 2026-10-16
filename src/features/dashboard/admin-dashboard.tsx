@@ -3,7 +3,10 @@ import Link from "next/link";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { BookOpenCheck, CalendarCheck2, ClipboardCheck, GraduationCap, Megaphone, UserPlus, Users, Wallet, ArrowRight, CalendarClock, AlertCircle } from "lucide-react";
 import { services } from "@/lib/services";
-import { useQuery } from "@/lib/hooks/use-query";
+import { useQuery, type QueryState } from "@/lib/hooks/use-query";
+import { useSchoolQuery } from "@/lib/convex/membership";
+import { api } from "@convex/_generated/api";
+import type { FunctionReturnType } from "convex/server";
 import { useSession } from "@/features/auth/session-provider";
 import { Button, CardHeader, GlassCard, Card, QueryView, StatCard, StatusBadge, ProgressBar, EmptyState, LinkButton } from "@/components/ui";
 import { ChartCard, ChartTooltip, axisProps } from "@/components/charts/chart-card";
@@ -11,6 +14,7 @@ import { CHART, CHART_GRID } from "@/lib/constants/theme";
 import { formatCurrency, formatNumber, formatPercent } from "@/lib/utils/format";
 import { formatDate, formatShortDate, greeting, formatLongDate, todayISO } from "@/lib/utils/dates";
 import { NoticeListItem } from "@/features/notices/notice-list-item";
+import { useMemo } from "react";
 
 const QUICK_ACTIONS = [
   { label: "Add student", href: "/admin/students/new", Icon: UserPlus },
@@ -20,12 +24,66 @@ const QUICK_ACTIONS = [
   { label: "Post notice", href: "/admin/notices?action=new", Icon: Megaphone },
 ];
 
+type AdminDashboardData = NonNullable<Awaited<ReturnType<typeof services.dashboard.getAdminDashboard>>>;
+
 export function AdminDashboard() {
-  const { user } = useSession();
-  const q = useQuery(() => services.dashboard.getAdminDashboard(), []);
+  const { user, dataSource } = useSession();
+  const live = dataSource === "live";
+
+  // Live: one server aggregate from the school's records. Sections the caller may not see come back null.
+  const liveData = useSchoolQuery(api.reports.adminDashboard, live ? {} : "skip");
+
+  // Demo data
+  const q = useQuery(() => services.dashboard.getAdminDashboard(), [live], { enabled: !live });
+
+  const adaptedLive = useMemo(() => {
+    if (!liveData?.overview) return undefined;
+    const o = liveData.overview;
+    const f = liveData.fees;
+    const today = liveData.today;
+    return {
+      school: { ...liveData.school },
+      stats: {
+        students: o.students,
+        sections: o.sections,
+        teachers: o.teachers,
+        teachersOnLeave: o.teachersOnLeave,
+        attendance: o.attendance ?? { date: today, isToday: true, percentage: null, absent: 0, marked: 0, totalSections: o.sections, delta: null },
+        fees: {
+          outstanding: (f?.outstandingMinor ?? 0) / 100,
+          overdue: (f?.overdueMinor ?? 0) / 100,
+          overdueStudents: f?.overdueStudents ?? 0,
+          collected: (f?.collectedMinor ?? 0) / 100,
+          collectionRate: f?.collectionRate ?? 0,
+        },
+      },
+      attendanceTrend: o.attendanceTrend.filter((p) => p.percentage !== null).map((p) => ({ date: p.date, percentage: p.percentage as number })),
+      feeByClass: (f?.byClass ?? []).map((c) => ({ name: c.name, collected: c.collectedMinor / 100, outstanding: c.outstandingMinor / 100 })),
+      performance: o.performance,
+      upcomingExams: o.upcomingExams.map((e) => ({ id: e.examId as string, name: e.name, status: e.status, startDate: e.startDate, endDate: e.endDate, classCount: e.classCount, paperCount: e.paperCount, marksProgress: null as number | null })),
+      notices: o.notices.map((n) => ({
+        id: n.noticeId as string, title: n.title, body: n.body, type: n.type, priority: n.priority, publishDate: n.publishDate, eventDate: n.eventDate,
+        audienceLabel: n.audienceLabel, status: "published" as const, audience: { scope: "school" as const }, createdBy: "",
+      })),
+      tasks: o.tasks,
+    };
+  }, [liveData]);
+
+  const queryState = useMemo<QueryState<AdminDashboardData>>(
+    () => (live
+      ? { isLoading: liveData === undefined, isRefreshing: false, data: adaptedLive as AdminDashboardData | undefined, error: null, refetch: () => {} }
+      : q),
+    [live, liveData, adaptedLive, q],
+  );
+
+  if (live && liveData && !liveData.academicYear) {
+    return <Card><EmptyState title="No current academic year" description="Set the current academic year in Academics to see the dashboard." action={<LinkButton href="/admin/academics?tab=years">Open Academics</LinkButton>} /></Card>;
+  }
+  // A member with finance access only (no school-wide reports) sees just the fee figures.
+  if (live && liveData && !liveData.overview) return <FinanceOnlyDashboard data={liveData} />;
 
   return (
-    <QueryView query={q}>
+    <QueryView query={queryState}>
       {(d) => {
         const att = d.stats.attendance;
         return (
@@ -175,5 +233,25 @@ export function AdminDashboard() {
         );
       }}
     </QueryView>
+  );
+}
+
+function FinanceOnlyDashboard({ data }: { data: FunctionReturnType<typeof api.reports.adminDashboard> }) {
+  const f = data.fees;
+  return (
+    <div className="space-y-6">
+      <div>
+        <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-plum">{formatLongDate(data.today)}</p>
+        <h1 className="mt-1 text-[28px] font-semibold text-sapphire">Fees · {data.school.name}</h1>
+      </div>
+      {!f ? <Card><EmptyState title="Nothing to show" description="Your account has no dashboard figures." /></Card> : (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <StatCard label="Collected" value={formatCurrency(f.collectedMinor / 100)} icon={<Wallet className="h-5 w-5" />} hint={`${formatPercent(f.collectionRate, 1)} of net fees`} href="/admin/fees" />
+          <StatCard label="Outstanding" value={formatCurrency(f.outstandingMinor / 100)} icon={<Wallet className="h-5 w-5" />} tone="sapphire" href="/admin/fees?tab=balances" />
+          <StatCard label="Overdue" value={formatCurrency(f.overdueMinor / 100)} icon={<AlertCircle className="h-5 w-5" />} tone="lavender" hint={`${f.overdueStudents} students`} href="/admin/fees?tab=balances&standing=overdue" />
+          <StatCard label="Net fees" value={formatCurrency(f.netMinor / 100)} icon={<Wallet className="h-5 w-5" />} tone="purple" />
+        </div>
+      )}
+    </div>
   );
 }

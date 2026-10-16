@@ -52,3 +52,19 @@ export const markAllRead = schoolMutation({
     return { updated: unread.length };
   },
 });
+
+/**
+ * Remove one of the caller's OWN notifications from their inbox. Notifications
+ * are personal copies (the notice, payment or result they point at is not
+ * touched), so removing one only affects the caller's list.
+ */
+export const remove = schoolMutation({
+  args: { notificationId: v.id("notifications") },
+  handler: async (ctx, { notificationId }) => {
+    requirePermission(ctx.actor, "notifications:read");
+    const n = await getInSchool(ctx, "notifications", notificationId, "Notification");
+    if (n.userId !== ctx.actor.userId) throw notFound("Notification");
+    await ctx.db.delete(n._id);
+    return { ok: true };
+  },
+});

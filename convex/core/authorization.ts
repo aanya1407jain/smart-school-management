@@ -195,3 +195,21 @@ export async function requireStudentAccess(
   // Same response as "no such student" — do not confirm existence to outsiders.
   throw notFound("Student");
 }
+
+/**
+ * Subject-teaching gate (marks entry, homework): the actor's teacher record
+ * must hold a PERSISTED assignment for this subject in this section. Class
+ * teacher ownership alone does not qualify, and neither does teaching another
+ * subject in the section.
+ */
+export async function isSubjectTeacherOf(ctx: QueryCtx, teacherId: Id<"teachers"> | undefined, sectionId: Id<"sections">, subjectId: Id<"subjects">): Promise<boolean> {
+  if (!teacherId) return false;
+  const rows = await ctx.db.query("teacherAssignments").withIndex("by_section_subject", (q) => q.eq("sectionId", sectionId).eq("subjectId", subjectId)).collect();
+  return rows.some((a) => a.teacherId === teacherId);
+}
+
+export async function requireSubjectTeacher(ctx: Ctx, sectionId: Id<"sections">, subjectId: Id<"subjects">, message = "You do not teach this subject in this section."): Promise<Doc<"sections">> {
+  const section = await getInSchool(ctx, "sections", sectionId, "Section");
+  if (!(await isSubjectTeacherOf(ctx, ctx.actor.teacherId, section._id, subjectId))) throw forbidden(message);
+  return section;
+}

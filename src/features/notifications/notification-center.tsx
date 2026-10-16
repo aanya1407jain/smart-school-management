@@ -5,34 +5,95 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Bell, Check, CheckCheck, ChevronRight, Trash2 } from "lucide-react";
 import type { NotificationCategory } from "@/types/domain";
 import { services } from "@/lib/services";
-import { useQuery } from "@/lib/hooks/use-query";
+import { useQuery, type QueryState } from "@/lib/hooks/use-query";
+import { useSchoolMutation, useSchoolQuery } from "@/lib/convex/membership";
+import { api } from "@convex/_generated/api";
+import type { Id } from "@convex/_generated/dataModel";
+import { useSession } from "@/features/auth/session-provider";
 import { Badge, Button, Card, EmptyState, PageHeader, QueryView, Segmented, useToast } from "@/components/ui";
 import { NOTIFICATION_CATEGORY_LABELS } from "@/lib/constants/labels";
 import { relativeTime, formatDateTime } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils/cn";
+import { isLiveRoute } from "@/lib/permissions/navigation";
 import { CategoryIcon } from "./category-icon";
 import { useUnreadCount } from "./use-unread-count";
+
+const LIVE_CATEGORY_MAP: Record<string, NotificationCategory> = {
+  attendance: "attendance",
+  fees: "fees",
+  homework: "homework",
+  examination: "examination",
+  exam: "examination",
+  notice: "notice",
+  general: "general",
+  account: "general",
+};
 
 export function NotificationCenter() {
   const router = useRouter();
   const { toast } = useToast();
+  const { dataSource } = useSession();
+  const live = dataSource === "live";
   const unread = useUnreadCount();
   const [category, setCategory] = useState<NotificationCategory | "all">("all");
   const [onlyUnread, setOnlyUnread] = useState<"all" | "unread">("all");
 
-  const allItems = useQuery(() => services.notifications.list({}), []);
+  // Real Convex queries & mutations
+  const rawLiveList = useSchoolQuery(api.notifications.list, live ? { limit: 100 } : "skip");
+  const markReadMutation = useSchoolMutation(api.notifications.markRead);
+  const markAllReadMutation = useSchoolMutation(api.notifications.markAllRead);
+  const removeMutation = useSchoolMutation(api.notifications.remove);
+
+  // Demo fallback queries
+  const allItemsQuery = useQuery(() => (live ? Promise.resolve([]) : services.notifications.list({})), [live]);
   const q = useQuery(
-    () => services.notifications.list({ category, unreadOnly: onlyUnread === "unread" }),
-    [category, onlyUnread]
+    () => (live ? Promise.resolve([]) : services.notifications.list({ category, unreadOnly: onlyUnread === "unread" })),
+    [live, category, onlyUnread]
   );
+
+  const liveItems = useMemo(() => {
+    if (!rawLiveList) return undefined;
+    return rawLiveList.map((n) => ({
+      id: n._id as string,
+      title: n.title,
+      message: n.message,
+      read: n.isRead,
+      category: (LIVE_CATEGORY_MAP[n.type] ?? "general") as NotificationCategory,
+      createdAt: new Date(n._creationTime).toISOString(),
+      href: n.href ?? null,
+    }));
+  }, [rawLiveList]);
+
+  const allList = live ? liveItems : allItemsQuery.data;
+
+  const items = useMemo(() => {
+    const base = live ? liveItems : q.data;
+    if (!base) return undefined;
+    return base.filter((n) => {
+      if (category !== "all" && n.category !== category) return false;
+      if (onlyUnread === "unread" && n.read) return false;
+      return true;
+    });
+  }, [live, liveItems, q.data, category, onlyUnread]);
 
   const unreadByCategory = useMemo(() => {
     const counts: Record<string, number> = {};
-    (allItems.data ?? []).forEach((n) => {
+    (allList ?? []).forEach((n) => {
       if (!n.read) counts[n.category] = (counts[n.category] ?? 0) + 1;
     });
     return counts;
-  }, [allItems.data]);
+  }, [allList]);
+
+  const queryState = useMemo<QueryState<NonNullable<typeof items>>>(
+    () => ({
+      isLoading: live ? liveItems === undefined : q.isLoading,
+      isRefreshing: false,
+      data: items,
+      error: live ? null : q.error,
+      refetch: live ? () => {} : q.refetch,
+    }),
+    [live, liveItems, items, q.isLoading, q.error, q.refetch]
+  );
 
   const cats: (NotificationCategory | "all")[] = [
     "all",
@@ -44,28 +105,52 @@ export function NotificationCenter() {
     "general",
   ];
 
+  const fail = (e: unknown) => toast({ title: "That didn't work", description: e instanceof Error ? e.message : "Please try again.", tone: "error" });
+
   const handleMarkAllRead = async () => {
-    const r = await services.notifications.markAllRead();
-    toast({
-      title: "All notifications marked as read",
-      description: `${r.count} notification${r.count === 1 ? "" : "s"} updated.`,
-    });
+    try {
+    if (live) {
+      const r = await markAllReadMutation({});
+      toast({
+        title: "All notifications marked as read",
+        description: `${r.updated} notification${r.updated === 1 ? "" : "s"} updated.`,
+      });
+    } else {
+      const r = await services.notifications.markAllRead();
+      toast({
+        title: "All notifications marked as read",
+        description: `${r.count} notification${r.count === 1 ? "" : "s"} updated.`,
+      });
+    }
+    } catch (e) { fail(e); }
   };
 
   const handleMarkRead = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    await services.notifications.markRead(id);
-    toast({ title: "Notification marked as read" });
+    try {
+      if (live) {
+        await markReadMutation({ notificationId: id as Id<"notifications"> });
+      } else {
+        await services.notifications.markRead(id);
+      }
+      toast({ title: "Notification marked as read" });
+    } catch (err) { fail(err); }
   };
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    await services.notifications.remove(id);
-    toast({ title: "Notification removed" });
+    try {
+      if (live) {
+        await removeMutation({ notificationId: id as Id<"notifications"> });
+      } else {
+        await services.notifications.remove(id);
+      }
+      toast({ title: "Notification removed" });
+    } catch (err) { fail(err); }
   };
 
   return (
-    <div className="mx-auto max-w-4xl">
+    <div className="mx-auto max-w-4xl" data-testid={live ? "live-notifications" : undefined}>
       <PageHeader
         title="Notifications"
         description={
@@ -126,7 +211,7 @@ export function NotificationCenter() {
         />
       </div>
 
-      <QueryView query={q} loading="table">
+      <QueryView query={queryState} loading="table">
         {(items) =>
           items.length === 0 ? (
             <Card>
@@ -184,8 +269,15 @@ export function NotificationCenter() {
                       <button
                         className="min-w-0 flex-1 text-left"
                         onClick={async () => {
-                          if (!n.read) await services.notifications.markRead(n.id);
-                          if (n.href) router.push(n.href);
+                          if (!n.read) {
+                            if (live) {
+                              await markReadMutation({ notificationId: n.id as Id<"notifications"> });
+                            } else {
+                              await services.notifications.markRead(n.id);
+                            }
+                          }
+                          // Live accounts only follow links to pages backed by real records.
+                          if (n.href && (!live || isLiveRoute(n.href))) router.push(n.href);
                         }}
                       >
                         <div className="flex flex-wrap items-center gap-2">

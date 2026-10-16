@@ -22,7 +22,7 @@ import { AppError, conflict, invalid, invalidRelationship } from "./core/errors"
 import { assertIsoDate, assertNonEmpty, vAcademicYearStatus, vGender } from "./core/validators";
 import { activeRoster, fullName, teacherDisplayName } from "./model/academics";
 import { writeAudit } from "./model/audit";
-import { renumberSections } from "./model/rollNumbers";
+import { compareRosterEntries, renumberSections } from "./model/rollNumbers";
 import { notifyUsers } from "./model/notifications";
 import { nextAdmissionNumber } from "./model/counters";
 import { attendanceRecords, currentYear, feeLedger, guardiansOf, homeworkFor, placement, publishedResults, studentFields } from "./model/studentRecords";
@@ -182,6 +182,66 @@ export const createAcademicYear = schoolMutation({
     }
     await writeAudit(ctx, { schoolId: ctx.actor.schoolId, actor: ctx.actor, action: "academic_year.created", entity: { table: "academicYears", id }, summary: `Created academic year ${name}` });
     return id;
+  },
+});
+
+/**
+ * Make an academic year the school's CURRENT year (the year attendance,
+ * admissions, fees and the portals use by default). A closed year cannot be
+ * made current; a planned year becomes active. The previous current year's
+ * status is left unchanged (closing a year is a separate decision).
+ */
+export const setCurrentAcademicYear = schoolMutation({
+  args: { academicYearId: v.id("academicYears") },
+  handler: async (ctx, { academicYearId }) => {
+    requirePermission(ctx.actor, "academics:manage");
+    const year = await getInSchool(ctx, "academicYears", academicYearId, "Academic year");
+    if (year.status === "closed") throw conflict(`${year.name} is closed and cannot be made the current year.`);
+    const settings = await getSchoolSettings(ctx, ctx.actor.schoolId);
+    if (settings.currentAcademicYearId === year._id) return { ok: true, changed: false };
+    const previous = settings.currentAcademicYearId ?? null;
+    await ctx.db.patch(settings._id, { currentAcademicYearId: year._id });
+    if (year.status === "planned") await ctx.db.patch(year._id, { status: "active" });
+    await writeAudit(ctx, {
+      schoolId: ctx.actor.schoolId, actor: ctx.actor, action: "academic_year.made_current", entity: { table: "academicYears", id: year._id },
+      summary: `${year.name} is now the current academic year`, metadata: { previousAcademicYearId: previous },
+    });
+    return { ok: true, changed: true };
+  },
+});
+
+/** Active teachers for assignment pickers (academics managers only). */
+export const listTeachers = schoolQuery({
+  args: {},
+  handler: async (ctx) => {
+    requirePermission(ctx.actor, "academics:manage");
+    const rows = await ctx.db.query("teachers").withIndex("by_school_status", (q) => q.eq("schoolId", ctx.actor.schoolId).eq("status", "active")).take(2000);
+    return rows.map((t) => ({ teacherId: t._id, name: teacherDisplayName(t), employeeId: t.employeeId })).sort((a, b) => a.name.localeCompare(b.name));
+  },
+});
+
+/** Largest list of not-yet-enrolled students returned at once. */
+export const MAX_UNENROLLED = 500;
+
+/**
+ * Active students with NO active enrollment in a year (default: current
+ * year), in roster order, for the "enrol students" workflow. Bounded.
+ */
+export const listUnenrolledStudents = schoolQuery({
+  args: { academicYearId: v.optional(v.id("academicYears")) },
+  handler: async (ctx, { academicYearId }) => {
+    requirePermission(ctx.actor, "students:write");
+    const yearId = academicYearId ? (await getInSchool(ctx, "academicYears", academicYearId, "Academic year"))._id : await getCurrentAcademicYearId(ctx, ctx.actor.schoolId);
+    const students = await ctx.db.query("students").withIndex("by_school_status_name", (q) => q.eq("schoolId", ctx.actor.schoolId).eq("status", "active")).take(5001);
+    if (students.length > 5000) throw conflict("More than 5000 active students; this list needs pagination.");
+    const out = [];
+    for (const s of students) {
+      const enr = await ctx.db.query("enrollments").withIndex("by_student_year", (q) => q.eq("studentId", s._id).eq("academicYearId", yearId)).collect();
+      if (enr.some((e) => e.status === "active")) continue;
+      out.push({ studentId: s._id, name: fullName(s), admissionNo: s.admissionNo, firstName: s.firstName, lastName: s.lastName });
+    }
+    out.sort((a, b) => compareRosterEntries({ enrollmentId: "", studentId: a.studentId, firstName: a.firstName, lastName: a.lastName }, { enrollmentId: "", studentId: b.studentId, firstName: b.firstName, lastName: b.lastName }));
+    return { students: out.slice(0, MAX_UNENROLLED).map(({ firstName: _f, lastName: _l, ...r }) => r), truncated: out.length > MAX_UNENROLLED, total: out.length };
   },
 });
 
@@ -571,3 +631,79 @@ function normalizePhone(raw: string, field: string): string {
   if (!/^\+?[\d\s()-]+$/.test(value) || digits.length < 7 || digits.length > 15) throw invalid(`"${value}" is not a valid phone number.`, { [field]: "Enter a valid phone number" });
   return value.replace(/\s+/g, " ");
 }
+
+/**
+ * Edit a student's own profile fields (admin `students:write`).
+ *
+ * Only personal/contact fields change here. Admission number, status,
+ * enrollment/class/section, guardians, accounts, roles and credentials are NOT
+ * editable through this function (enrollment changes use enrollStudent /
+ * endEnrollment; accounts use Accounts & Import).
+ *
+ * A first/last-name change can move the student in the alphabetical roster, so
+ * every section where the student is ACTIVELY enrolled is renumbered in this
+ * same transaction (model/rollNumbers.ts) — the same rule as admissions,
+ * transfers and withdrawals. Other students' numbers change only as far as the
+ * alphabetical order requires; historical enrollments are untouched.
+ */
+export const updateStudentProfile = schoolMutation({
+  args: {
+    studentId: v.id("students"),
+    firstName: v.optional(v.string()),
+    lastName: v.optional(v.string()),
+    gender: v.optional(vGender),
+    dateOfBirth: v.optional(v.string()),
+    email: v.optional(v.string()),
+    phone: v.optional(v.string()),
+    address: v.optional(v.string()),
+    bloodGroup: v.optional(v.string()),
+  },
+  handler: async (ctx, a) => {
+    requirePermission(ctx.actor, "students:write");
+    const student = await getInSchool(ctx, "students", a.studentId, "Student");
+    const patch: Partial<Doc<"students">> = {};
+    if (a.firstName !== undefined) patch.firstName = assertNonEmpty(a.firstName, "firstName", 80);
+    if (a.lastName !== undefined) patch.lastName = assertNonEmpty(a.lastName, "lastName", 80);
+    if (a.gender !== undefined) patch.gender = a.gender;
+    if (a.dateOfBirth !== undefined) {
+      if (a.dateOfBirth.trim() === "") patch.dateOfBirth = undefined;
+      else {
+        assertIsoDate(a.dateOfBirth, "dateOfBirth");
+        const school = (await ctx.db.get(ctx.actor.schoolId))!;
+        const today = new Intl.DateTimeFormat("en-CA", { timeZone: school.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(Date.now());
+        if (a.dateOfBirth >= today) throw invalid("Date of birth must be in the past.", { dateOfBirth: "Not in the past" });
+        patch.dateOfBirth = a.dateOfBirth;
+      }
+    }
+    if (a.email !== undefined) {
+      const e = a.email.trim().toLowerCase();
+      if (e && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) throw invalid("Enter a valid email address", { email: "Invalid email" });
+      patch.email = e || undefined;
+    }
+    if (a.phone !== undefined) patch.phone = a.phone.trim() ? normalizePhone(a.phone, "phone") : undefined;
+    if (a.address !== undefined) patch.address = a.address.trim() ? assertNonEmpty(a.address, "address", 200) : undefined;
+    if (a.bloodGroup !== undefined) {
+      const bg = a.bloodGroup.trim().toUpperCase();
+      if (bg && !/^(A|B|AB|O)[+-]$/.test(bg)) throw invalid("Blood group must look like A+, O- or AB+.", { bloodGroup: "Invalid" });
+      patch.bloodGroup = bg || undefined;
+    }
+    const changed = (Object.keys(patch) as (keyof Doc<"students">)[]).filter((k) => patch[k] !== student[k]);
+    if (changed.length === 0) return { changed: [], renumberedSections: 0 };
+    await ctx.db.patch(student._id, patch);
+
+    const nameChanged = changed.includes("firstName") || changed.includes("lastName");
+    let renumbered: Id<"sections">[] = [];
+    if (nameChanged) {
+      // Every ACTIVE enrollment of the student (normally one, in the current year).
+      const years = await ctx.db.query("enrollments").withIndex("by_student_year", (q) => q.eq("studentId", student._id)).collect();
+      renumbered = years.filter((e) => e.schoolId === ctx.actor.schoolId && e.status === "active").map((e) => e.sectionId);
+      await renumberSections(ctx, renumbered);
+    }
+    await writeAudit(ctx, {
+      schoolId: ctx.actor.schoolId, actor: ctx.actor, action: "student.updated", entity: { table: "students", id: student._id },
+      summary: `Updated ${fullName({ firstName: patch.firstName ?? student.firstName, lastName: patch.lastName ?? student.lastName })} (${student.admissionNo})`,
+      metadata: { fields: changed, renumberedSections: renumbered.length },
+    });
+    return { changed, renumberedSections: renumbered.length };
+  },
+});

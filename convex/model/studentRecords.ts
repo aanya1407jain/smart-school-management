@@ -10,6 +10,7 @@
  * Amounts are returned in minor units (paise); the UI formats them.
  */
 import type { QueryCtx } from "../_generated/server";
+import { computeLedger, effectivePayments } from "./feeMath";
 import type { Doc, Id } from "../_generated/dataModel";
 import { classTeacherOf, teacherDisplayName } from "./academics";
 
@@ -156,57 +157,25 @@ export async function publishedResults(ctx: QueryCtx, student: Doc<"students">) 
  */
 export async function feeLedger(ctx: QueryCtx, student: Doc<"students">, year: Doc<"academicYears">) {
   const obligations = (await ctx.db.query("studentFees").withIndex("by_student_year", (q) => q.eq("studentId", student._id).eq("academicYearId", year._id)).collect())
-    .filter((o) => o.schoolId === student.schoolId && o.status === "active")
-    .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+    .filter((o) => o.schoolId === student.schoolId);
   const concessions = (await ctx.db.query("feeConcessions").withIndex("by_student_year", (q) => q.eq("studentId", student._id).eq("academicYearId", year._id)).collect())
-    .filter((c) => c.schoolId === student.schoolId && c.status === "active");
+    .filter((c) => c.schoolId === student.schoolId);
   const allPayments = (await ctx.db.query("feePayments").withIndex("by_student_paid", (q) => q.eq("studentId", student._id)).collect())
     .filter((p) => p.schoolId === student.schoolId && p.academicYearId === year._id);
-  const reversed = new Set(allPayments.map((p) => p.reversalOfPaymentId).filter((x): x is Id<"feePayments"> => !!x));
-  const payments = allPayments.filter((p) => p.status === "completed" && !p.reversalOfPaymentId && !reversed.has(p._id));
-
-  // Concessions: per-obligation ones apply to that obligation; year-wide percent ones to every
-  // obligation; year-wide fixed ones are spread over obligations in due-date order.
-  const concessionBy = new Map<Id<"studentFees">, number>();
-  for (const o of obligations) {
-    let c = 0;
-    for (const k of concessions) {
-      if (k.studentFeeId && k.studentFeeId !== o._id) continue;
-      if (k.kind === "percent") c += Math.round((o.amountMinor * k.value) / 10000);
-      else if (k.studentFeeId) c += k.value;
-    }
-    concessionBy.set(o._id, Math.min(c, o.amountMinor));
-  }
-  for (const k of concessions.filter((x) => x.kind === "fixed" && !x.studentFeeId)) {
-    let left = k.value;
-    for (const o of obligations) {
-      if (left <= 0) break;
-      const room = o.amountMinor - (concessionBy.get(o._id) ?? 0);
-      const take = Math.min(room, left);
-      concessionBy.set(o._id, (concessionBy.get(o._id) ?? 0) + take);
-      left -= take;
-    }
-  }
-  const paidBy = new Map<Id<"studentFees">, number>();
-  for (const p of payments) for (const a of p.allocations) paidBy.set(a.studentFeeId, (paidBy.get(a.studentFeeId) ?? 0) + a.amountMinor);
-
-  const rows = obligations.map((o) => {
-    const concession = concessionBy.get(o._id) ?? 0;
-    const paid = paidBy.get(o._id) ?? 0;
-    const net = o.amountMinor - concession;
-    return { obligationId: o._id, label: o.label, dueDate: o.dueDate, amountMinor: o.amountMinor, concessionMinor: concession, netMinor: net, paidMinor: paid, outstandingMinor: Math.max(0, net - paid) };
-  });
+  const payments = effectivePayments(allPayments);
+  // Shared with the school-wide fee reads (model/feeMath.ts), so totals always reconcile.
+  const { rows, totals } = computeLedger(obligations, concessions, payments);
   const paymentRows = [];
   for (const p of payments.sort((a, b) => b.paidOn.localeCompare(a.paidOn))) {
     const receipt = await ctx.db.query("receipts").withIndex("by_payment", (q) => q.eq("paymentId", p._id)).first();
-    paymentRows.push({ paymentId: p._id, paidOn: p.paidOn, amountMinor: p.amountMinor, method: p.method, receiptNo: receipt && receipt.schoolId === student.schoolId ? receipt.receiptNo : null });
+    const ok = receipt && receipt.schoolId === student.schoolId;
+    paymentRows.push({ paymentId: p._id, paidOn: p.paidOn, amountMinor: p.amountMinor, method: p.method, receiptNo: ok ? receipt.receiptNo : null, receiptId: ok ? receipt._id : null, reference: p.reference ?? null });
   }
-  const sum = (f: (r: (typeof rows)[number]) => number) => rows.reduce((a, r) => a + f(r), 0);
   return {
     academicYear: year.name,
-    obligations: rows,
+    obligations: rows.map(({ feeStructureId: _structure, ...r }) => r),
     payments: paymentRows,
-    totals: { grossMinor: sum((r) => r.amountMinor), concessionMinor: sum((r) => r.concessionMinor), paidMinor: sum((r) => r.paidMinor), outstandingMinor: sum((r) => r.outstandingMinor) },
+    totals,
   };
 }
 

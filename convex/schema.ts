@@ -391,7 +391,9 @@ export default defineSchema({
     status: v.union(v.literal("active"), v.literal("cancelled")),
   })
     .index("by_student_year", ["studentId", "academicYearId"])
-    .index("by_school_due", ["schoolId", "dueDate"]),
+    .index("by_school_due", ["schoolId", "dueDate"])
+    .index("by_structure", ["feeStructureId"])
+    .index("by_school_year", ["schoolId", "academicYearId"]),
 
   feeConcessions: defineTable({
     schoolId: v.id("schools"),
@@ -405,7 +407,9 @@ export default defineSchema({
     reason: v.string(),
     approvedByUserId: v.id("users"),
     status: v.union(v.literal("active"), v.literal("revoked")),
-  }).index("by_student_year", ["studentId", "academicYearId"]),
+  })
+    .index("by_student_year", ["studentId", "academicYearId"])
+    .index("by_school_year", ["schoolId", "academicYearId"]),
 
   /** Append-only payment transactions. A reversal is a new row pointing at the original. */
   feePayments: defineTable({
@@ -421,9 +425,17 @@ export default defineSchema({
     allocations: v.array(v.object({ studentFeeId: v.id("studentFees"), amountMinor: v.number() })),
     recordedByUserId: v.id("users"),
     note: v.optional(v.string()),
+    /**
+     * Client-generated id of the "record payment" request (fees.recordPayment).
+     * A retried request with the same id returns the original payment instead
+     * of charging twice. Absent on rows written before it existed.
+     */
+    clientRequestId: v.optional(v.string()),
   })
     .index("by_student_paid", ["studentId", "paidOn"])
-    .index("by_school_paid", ["schoolId", "paidOn"]),
+    .index("by_school_paid", ["schoolId", "paidOn"])
+    .index("by_school_request", ["schoolId", "clientRequestId"])
+    .index("by_school_year", ["schoolId", "academicYearId"]),
 
   receipts: defineTable({
     schoolId: v.id("schools"),
@@ -535,7 +547,8 @@ export default defineSchema({
     room: v.optional(v.string()),
   })
     .index("by_section_day_period", ["sectionId", "dayOfWeek", "periodId"])
-    .index("by_teacher_day_period", ["teacherId", "dayOfWeek", "periodId"]),
+    .index("by_teacher_day_period", ["teacherId", "dayOfWeek", "periodId"])
+    .index("by_school_day_period", ["schoolId", "dayOfWeek", "periodId"]),
 
   // ============================================================ homework
   homework: defineTable({
@@ -581,6 +594,8 @@ export default defineSchema({
     expiresOn: v.optional(v.string()),
     eventDate: v.optional(v.string()),
     createdByUserId: v.id("users"),
+    /** Set when the notice is first published (ms). Lets an archived notice be restored to the state it had. */
+    publishedAt: v.optional(v.number()),
   }).index("by_school_status_publish", ["schoolId", "status", "publishDate"]),
 
   events: defineTable({
@@ -604,9 +619,17 @@ export default defineSchema({
     readAt: v.optional(v.number()),
     href: v.optional(v.string()),
     entity: v.optional(vEntityRef),
+    /**
+     * Identifies the event that caused the notification (e.g.
+     * "homework.created:<id>"). notifyUsers never writes a second
+     * notification with the same key for the same user, so a repeated trigger
+     * cannot notify twice. Absent on older rows.
+     */
+    dedupeKey: v.optional(v.string()),
   })
     .index("by_user_school", ["userId", "schoolId"])
-    .index("by_user_school_read", ["userId", "schoolId", "isRead"]),
+    .index("by_user_school_read", ["userId", "schoolId", "isRead"])
+    .index("by_user_dedupe", ["userId", "dedupeKey"]),
 
   // ============================================================ platform
   /**
