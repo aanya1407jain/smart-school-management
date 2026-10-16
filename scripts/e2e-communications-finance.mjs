@@ -21,6 +21,11 @@ const check = (name, ok, detail = "") => {
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? ` — ${detail}` : ""}`);
 };
 
+/** Resolves true only when the element really becomes visible (a missing element FAILS the check). */
+async function visibleWithin(locator, timeout = 8000) {
+  return await locator.waitFor({ state: "visible", timeout }).then(() => true, () => false);
+}
+
 async function newPage(width = 1440) {
   const ctx = await browser.newContext({ viewport: { width, height: 900 }, acceptDownloads: true });
   const page = await ctx.newPage();
@@ -60,7 +65,7 @@ console.log("\n--- E2E Browser Testing: Fees, CSV Export, Notifications & Settin
 
   // Check balances table rendered
   await waitText(page, /Aarav Sharma/);
-  check("Fee balances table displays student records", await page.getByRole("table").isVisible().catch(() => true));
+  check("Fee balances table displays student records", await visibleWithin(page.getByRole("table").first().getByRole("row").filter({ hasText: "Aarav Sharma" }).first()));
 
   // Trigger CSV export and verify browser download event
   const exportBtn = page.getByRole("button").filter({ hasText: "Export CSV" }).first();
@@ -79,10 +84,12 @@ console.log("\n--- E2E Browser Testing: Fees, CSV Export, Notifications & Settin
 
   // Switch to Payments tab
   await page.goto(BASE + "/admin/fees?tab=payments");
-  await page.waitForTimeout(600);
-  check("Admin opens Payments tab", page.url().includes("tab=payments"));
-  const paymentsTable = page.getByRole("table");
-  check("Payments table displays records", await paymentsTable.isVisible().catch(() => true));
+  check("Admin opens Payments tab", page.url().includes("tab=payments") && (await visibleWithin(page.getByRole("tab", { name: /payments/i, selected: true }))));
+  // Fails when the table is missing or has no data rows (header row + at least one payment).
+  const paymentsTable = page.getByRole("table").first();
+  const hasTable = await visibleWithin(paymentsTable);
+  const rowCount = hasTable ? await paymentsTable.getByRole("row").count() : 0;
+  check("Payments table displays records", hasTable && rowCount > 1, `${rowCount} rows`);
 
   await ctx.close();
 }

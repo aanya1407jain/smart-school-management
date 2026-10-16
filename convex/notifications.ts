@@ -40,6 +40,8 @@ export const markRead = schoolMutation({
   },
 });
 
+const CLEAR_BATCH = 500;
+
 export const markAllRead = schoolMutation({
   args: {},
   handler: async (ctx) => {
@@ -53,9 +55,15 @@ export const markAllRead = schoolMutation({
   },
 });
 
+/**
+ * Remove one of the caller's OWN notifications from their inbox. Notifications
+ * are personal copies (the notice, payment or result they point at is not
+ * touched), so removing one only affects the caller's list.
+ */
 export const remove = schoolMutation({
   args: { notificationId: v.id("notifications") },
   handler: async (ctx, { notificationId }) => {
+    requirePermission(ctx.actor, "notifications:read");
     const n = await getInSchool(ctx, "notifications", notificationId, "Notification");
     if (n.userId !== ctx.actor.userId) throw notFound("Notification");
     await ctx.db.delete(n._id);
@@ -63,14 +71,20 @@ export const remove = schoolMutation({
   },
 });
 
+/**
+ * Remove ALL of the caller's own notifications in this school (bounded batch;
+ * `remaining: true` means call again). Other users' inboxes are never touched.
+ */
 export const clearAll = schoolMutation({
   args: {},
   handler: async (ctx) => {
-    const all = await ctx.db
+    requirePermission(ctx.actor, "notifications:read");
+    const batch = await ctx.db
       .query("notifications")
       .withIndex("by_user_school", (q) => q.eq("userId", ctx.actor.userId).eq("schoolId", ctx.actor.schoolId))
-      .take(500);
-    for (const n of all) await ctx.db.delete(n._id);
-    return { ok: true, deleted: all.length };
+      .take(CLEAR_BATCH + 1);
+    const rows = batch.slice(0, CLEAR_BATCH);
+    for (const n of rows) await ctx.db.delete(n._id);
+    return { ok: true, deleted: rows.length, remaining: batch.length > CLEAR_BATCH };
   },
 });

@@ -15,14 +15,35 @@ export type NotificationInput = {
   message: string;
   href?: string;
   entity?: { table: string; id: string };
+  /**
+   * The event that caused this notification ("homework.created:<id>"). When
+   * set, a user who already has a notification with this key is skipped, so a
+   * repeated trigger (retry, re-publish) never notifies twice.
+   */
+  dedupeKey?: string;
 };
 
+/** In-app notifications only (no SMS / email / push provider is configured). Returns how many were written. */
 export async function notifyUsers(ctx: MutationCtx, schoolId: Id<"schools">, userIds: Iterable<Id<"users">>, n: NotificationInput) {
   const unique = new Set(userIds);
+  let written = 0;
   for (const userId of unique) {
+    if (n.dedupeKey) {
+      const dup = await ctx.db.query("notifications").withIndex("by_user_dedupe", (q) => q.eq("userId", userId).eq("dedupeKey", n.dedupeKey)).first();
+      if (dup && dup.schoolId === schoolId) continue;
+    }
     await ctx.db.insert("notifications", { schoolId, userId, isRead: false, ...n });
+    written++;
   }
-  return unique.size;
+  return written;
+}
+
+/** Active user accounts of every student actively enrolled in a section (and their linked guardians). */
+export async function userIdsForSection(ctx: QueryCtx, schoolId: Id<"schools">, sectionId: Id<"sections">): Promise<Id<"users">[]> {
+  const enrollments = await ctx.db.query("enrollments").withIndex("by_section_status", (q) => q.eq("sectionId", sectionId).eq("status", "active")).take(1001);
+  const ids: Id<"users">[] = [];
+  for (const e of enrollments) if (e.schoolId === schoolId) ids.push(...(await userIdsForStudent(ctx, schoolId, e.studentId)));
+  return ids;
 }
 
 /** Active user accounts that represent a student: the student's own login and linked guardians' logins. */

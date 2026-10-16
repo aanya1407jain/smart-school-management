@@ -7,6 +7,10 @@
  *   3. await register({ storageId, kind, ownerType, ownerId, fileName })
  *      → validates ownership/permission, records metadata in `files`.
  * Download: `getUrl({ fileId })` re-checks read access every time.
+ * Homework / submission attachments: create the homework (homework.create) or
+ * the submission (homework.submit) first, then register each file with
+ * ownerType "homework" / "submission"; the file id is appended to the record
+ * in the same transaction. Client helper: src/lib/convex/use-file-upload.ts.
  *
  * Size and content type are read from Convex's own `_storage` metadata,
  * never from the client.
@@ -20,6 +24,7 @@ import { getInSchool, hasPermission, requireAnyPermission, requireStudentAccess 
 import { conflict, forbidden, invalid, invalidRelationship, notFound } from "./core/errors";
 import { assertNonEmpty, vFileKind, vFileOwnerType } from "./core/validators";
 import { writeAudit } from "./model/audit";
+import { canReadHomework } from "./model/homeworkAccess";
 
 type Ctx = QueryCtx & { actor: Actor };
 type OwnerType = Infer<typeof vFileOwnerType>;
@@ -35,9 +40,36 @@ const WRITE_POLICY: Record<FileKind, { owners: OwnerType[]; permission: Paramete
   receipt: { owners: ["receipt"], permission: "fees:manage" },
   report_card: { owners: ["result"], permission: "exams:publish" },
   school_document: { owners: ["school"], permission: "settings:manage" },
+  // Record-level checks (owning teacher / submitting student) are applied in requireRecordWrite.
+  homework_attachment: { owners: ["homework"], permission: "homework:manage:assigned" },
+  submission_attachment: { owners: ["submission"], permission: "homework:submit" },
 };
 
-const OWNER_TABLE = { student: "students", teacher: "teachers", receipt: "receipts", result: "results" } as const;
+const OWNER_TABLE = { student: "students", teacher: "teachers", receipt: "receipts", result: "results", homework: "homework", submission: "homeworkSubmissions" } as const;
+
+/** Most attachments per homework / submission. */
+export const MAX_ATTACHMENTS = 5;
+
+/**
+ * Record-level write rule for homework and submission attachments:
+ *  - homework: only the teacher who set it, while it is open;
+ *  - submission: only the student who submitted it, before it is reviewed.
+ */
+async function requireRecordWrite(ctx: Ctx, ownerType: OwnerType, ownerId: string) {
+  if (ownerType === "homework") {
+    const hw = await getInSchool(ctx, "homework", ownerId as Id<"homework">, "Owner");
+    if (!ctx.actor.teacherId || hw.teacherId !== ctx.actor.teacherId) throw forbidden("Only the teacher who set this homework can attach files to it.");
+    if (hw.status !== "active") throw conflict("This homework is closed.");
+    return hw;
+  }
+  if (ownerType === "submission") {
+    const sub = await getInSchool(ctx, "homeworkSubmissions", ownerId as Id<"homeworkSubmissions">, "Owner");
+    if (!ctx.actor.studentId || sub.studentId !== ctx.actor.studentId) throw forbidden("Only the student who submitted this work can attach files to it.");
+    if (sub.status === "reviewed") throw conflict("This submission has already been reviewed.");
+    return sub;
+  }
+  return null;
+}
 
 /** Resolve and tenant-check the owner record. Returns the owner doc (or the school id). */
 async function loadOwner(ctx: Ctx, ownerType: OwnerType, ownerId: string) {
@@ -73,13 +105,25 @@ async function requireFileRead(ctx: Ctx, file: Doc<"files">) {
       await requireStudentAccess(ctx, result.studentId, { all: "exams:manage", assigned: "exams:read:assigned", own: "results:read:own" });
       return;
     }
+    case "homework": {
+      const hw = await getInSchool(ctx, "homework", file.ownerId as Id<"homework">, "File");
+      if (await canReadHomework(ctx, hw)) return;
+      throw notFound("File");
+    }
+    case "submission": {
+      const sub = await getInSchool(ctx, "homeworkSubmissions", file.ownerId as Id<"homeworkSubmissions">, "File");
+      const hw = await getInSchool(ctx, "homework", sub.homeworkId, "File");
+      if (hasPermission(ctx.actor, "homework:read:all") || (ctx.actor.teacherId && hw.teacherId === ctx.actor.teacherId)) return;
+      await requireStudentAccess(ctx, sub.studentId, { own: "homework:read:own" });
+      return;
+    }
   }
 }
 
 export const generateUploadUrl = schoolMutation({
   args: {},
   handler: async (ctx) => {
-    requireAnyPermission(ctx.actor, ["files:upload", "students:write", "fees:manage", "exams:publish", "settings:manage"]);
+    requireAnyPermission(ctx.actor, ["files:upload", "students:write", "fees:manage", "exams:publish", "settings:manage", "homework:submit"]);
     return await ctx.storage.generateUploadUrl();
   },
 });
@@ -93,6 +137,8 @@ export const register = schoolMutation({
     const permission = a.kind === "profile_photo" && a.ownerType === "teacher" ? "staff:manage" : policy.permission;
     if (!teacherSelfPhoto && !hasPermission(ctx.actor, permission)) throw forbidden();
     await loadOwner(ctx, a.ownerType, a.ownerId);
+    const record = await requireRecordWrite(ctx, a.ownerType, a.ownerId);
+    if (record && record.attachmentFileIds.length >= MAX_ATTACHMENTS) throw conflict(`At most ${MAX_ATTACHMENTS} files can be attached.`);
 
     const meta = await ctx.db.system.get(a.storageId);
     if (!meta) throw notFound("Uploaded file");
@@ -106,6 +152,8 @@ export const register = schoolMutation({
       schoolId: ctx.actor.schoolId, storageId: a.storageId, kind: a.kind, ownerType: a.ownerType, ownerId: a.ownerId,
       fileName: assertNonEmpty(a.fileName, "fileName", 200), contentType, size: meta.size, uploadedByUserId: ctx.actor.userId,
     });
+    // Homework / submission attachments are linked to their record in the same transaction.
+    if (record) await ctx.db.patch(record._id, { attachmentFileIds: [...record.attachmentFileIds, id] });
     await writeAudit(ctx, { schoolId: ctx.actor.schoolId, actor: ctx.actor, action: "file.uploaded", entity: { table: "files", id }, summary: `Uploaded ${a.kind.replace("_", " ")} "${a.fileName}"`, metadata: { ownerType: a.ownerType, ownerId: a.ownerId } });
     return id;
   },
@@ -135,8 +183,10 @@ export const remove = schoolMutation({
   handler: async (ctx, { fileId }) => {
     const file = await getInSchool(ctx, "files", fileId, "File");
     if (!hasPermission(ctx.actor, WRITE_POLICY[file.kind].permission)) throw forbidden();
+    const record = await requireRecordWrite(ctx, file.ownerType, file.ownerId);
     await ctx.storage.delete(file.storageId);
     await ctx.db.delete(file._id);
+    if (record) await ctx.db.patch(record._id, { attachmentFileIds: record.attachmentFileIds.filter((f) => f !== file._id) });
     await writeAudit(ctx, { schoolId: ctx.actor.schoolId, actor: ctx.actor, action: "file.deleted", entity: { table: "files", id: file._id }, summary: `Deleted "${file.fileName}"`, metadata: { kind: file.kind, ownerType: file.ownerType, ownerId: file.ownerId } });
     return { ok: true };
   },

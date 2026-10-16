@@ -14,6 +14,7 @@ import { Badge, Button, Card, EmptyState, PageHeader, QueryView, Segmented, useT
 import { NOTIFICATION_CATEGORY_LABELS } from "@/lib/constants/labels";
 import { relativeTime, formatDateTime } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils/cn";
+import { isLiveRoute } from "@/lib/permissions/navigation";
 import { CategoryIcon } from "./category-icon";
 import { useUnreadCount } from "./use-unread-count";
 
@@ -104,7 +105,10 @@ export function NotificationCenter() {
     "general",
   ];
 
+  const fail = (e: unknown) => toast({ title: "That didn't work", description: e instanceof Error ? e.message : "Please try again.", tone: "error" });
+
   const handleMarkAllRead = async () => {
+    try {
     if (live) {
       const r = await markAllReadMutation({});
       toast({
@@ -118,30 +122,35 @@ export function NotificationCenter() {
         description: `${r.count} notification${r.count === 1 ? "" : "s"} updated.`,
       });
     }
+    } catch (e) { fail(e); }
   };
 
   const handleMarkRead = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (live) {
-      await markReadMutation({ notificationId: id as Id<"notifications"> });
-    } else {
-      await services.notifications.markRead(id);
-    }
-    toast({ title: "Notification marked as read" });
+    try {
+      if (live) {
+        await markReadMutation({ notificationId: id as Id<"notifications"> });
+      } else {
+        await services.notifications.markRead(id);
+      }
+      toast({ title: "Notification marked as read" });
+    } catch (err) { fail(err); }
   };
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (live) {
-      await removeMutation({ notificationId: id as Id<"notifications"> });
-    } else {
-      await services.notifications.remove(id);
-    }
-    toast({ title: "Notification removed" });
+    try {
+      if (live) {
+        await removeMutation({ notificationId: id as Id<"notifications"> });
+      } else {
+        await services.notifications.remove(id);
+      }
+      toast({ title: "Notification removed" });
+    } catch (err) { fail(err); }
   };
 
   return (
-    <div className="mx-auto max-w-4xl">
+    <div className="mx-auto max-w-4xl" data-testid={live ? "live-notifications" : undefined}>
       <PageHeader
         title="Notifications"
         description={
@@ -267,7 +276,8 @@ export function NotificationCenter() {
                               await services.notifications.markRead(n.id);
                             }
                           }
-                          if (n.href) router.push(n.href);
+                          // Live accounts only follow links to pages backed by real records.
+                          if (n.href && (!live || isLiveRoute(n.href))) router.push(n.href);
                         }}
                       >
                         <div className="flex flex-wrap items-center gap-2">

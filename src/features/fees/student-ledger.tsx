@@ -25,14 +25,12 @@ export function StudentLedger({ studentId }: { studentId: string }) {
   const { dataSource } = useSession();
   const live = dataSource === "live";
 
-  // Live Convex queries & mutations
-  const liveLedger = useSchoolQuery(api.fees.getStudentLedger, live ? { studentId: studentId as Id<"students"> } : "skip");
-  const profile = useSchoolQuery(api.academics.getStudentProfile, live ? { studentId: studentId as Id<"students"> } : "skip");
-  const liveStructures = useSchoolQuery(api.fees.listStructures, live ? {} : "skip");
+  // Live: the student's real ledger (obligations, concessions, payments, receipts) from Convex.
+  const liveLedger = useSchoolQuery(api.fees.studentLedger, live ? { studentId: studentId as Id<"students"> } : "skip");
   const assignStructureMutation = useSchoolMutation(api.fees.assignStructure);
 
-  // Demo fallback query
-  const q = useQuery(() => (live ? Promise.resolve(null as any) : services.fees.getStudentLedger(studentId)), [live, studentId]);
+  // Demo data
+  const q = useQuery(() => services.fees.getStudentLedger(studentId), [live, studentId], { enabled: !live });
 
   const [payOpen, setPayOpen] = useState(false);
   const [concOpen, setConcOpen] = useState(false);
@@ -42,93 +40,37 @@ export function StudentLedger({ studentId }: { studentId: string }) {
 
   const adaptedLive = useMemo(() => {
     if (!liveLedger) return undefined;
-    const sName = profile ? `${profile.student.firstName} ${profile.student.lastName}` : "Student";
-    const sAdm = profile?.student.admissionNo ?? "";
-    const sClass = profile?.enrollment ? (profile.enrollment.sectionDisplayName ?? profile.enrollment.className ?? "") : "";
-
-    const gross = liveLedger.totals.grossMinor / 100;
-    const concession = liveLedger.totals.concessionMinor / 100;
-    const paid = liveLedger.totals.paidMinor / 100;
-    const outstanding = liveLedger.totals.outstandingMinor / 100;
-    const net = gross - concession;
-
-    const today = todayISO();
-    let overdue = 0;
-    let nextDue: { dueDate: string; outstanding: number } | null = null;
-
-    const obligations = liveLedger.obligations.map((o) => {
-      const obOut = o.outstandingMinor / 100;
-      if (obOut > 0 && o.dueDate < today) {
-        overdue += obOut;
-      }
-      if (obOut > 0 && (!nextDue || o.dueDate < nextDue.dueDate)) {
-        nextDue = { dueDate: o.dueDate, outstanding: obOut };
-      }
-      const status = obOut === 0 ? "paid" : o.dueDate < today ? "overdue" : o.paidMinor > 0 ? "partial" : "unpaid";
-      return {
-        id: o.obligationId,
-        label: o.label,
-        dueDate: o.dueDate,
-        amount: o.amountMinor / 100,
-        concession: o.concessionMinor / 100,
-        net: o.netMinor / 100,
-        paid: o.paidMinor / 100,
-        outstanding: obOut,
-        status: status as any,
-      };
-    });
-
-    const payments = liveLedger.payments.map((p) => ({
-      id: p.paymentId,
-      receiptId: p.paymentId,
-      receiptNo: p.receiptNo ?? "—",
-      amount: p.amountMinor / 100,
-      method: p.method as PaymentMethod,
-      reference: `REF-${p.paymentId.slice(-6)}`,
-      paidOn: p.paidOn,
-    }));
-
-    const standing = outstanding === 0 && net > 0 ? "paid" : overdue > 0 ? "overdue" : paid > 0 ? "partial" : "unpaid";
-
+    const m = (x: number) => x / 100;
     return {
-      student: {
-        id: studentId,
-        name: sName,
-        admissionNo: sAdm,
-        classLabel: sClass,
-      },
+      yearLabel: liveLedger.academicYear.name,
+      student: { id: liveLedger.studentId, name: liveLedger.name, admissionNo: liveLedger.admissionNo, classLabel: liveLedger.classLabel ?? "Not enrolled" },
       totals: {
-        gross,
-        concession,
-        net,
-        paid,
-        outstanding,
-        overdue,
+        gross: m(liveLedger.totals.grossMinor), concession: m(liveLedger.totals.concessionMinor), net: m(liveLedger.totals.netMinor),
+        paid: m(liveLedger.totals.paidMinor), outstanding: m(liveLedger.totals.outstandingMinor), overdue: m(liveLedger.totals.overdueMinor),
       },
-      standing,
-      assignments: liveLedger.obligations.length > 0 ? [{ id: "assigned" }] : [],
-      availableStructures: (liveStructures ?? []).map((fs) => ({
-        id: fs._id,
-        name: fs.name,
-        total: fs.totalMinor / 100,
+      standing: liveLedger.standing,
+      assignments: liveLedger.obligations.length ? liveLedger.structures : [],
+      availableStructures: liveLedger.availableStructures.map((x) => ({ id: x.structureId as string, name: x.name, total: m(x.totalMinor) })),
+      structures: liveLedger.structures,
+      obligations: liveLedger.obligations.map((o) => ({
+        id: o.obligationId as string, label: o.label, dueDate: o.dueDate, amount: m(o.amountMinor), concession: m(o.concessionMinor),
+        net: m(o.netMinor), paid: m(o.paidMinor), outstanding: m(o.outstandingMinor), status: o.status,
       })),
-      structures: (liveStructures ?? []).filter((fs) => fs.assignedCount > 0),
-      obligations,
-      concessions: [],
-      payments,
-      nextDue,
+      concessions: liveLedger.concessions.filter((c) => c.status === "active").map((c) => ({
+        id: c.concessionId as string, reason: c.reason, createdAt: new Date(c.createdAt).toISOString(),
+        amount: c.kind === "fixed" ? m(c.value) : 0, display: c.kind === "percent" ? `${c.value / 100}%` : undefined,
+      })),
+      payments: liveLedger.payments.map((p) => ({
+        id: p.paymentId as string, receiptId: p.receiptId ?? undefined, receiptNo: p.receiptNo ?? "—", amount: m(p.amountMinor),
+        method: p.method as PaymentMethod, reference: p.reference ?? "—", paidOn: p.paidOn,
+      })),
+      nextDue: liveLedger.nextDue ? { dueDate: liveLedger.nextDue.dueDate, outstanding: m(liveLedger.nextDue.outstandingMinor) } : null,
     };
-  }, [liveLedger, profile, liveStructures, studentId]);
+  }, [liveLedger]);
 
   const queryState = useMemo<QueryState<any>>(
-    () => ({
-      isLoading: live ? liveLedger === undefined : q.isLoading,
-      isRefreshing: false,
-      data: live ? adaptedLive : q.data,
-      error: live ? null : q.error,
-      refetch: live ? () => {} : q.refetch,
-    }),
-    [live, liveLedger, adaptedLive, q.isLoading, q.data, q.error, q.refetch]
+    () => (live ? { isLoading: adaptedLive === undefined, isRefreshing: false, data: adaptedLive, error: null, refetch: () => {} } : q),
+    [live, adaptedLive, q],
   );
 
   useEffect(() => {
@@ -147,7 +89,7 @@ export function StudentLedger({ studentId }: { studentId: string }) {
                 <div className="flex items-center gap-4">
                   <Avatar name={l.student.name} size="lg" />
                   <div>
-                    <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-plum">Fee ledger · 2026–27</p>
+                    <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-plum">Fee ledger · {l.yearLabel ?? "2026–27"}</p>
                     <h1 className="text-2xl font-semibold text-sapphire">{l.student.name}</h1>
                     <p className="text-sm text-ink-muted"><span className="font-mono">{l.student.admissionNo}</span> · {l.student.classLabel} · <Link href={`/admin/students/${l.student.id}`} className="text-lagoon hover:underline">Profile</Link></p>
                   </div>
@@ -174,7 +116,7 @@ export function StudentLedger({ studentId }: { studentId: string }) {
                 <EmptyState
                   icon={<Layers className="h-6 w-6" />}
                   title="No fee structure assigned"
-                  description="Assign a fee structure to generate this student's installments."
+                  description={l.availableStructures.length ? "Assign a fee structure to generate this student's installments." : "No active fee structure covers this student's class yet."}
                   action={l.availableStructures.map((s: any) => (
                     <Button
                       key={s.id}
@@ -186,7 +128,7 @@ export function StudentLedger({ studentId }: { studentId: string }) {
                           try {
                             await assignStructureMutation({
                               structureId: s.id as Id<"feeStructures">,
-                              studentId: studentId as Id<"students">,
+                              target: { kind: "students", studentIds: [studentId as Id<"students">] },
                             });
                             toast({ title: "Fee assigned", description: s.name });
                           } catch (err: any) {
@@ -214,7 +156,7 @@ export function StudentLedger({ studentId }: { studentId: string }) {
                   <Card>
                     <CardHeader title="Concessions" />
                     <ul className="divide-y divide-line/60 px-5 pb-2">
-                      {l.concessions.map((c: any) => <li key={c.id} className="flex justify-between py-3 text-sm"><span className="text-ink-soft">{c.reason} · {formatDate(c.createdAt.slice(0, 10))}</span><span className="font-semibold text-ink">− {formatCurrency(c.amount)}</span></li>)}
+                      {l.concessions.map((c: any) => <li key={c.id} className="flex justify-between py-3 text-sm"><span className="text-ink-soft">{c.reason} · {formatDate(c.createdAt.slice(0, 10))}</span><span className="font-semibold text-ink">− {c.display ?? formatCurrency(c.amount)}</span></li>)}
                     </ul>
                   </Card>
                 )}
@@ -245,7 +187,16 @@ export function StudentLedger({ studentId }: { studentId: string }) {
   );
 }
 
+function newRequestId(): string {
+  try {
+    return `pay-${crypto.randomUUID()}`;
+  } catch {
+    return `pay-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  }
+}
+
 function PaymentModal({ open, onOpenChange, studentId, outstanding, suggested, onPaid }: { open: boolean; onOpenChange: (o: boolean) => void; studentId: string; outstanding: number; suggested: number; onPaid: (receiptId: string, receiptNo: string, amount: number) => void }) {
+  const { toast } = useToast();
   const { dataSource } = useSession();
   const live = dataSource === "live";
   const [amount, setAmount] = useState(suggested);
@@ -258,11 +209,19 @@ function PaymentModal({ open, onOpenChange, studentId, outstanding, suggested, o
 
   const liveRecordPayment = useSchoolMutation(api.fees.recordPayment);
   const m = useMutation(services.fees.recordPayment);
+  // Retry safety: one key per intended payment. Re-submitting the same payment (after a timeout or a
+  // network error) re-sends the same key, so the server returns the original payment instead of charging twice.
+  // Changing the amount, method or date makes it a different payment, with a new key.
+  const [requestId, setRequestId] = useState(newRequestId);
 
-  useEffect(() => { if (open) { setAmount(suggested); m.reset(); setError(null); } }, [open, suggested]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (open) { setAmount(suggested); m.reset(); setError(null); setRequestId(newRequestId()); } }, [open, suggested]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setRequestId(newRequestId()); }, [amount, method, paidOn, studentId]);
 
   const submit = async () => {
+    if (pending) return;
     setError(null);
+    if (live && (!Number.isFinite(amount) || amount <= 0 || amount > outstanding)) { setError(`Enter an amount between ₹1 and ${formatCurrency(outstanding)}.`); return; }
+    if (live && method !== "cash" && !reference.trim()) { setError("Enter the transaction reference for this payment method."); return; }
     setPending(true);
     try {
       if (live) {
@@ -273,9 +232,11 @@ function PaymentModal({ open, onOpenChange, studentId, outstanding, suggested, o
           paidOn,
           reference: reference.trim() || undefined,
           note: note.trim() || undefined,
+          clientRequestId: requestId,
         });
         if (r) {
           onOpenChange(false);
+          if (r.duplicate) toast({ title: "Payment was already recorded", description: `Receipt ${r.receiptNo} — no second charge was made.` });
           onPaid(r.receiptId, r.receiptNo, amount);
           setReference("");
           setNote("");
@@ -322,11 +283,12 @@ function ConcessionModal({ open, onOpenChange, studentId, max }: { open: boolean
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const liveCreateConcession = useSchoolMutation(api.fees.createConcession);
+  const liveCreateConcession = useSchoolMutation(api.fees.addConcession);
   const m = useMutation(services.fees.addConcession);
 
   const handleSubmit = async () => {
     setError(null);
+    if (live && (!reason.trim() || !(amount > 0) || amount > max)) { setError(`Enter a reason and an amount between ₹1 and ${formatCurrency(max)}.`); return; }
     setPending(true);
     try {
       if (live) {

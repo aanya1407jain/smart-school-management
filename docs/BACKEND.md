@@ -50,7 +50,15 @@ convex/
 ├── academics.ts           years/classes/subjects/sections, curriculum, roster, assignments, class teacher, enrollment
 ├── attendance.ts          getByDate, listBySection, studentHistory, dailyOverview, mark, update
 ├── notifications.ts       list, unreadCount, markRead, markAllRead
-├── files.ts               generateUploadUrl, register, getUrl, listForOwner, remove
+├── files.ts               generateUploadUrl, register, getUrl, listForOwner, remove (+ homework / submission attachments)
+├── fees.ts                structures, assignment, concessions, recordPayment (retry-safe), reversePayment, ledger, receipts, collection
+├── exams.ts               exams, papers, marks entry (subject-teacher scope), publish → results, section results
+├── timetable.ts           periods, lessons with clash checks, section / teacher views
+├── homework.ts            create/update/close, submissions (own work only), review
+├── notices.ts             draft → publish → archive, audience-scoped feed
+├── events.ts              school calendar (holidays affect attendance school days)
+├── staff.ts               staff attendance, leave apply / decide
+├── reports.ts             enrollment, attendance, fee and exam-performance summaries
 ├── audit.ts               list
 ├── seed.ts                demo (internal) — dataset-driven seeding
 └── seedData/              datasets (types.ts + asterAcademy.ts)
@@ -60,7 +68,18 @@ convex/
 Put a new module in `convex/<module>.ts`; put its non-public helpers in `convex/model/<module>.ts`.
 Do not create a folder with the same name as a module file (Convex paths would collide).
 
-Frontend side: `src/lib/convex/` (provider, hooks, errors, `api` re-export) and `src/proxy.ts`.
+Frontend side: `src/lib/convex/` (provider, hooks, errors, `api` re-export, `use-file-upload.ts`) and `src/proxy.ts`.
+
+**Function-by-function contracts** (arguments, who may call, rules, errors, retry guarantees):
+[`docs/BACKEND_API_CONTRACTS.md`](./BACKEND_API_CONTRACTS.md).
+
+**Live vs demo sessions (A-00).** Demo personas of the demo school bind to the in-browser demo data. Every
+other account — student, guardian, teacher or admin created by the school — gets the LIVE workspace for its
+server-derived role (`src/features/auth/live-user.ts`). Live accounts only open pages backed by Convex
+(`src/lib/permissions/navigation.ts` `isLiveRoute`: admin Accounts & Import, Attendance, Notifications, student
+admission/profile; teacher Attendance, Notifications, student profile; the whole student portal). Other pages
+show "not connected to your school's records yet" instead of demo data until their screens are wired to the
+functions above.
 
 ---
 

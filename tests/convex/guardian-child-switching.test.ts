@@ -1,5 +1,6 @@
 /**
  * Guardian child switching, multi-child data isolation, and notification delivery tests.
+ * Ported from PR #11 (Apporva) to the reconciled fees / notices API.
  * Covers AP-05 requirements with verified Convex backend queries and mutations.
  */
 import { describe, expect, test } from "vitest";
@@ -90,17 +91,19 @@ describe("AP-05: Guardian child switching and notifications", () => {
       classIds: [A.classId],
       components: [{ label: "Tuition", amountMinor: 2000000 }],
       installments: [{ label: "Term 1", dueDate: "2026-05-01", amountMinor: 2000000 }],
+      activate: true,
     });
     const { structureId: structB } = await adminUser.mutation(api.fees.createStructure, {
       name: "Standard 8-B",
       classIds: [A.classId],
       components: [{ label: "Tuition", amountMinor: 3000000 }],
       installments: [{ label: "Term 1", dueDate: "2026-05-01", amountMinor: 3000000 }],
+      activate: true,
     });
 
     // Assign fee structures to student A and student B
-    await adminUser.mutation(api.fees.assignStructure, { structureId: structA, studentId: A.studentA });
-    await adminUser.mutation(api.fees.assignStructure, { structureId: structB, studentId: A.studentB });
+    await adminUser.mutation(api.fees.assignStructure, { structureId: structA, target: { kind: "students", studentIds: [A.studentA] } });
+    await adminUser.mutation(api.fees.assignStructure, { structureId: structB, target: { kind: "students", studentIds: [A.studentB] } });
 
     // 1. Query for Child A
     const profileA = await guardianUser.query(api.studentPortal.myProfile, { studentId: A.studentA });
@@ -203,8 +206,9 @@ describe("AP-05: Guardian child switching and notifications", () => {
       classIds: [A.classId],
       components: [{ label: "Tuition", amountMinor: 1500000 }],
       installments: [{ label: "Term 1", dueDate: "2026-05-01", amountMinor: 1500000 }],
+      activate: true,
     });
-    await admin.mutation(api.fees.assignStructure, { structureId, studentId: A.studentA });
+    await admin.mutation(api.fees.assignStructure, { structureId, target: { kind: "students", studentIds: [A.studentA] } });
 
     // 1. Record fee payment -> notifies student and guardian
     await admin.mutation(api.fees.recordPayment, {
@@ -213,13 +217,14 @@ describe("AP-05: Guardian child switching and notifications", () => {
       method: "upi",
       reference: "UPI-TEST-1234",
       paidOn: "2026-04-15",
+      clientRequestId: "guardian-test-payment-1",
     });
 
     const gNotesAfterFee = await guardian.query(api.notifications.list, {});
-    expect(gNotesAfterFee.some((n) => n.type === "fees" && n.title === "Fee payment received")).toBe(true);
+    expect(gNotesAfterFee.some((n) => n.type === "fees" && n.title === "Payment received")).toBe(true);
 
     const sNotesAfterFee = await student.query(api.notifications.list, {});
-    expect(sNotesAfterFee.some((n) => n.type === "fees" && n.title === "Fee payment received")).toBe(true);
+    expect(sNotesAfterFee.some((n) => n.type === "fees" && n.title === "Payment received")).toBe(true);
 
     // 2. Mark attendance with student absent -> notifies guardian and student
     const monday = pastMonday();
@@ -233,18 +238,18 @@ describe("AP-05: Guardian child switching and notifications", () => {
     expect(gNotesAfterAtt.some((n) => n.type === "attendance" && n.title === "Marked absent")).toBe(true);
 
     // 3. Publish notice targeted to section A -> notifies members in section A
-    await admin.mutation(api.notices.create, {
+    const { noticeId } = await admin.mutation(api.notices.createDraft, {
       title: "Exam Preparation Session",
       body: "Mandatory preparation session tomorrow morning.",
       type: "notice",
       priority: "high",
-      status: "published",
       publishDate: "2026-04-10",
       audience: { kind: "sections", sectionIds: [A.sectionA] },
     });
+    await admin.mutation(api.notices.publish, { noticeId });
 
     const gNotesAfterNotice = await guardian.query(api.notifications.list, {});
-    expect(gNotesAfterNotice.some((n) => n.type === "notice" && n.title.includes("Exam Preparation Session"))).toBe(true);
+    expect(gNotesAfterNotice.some((n) => n.type === "notice" && n.message.includes("Exam Preparation Session"))).toBe(true);
 
     // 4. Test notification management: unreadCount, markRead, markAllRead, remove, clearAll
     const unreadBefore = await guardian.query(api.notifications.unreadCount, {});
@@ -264,9 +269,16 @@ describe("AP-05: Guardian child switching and notifications", () => {
     const listAfterDelete = await guardian.query(api.notifications.list, {});
     expect(listAfterDelete.every((n) => n._id !== firstNotice._id)).toBe(true);
 
-    // Clear all
-    await guardian.mutation(api.notifications.clearAll, {});
-    const listAfterClear = await guardian.query(api.notifications.list, {});
-    expect(listAfterClear).toHaveLength(0);
+    // Removing is limited to the caller's own notifications.
+    const studentNote = (await student.query(api.notifications.list, {}))[0];
+    expect(await errorCode(guardian.mutation(api.notifications.remove, { notificationId: studentNote._id }))).toBe("NOT_FOUND");
+
+    // Clearing the inbox (PR #11's clearAll) empties only the caller's own notifications.
+    const studentCountBefore = (await student.query(api.notifications.list, {})).length;
+    const cleared = await guardian.mutation(api.notifications.clearAll, {});
+    expect(cleared.deleted).toBe(listAfterDelete.length);
+    expect(cleared.remaining).toBe(false);
+    expect(await guardian.query(api.notifications.list, {})).toHaveLength(0);
+    expect(await student.query(api.notifications.list, {})).toHaveLength(studentCountBefore);
   });
 });

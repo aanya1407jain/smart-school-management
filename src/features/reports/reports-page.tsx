@@ -8,6 +8,7 @@ import { services } from "@/lib/services";
 import { useQuery, type QueryState } from "@/lib/hooks/use-query";
 import { useSchoolQuery } from "@/lib/convex/membership";
 import { api } from "@convex/_generated/api";
+import type { Id } from "@convex/_generated/dataModel";
 import { useSession } from "@/features/auth/session-provider";
 import type { FeeStanding } from "@/lib/services/derive";
 import {
@@ -49,41 +50,24 @@ function StudentStats() {
   const { dataSource } = useSession();
   const live = dataSource === "live";
 
-  // Live Convex query
+  // Live: enrolled-student statistics computed on the server from the school's records.
   const liveStats = useSchoolQuery(api.reports.studentStatistics, live ? {} : "skip");
-
-  // Demo fallback query
-  const q = useQuery(() => (live ? Promise.resolve(null as any) : services.reports.getStudentStatistics()), [live]);
+  const q = useQuery(() => services.reports.getStudentStatistics(), [live], { enabled: !live });
 
   const adaptedLive = useMemo(() => {
     if (!liveStats) return undefined;
     return {
-      total: liveStats.totalEnrolled,
-      status: { active: liveStats.totalEnrolled, inactive: 0, transferred: 0, alumni: 0 },
-      bySection: liveStats.sectionStats.map((s) => ({
-        label: s.name,
-        students: s.studentsCount,
-        capacity: s.capacity,
-      })),
-      guardians: liveStats.uniqueGuardians,
-      byClass: liveStats.classStats.map((c) => ({
-        name: c.name,
-        male: c.male,
-        female: c.female,
-        total: c.total,
-      })),
+      total: liveStats.total,
+      status: liveStats.status,
+      bySection: liveStats.bySection.map((s) => ({ label: s.label, students: s.students, capacity: s.capacity })),
+      guardians: liveStats.guardians,
+      byClass: liveStats.byClass.map((c) => ({ name: c.name, male: c.male, female: c.female, total: c.total })),
     };
   }, [liveStats]);
 
   const queryState = useMemo<QueryState<any>>(
-    () => ({
-      isLoading: live ? liveStats === undefined : q.isLoading,
-      isRefreshing: false,
-      data: live ? adaptedLive : q.data,
-      error: live ? null : q.error,
-      refetch: live ? () => {} : q.refetch,
-    }),
-    [live, liveStats, adaptedLive, q.isLoading, q.data, q.error, q.refetch]
+    () => (live ? { isLoading: adaptedLive === undefined, isRefreshing: false, data: adaptedLive, error: null, refetch: () => {} } : q),
+    [live, adaptedLive, q],
   );
 
   return (
@@ -131,47 +115,28 @@ function AttendanceReport() {
   const { dataSource } = useSession();
   const live = dataSource === "live";
 
-  // Live Convex query
+  // Live: register totals per month and per section (this academic year, school-local dates).
+  // Per-student bands and the below-threshold list are not computed for live data yet (shown as such).
   const liveAtt = useSchoolQuery(api.reports.attendanceReport, live ? {} : "skip");
-
-  // Demo fallback query
-  const q = useQuery(() => (live ? Promise.resolve(null as any) : services.reports.getAttendanceReport()), [live]);
+  const q = useQuery(() => services.reports.getAttendanceReport(), [live], { enabled: !live });
 
   const adaptedLive = useMemo(() => {
     if (!liveAtt) return undefined;
-    const bands = [
-      { band: "95–100%", students: liveAtt.bySection.filter((s) => s.percentage >= 95).length },
-      { band: "90–95%", students: liveAtt.bySection.filter((s) => s.percentage >= 90 && s.percentage < 95).length },
-      { band: "85–90%", students: liveAtt.bySection.filter((s) => s.percentage >= 85 && s.percentage < 90).length },
-      { band: "75–85%", students: liveAtt.bySection.filter((s) => s.percentage >= 75 && s.percentage < 85).length },
-      { band: "Below 75%", students: liveAtt.bySection.filter((s) => s.percentage < 75).length },
-    ];
     return {
-      monthly: liveAtt.monthly.map((m) => ({
-        month: m.month,
-        percentage: m.percentage,
-        late: m.lateCount,
-        absent: m.absentCount,
+      monthly: liveAtt.monthly.filter((m) => m.percentage !== null).map((m) => ({
+        month: new Date(`${m.month}-01T00:00:00`).toLocaleString("en-IN", { month: "short" }),
+        percentage: m.percentage as number, late: m.late, absent: m.absent,
       })),
-      bySection: liveAtt.bySection.map((s) => ({
-        label: s.label,
-        percentage: s.percentage,
-      })),
-      bands,
-      lowAttendance: [],
+      bySection: liveAtt.bySection.filter((s) => s.percentage !== null).map((s) => ({ label: s.label, percentage: s.percentage as number })),
+      bands: null,
+      lowAttendance: null,
       threshold: liveAtt.threshold,
     };
   }, [liveAtt]);
 
   const queryState = useMemo<QueryState<any>>(
-    () => ({
-      isLoading: live ? liveAtt === undefined : q.isLoading,
-      isRefreshing: false,
-      data: live ? adaptedLive : q.data,
-      error: live ? null : q.error,
-      refetch: live ? () => {} : q.refetch,
-    }),
-    [live, liveAtt, adaptedLive, q.isLoading, q.data, q.error, q.refetch]
+    () => (live ? { isLoading: adaptedLive === undefined, isRefreshing: false, data: adaptedLive, error: null, refetch: () => {} } : q),
+    [live, adaptedLive, q],
   );
 
   return (
@@ -184,13 +149,16 @@ function AttendanceReport() {
                 <LineChart data={d.monthly} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                   <CartesianGrid vertical={false} stroke={CHART_GRID} />
                   <XAxis dataKey="month" {...axisProps} />
-                  <YAxis domain={[80, 100]} {...axisProps} tickFormatter={pctTick} width={46} />
+                  <YAxis domain={live ? [0, 100] : [80, 100]} {...axisProps} tickFormatter={pctTick} width={46} />
                   <Tooltip content={<ChartTooltip format={(v) => `${v.toFixed(1)}%`} />} />
                   <ReferenceLine y={d.threshold} stroke={CHART.highlight} strokeDasharray="4 4" />
                   <Line type="monotone" dataKey="percentage" name="Attendance" stroke={CHART.single} strokeWidth={2} dot={{ r: 4, fill: CHART.single, stroke: "#fff", strokeWidth: 2 }} />
                 </LineChart>
               </ResponsiveContainer>
             </ChartCard>
+            {d.bands === null ? (
+              <Card className="p-6"><EmptyState title="Attendance bands per student" description="Per-student attendance bands are not calculated for live school data yet. Section and monthly figures are complete." /></Card>
+            ) : (
             <ChartCard title="Students by attendance band" description="How many students fall in each range">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={d.bands} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
@@ -202,19 +170,20 @@ function AttendanceReport() {
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
+            )}
           </div>
           <ChartCard title="Attendance by section" description="Year to date" height={280}>
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={d.bySection} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid vertical={false} stroke={CHART_GRID} />
                 <XAxis dataKey="label" {...axisProps} interval={0} fontSize={11} />
-                <YAxis domain={[80, 100]} {...axisProps} tickFormatter={pctTick} width={46} />
+                <YAxis domain={live ? [0, 100] : [80, 100]} {...axisProps} tickFormatter={pctTick} width={46} />
                 <Tooltip content={<ChartTooltip format={(v) => `${v.toFixed(1)}%`} />} cursor={barCursor} />
                 <Bar dataKey="percentage" name="Attendance" fill={CHART.single} radius={[4, 4, 0, 0]} maxBarSize={28} />
               </BarChart>
             </ResponsiveContainer>
           </ChartCard>
-          <Card>
+          {d.lowAttendance !== null && <Card>
             <CardHeader title={`Students below ${d.threshold}%`} description="Follow up with these students and their guardians" />
             <div className="p-5">
               <DataTable rows={d.lowAttendance as any[]} getRowId={(s: any) => s.id} empty={<EmptyState title="No students below the threshold" />}
@@ -225,7 +194,7 @@ function AttendanceReport() {
                   { key: "p", header: "Attendance", align: "right", cell: (s: any) => <span className="font-semibold text-plum">{formatPercent(s.percentage, 1)}</span> },
                 ]} />
             </div>
-          </Card>
+          </Card>}
         </div>
       )}
     </QueryView>
@@ -244,35 +213,40 @@ function FeeReport() {
   const [paidFrom, setPaidFrom] = useState("");
   const [paidTo, setPaidTo] = useState("");
 
-  // Live Convex queries
-  const liveSummary = useSchoolQuery(api.fees.collectionSummary, live ? {} : "skip");
+  // Live: the same server aggregates as the Fees workspace (one shared ledger calculation).
+  const liveOverview = useSchoolQuery(api.fees.overview, live ? {} : "skip");
+  const liveByClass = useSchoolQuery(api.reports.feeSummary, live ? {} : "skip");
+  const liveMethods = useSchoolQuery(
+    api.fees.collectionSummary,
+    live && liveOverview ? { from: liveOverview.academicYear.startDate, to: liveOverview.today < liveOverview.academicYear.endDate ? liveOverview.today : liveOverview.academicYear.endDate } : "skip",
+  );
   const liveBalances = useSchoolQuery(
     api.fees.listBalances,
     live
       ? {
-          search: search || undefined,
-          classId: (classId || undefined) as any,
-          sectionId: (sectionId || undefined) as any,
-          standing: (standing || "all") as any,
+          search: search.trim() || undefined,
+          academicYearId: (academicYearId || undefined) as Id<"academicYears"> | undefined,
+          classId: (classId || undefined) as Id<"classes"> | undefined,
+          sectionId: (sectionId || undefined) as Id<"sections"> | undefined,
+          standing: (standing || undefined) as FeeStanding | undefined,
         }
       : "skip"
   );
 
-  // Demo fallback queries
-  const q = useQuery(() => (live ? Promise.resolve(null as any) : services.fees.getSummary()), [live]);
-  const payments = useQuery(() => (live ? Promise.resolve([] as any) : services.fees.listPayments({})), [live]);
+  // Demo data
+  const q = useQuery(() => services.fees.getSummary(), [live], { enabled: !live });
+  const payments = useQuery(() => services.fees.listPayments({}), [live], { enabled: !live });
   const balances = useQuery(
     () =>
-      live
-        ? Promise.resolve([] as any)
-        : services.fees.listBalances({
-            search,
-            classId,
-            sectionId,
-            academicYearId: academicYearId || undefined,
-            standing: (standing || "all") as FeeStanding | "all",
-          }),
-    [live, search, classId, sectionId, academicYearId, standing]
+      services.fees.listBalances({
+        search,
+        classId,
+        sectionId,
+        academicYearId: academicYearId || undefined,
+        standing: (standing || "all") as FeeStanding | "all",
+      }),
+    [live, search, classId, sectionId, academicYearId, standing],
+    { enabled: !live },
   );
 
   interface FeeReportRow {
@@ -291,7 +265,7 @@ function FeeReport() {
 
   const liveRows = useMemo<FeeReportRow[] | undefined>(() => {
     if (!liveBalances) return undefined;
-    return liveBalances.map((r) => ({
+    return liveBalances.rows.map((r) => ({
       id: r.studentId,
       studentId: r.studentId,
       name: r.name,
@@ -351,45 +325,30 @@ function FeeReport() {
   }, [filteredRows]);
 
   const adaptedSummary = useMemo(() => {
-    if (!liveSummary) return undefined;
+    if (!liveOverview || !liveByClass) return undefined;
+    const t = liveOverview.totals;
     return {
       totals: {
-        paid: liveSummary.collectedMinor / 100,
-        outstanding: liveSummary.outstandingMinor / 100,
-        net: liveSummary.netMinor / 100,
-        concession: 0,
-        collectionRate: liveSummary.collectionRate,
-        overdue: 0,
-        dueSoon: 0,
+        paid: t.paidMinor / 100, outstanding: t.outstandingMinor / 100, net: t.netMinor / 100, concession: t.concessionMinor / 100,
+        collectionRate: liveOverview.collectionRate, overdue: t.overdueMinor / 100, dueSoon: t.dueSoonMinor / 100,
       },
-      standing: {
-        overdue: 0,
-        due_soon: 0,
-        clear: 0,
-        paid: 0,
-      },
-      monthly: [],
-      recentPayments: [],
+      standing: liveOverview.standing,
+      byClass: liveByClass.classes.map((c) => ({ name: c.className, collected: c.paidMinor / 100, outstanding: c.outstandingMinor / 100 })),
     };
-  }, [liveSummary]);
+  }, [liveOverview, liveByClass]);
 
   const queryState = useMemo<QueryState<any>>(
-    () => ({
-      isLoading: live ? liveSummary === undefined : q.isLoading,
-      isRefreshing: false,
-      data: live ? adaptedSummary : q.data,
-      error: live ? null : q.error,
-      refetch: live ? () => {} : q.refetch,
-    }),
-    [live, liveSummary, adaptedSummary, q.isLoading, q.data, q.error, q.refetch]
+    () => (live ? { isLoading: adaptedSummary === undefined, isRefreshing: false, data: adaptedSummary, error: null, refetch: () => {} } : q),
+    [live, adaptedSummary, q],
   );
 
   const byMethod = useMemo(
     () => {
-      const payList: any[] = payments.data ?? [];
       const record: Record<string, number> = {};
-      for (const p of payList) {
-        record[p.method] = (record[p.method] ?? 0) + Number(p.amount || 0);
+      if (live) {
+        for (const [m, minor] of Object.entries(liveMethods?.byMethod ?? {})) record[m] = minor / 100;
+      } else {
+        for (const p of payments.data ?? []) record[p.method] = (record[p.method] ?? 0) + Number(p.amount || 0);
       }
       return Object.entries(record)
         .map(([m, amount]) => ({
@@ -398,7 +357,7 @@ function FeeReport() {
         }))
         .sort((a, b) => b.amount - a.amount);
     },
-    [payments.data]
+    [live, liveMethods, payments.data]
   );
 
   const handleExportCsv = () => {
@@ -677,6 +636,56 @@ function FeeReport() {
 }
 
 function ExamReport() {
+  const { dataSource } = useSession();
+  if (dataSource === "live") return <LiveExamReport />;
+  return <DemoExamReport />;
+}
+
+/** Live: published examinations only, from the result snapshots written at publication. */
+function LiveExamReport() {
+  const exams = useSchoolQuery(api.exams.list, {});
+  const published = useMemo(() => (exams ?? []).filter((e) => e.status === "published"), [exams]);
+  const [examId, setExamId] = useState<string>("");
+  const selected = examId || published[0]?.examId || "";
+  const perf = useSchoolQuery(api.reports.examPerformance, selected ? { examId: selected as Id<"exams"> } : "skip");
+  if (exams === undefined || (selected && perf === undefined)) return <Card className="p-6"><p className="text-sm text-ink-muted">Loading examination results…</p></Card>;
+  if (!selected || !perf) return <Card><EmptyState title="No published examination results yet" description="Results appear here once an examination's results are published." /></Card>;
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center gap-3">
+        <Select aria-label="Examination" value={selected} onChange={(e) => setExamId(e.target.value)} className="w-64">{published.map((e) => <option key={e.examId} value={e.examId}>{e.name}</option>)}</Select>
+        <p className="text-sm text-ink-muted">{perf.students} students · average <span className="font-semibold text-ink">{perf.averagePercentage === null ? "—" : formatPercent(perf.averagePercentage, 1)}</span> · pass rate <span className="font-semibold text-ink">{perf.passRate === null ? "—" : formatPercent(perf.passRate, 1)}</span></p>
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <ChartCard title="Average by section" description="Percentage of total marks">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={perf.sections.map((x) => ({ name: x.section, average: x.averagePercentage ?? 0 }))} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid vertical={false} stroke={CHART_GRID} />
+              <XAxis dataKey="name" {...axisProps} />
+              <YAxis domain={[0, 100]} {...axisProps} tickFormatter={pctTick} width={46} />
+              <Tooltip content={<ChartTooltip format={(v) => `${v.toFixed(1)}%`} />} cursor={barCursor} />
+              <Bar dataKey="average" name="Average" fill={CHART.single} radius={[4, 4, 0, 0]} maxBarSize={36} />
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
+        <Card>
+          <CardHeader title="Subjects" description="Average and pass rate per subject" />
+          <div className="p-5">
+            <DataTable rows={perf.subjects} getRowId={(x) => x.subjectId} empty={<EmptyState title="No subject results" />}
+              columns={[
+                { key: "s", header: "Subject", primary: true, cell: (x) => x.subject },
+                { key: "a", header: "Average", align: "right", cell: (x) => (x.averagePercentage === null ? "—" : formatPercent(x.averagePercentage, 1)) },
+                { key: "p", header: "Pass rate", align: "right", cell: (x) => (x.passRate === null ? "—" : formatPercent(x.passRate, 1)) },
+                { key: "n", header: "Students", align: "right", cell: (x) => x.students },
+              ]} />
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function DemoExamReport() {
   const [examId, setExamId] = useState<string | undefined>(undefined);
   const q = useQuery(() => services.reports.getExamPerformance(examId), [examId]);
   return (
@@ -750,6 +759,14 @@ function ExamReport() {
 }
 
 function AcademicReport() {
+  const { dataSource } = useSession();
+  if (dataSource === "live") {
+    return <Card><EmptyState title="Academic trend not available yet" description="The exam-over-exam subject trend is not calculated for live school data yet. Use Examination performance for published results." /></Card>;
+  }
+  return <DemoAcademicReport />;
+}
+
+function DemoAcademicReport() {
   const q = useQuery(() => services.reports.getAcademicTrend(), []);
   const subjects = ["Mathematics", "Science", "English", "Computer Science", "Social Science", "Hindi"];
   return (

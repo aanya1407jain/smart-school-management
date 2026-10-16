@@ -6,6 +6,7 @@ import { services } from "@/lib/services";
 import { useQuery, type QueryState } from "@/lib/hooks/use-query";
 import { useSchoolQuery } from "@/lib/convex/membership";
 import { api } from "@convex/_generated/api";
+import type { FunctionReturnType } from "convex/server";
 import { useSession } from "@/features/auth/session-provider";
 import { Button, CardHeader, GlassCard, Card, QueryView, StatCard, StatusBadge, ProgressBar, EmptyState, LinkButton } from "@/components/ui";
 import { ChartCard, ChartTooltip, axisProps } from "@/components/charts/chart-card";
@@ -29,84 +30,57 @@ export function AdminDashboard() {
   const { user, dataSource } = useSession();
   const live = dataSource === "live";
 
-  // Live Convex query
+  // Live: one server aggregate from the school's records. Sections the caller may not see come back null.
   const liveData = useSchoolQuery(api.reports.adminDashboard, live ? {} : "skip");
 
-  // Demo fallback query
-  const q = useQuery(() => (live ? Promise.resolve(null as any) : services.dashboard.getAdminDashboard()), [live]);
+  // Demo data
+  const q = useQuery(() => services.dashboard.getAdminDashboard(), [live], { enabled: !live });
 
   const adaptedLive = useMemo(() => {
-    if (!liveData) return undefined;
-    const today = todayISO();
-    const attDate = liveData.latestAttendanceDate ?? today;
-    const attPct = liveData.attendancePercentage ?? 100;
-    const sectionsCount = liveData.fees.feeByClass.length || 1;
-
+    if (!liveData?.overview) return undefined;
+    const o = liveData.overview;
+    const f = liveData.fees;
+    const today = liveData.today;
     return {
-      school: {
-        name: liveData.school.name,
-        shortName: liveData.school.shortName,
-        code: liveData.school.code,
-      },
+      school: { ...liveData.school },
       stats: {
-        students: liveData.studentCount,
-        sections: sectionsCount,
-        teachers: liveData.teacherCount,
-        teachersOnLeave: 0,
-        attendance: {
-          date: attDate,
-          isToday: attDate === today,
-          percentage: attPct,
-          absent: 0,
-          marked: liveData.attendancePercentage !== null ? 1 : 0,
-          totalSections: sectionsCount,
-          delta: null,
-        },
+        students: o.students,
+        sections: o.sections,
+        teachers: o.teachers,
+        teachersOnLeave: o.teachersOnLeave,
+        attendance: o.attendance ?? { date: today, isToday: true, percentage: null, absent: 0, marked: 0, totalSections: o.sections, delta: null },
         fees: {
-          outstanding: liveData.fees.totalOutstandingMinor / 100,
-          overdue: liveData.fees.totalOverdueMinor / 100,
-          overdueStudents: liveData.fees.overdueStudentsCount,
-          collected: liveData.fees.totalCollectedMinor / 100,
-          collectionRate: liveData.fees.feeCollectionRate,
+          outstanding: (f?.outstandingMinor ?? 0) / 100,
+          overdue: (f?.overdueMinor ?? 0) / 100,
+          overdueStudents: f?.overdueStudents ?? 0,
+          collected: (f?.collectedMinor ?? 0) / 100,
+          collectionRate: f?.collectionRate ?? 0,
         },
       },
-      attendanceTrend: [
-        { date: attDate, percentage: attPct },
-      ],
-      feeByClass: liveData.fees.feeByClass.map((c) => ({
-        name: c.name,
-        collected: c.collected / 100,
-        outstanding: c.outstanding / 100,
+      attendanceTrend: o.attendanceTrend.filter((p) => p.percentage !== null).map((p) => ({ date: p.date, percentage: p.percentage as number })),
+      feeByClass: (f?.byClass ?? []).map((c) => ({ name: c.name, collected: c.collectedMinor / 100, outstanding: c.outstandingMinor / 100 })),
+      performance: o.performance,
+      upcomingExams: o.upcomingExams.map((e) => ({ id: e.examId as string, name: e.name, status: e.status, startDate: e.startDate, endDate: e.endDate, classCount: e.classCount, paperCount: e.paperCount, marksProgress: null as number | null })),
+      notices: o.notices.map((n) => ({
+        id: n.noticeId as string, title: n.title, body: n.body, type: n.type, priority: n.priority, publishDate: n.publishDate, eventDate: n.eventDate,
+        audienceLabel: n.audienceLabel, status: "published" as const, audience: { scope: "school" as const }, createdBy: "",
       })),
-      performance: { examName: null, rows: [] },
-      upcomingExams: [],
-      notices: liveData.recentNotices.map((n) => ({
-        id: n.id,
-        title: n.title,
-        type: n.type as any,
-        priority: n.priority as any,
-        publishDate: n.publishDate,
-        eventDate: null,
-        audienceLabel: n.audienceKind === "all" ? "School-wide" : `Audience: ${n.audienceKind}`,
-        body: "",
-        createdBy: "",
-        status: "published" as const,
-        audience: { scope: "all" as const },
-      })),
-      tasks: { unmarkedToday: 0, pendingLeave: 0, isSchoolDay: true },
+      tasks: o.tasks,
     };
   }, [liveData]);
 
   const queryState = useMemo<QueryState<AdminDashboardData>>(
-    () => ({
-      isLoading: live ? liveData === undefined : q.isLoading,
-      isRefreshing: false,
-      data: (live ? adaptedLive : q.data) as AdminDashboardData,
-      error: live ? null : q.error,
-      refetch: live ? () => {} : q.refetch,
-    }),
-    [live, liveData, adaptedLive, q.isLoading, q.data, q.error, q.refetch]
+    () => (live
+      ? { isLoading: liveData === undefined, isRefreshing: false, data: adaptedLive as AdminDashboardData | undefined, error: null, refetch: () => {} }
+      : q),
+    [live, liveData, adaptedLive, q],
   );
+
+  if (live && liveData && !liveData.academicYear) {
+    return <Card><EmptyState title="No current academic year" description="Set the current academic year in Academics to see the dashboard." action={<LinkButton href="/admin/academics?tab=years">Open Academics</LinkButton>} /></Card>;
+  }
+  // A member with finance access only (no school-wide reports) sees just the fee figures.
+  if (live && liveData && !liveData.overview) return <FinanceOnlyDashboard data={liveData} />;
 
   return (
     <QueryView query={queryState}>
@@ -259,5 +233,25 @@ export function AdminDashboard() {
         );
       }}
     </QueryView>
+  );
+}
+
+function FinanceOnlyDashboard({ data }: { data: FunctionReturnType<typeof api.reports.adminDashboard> }) {
+  const f = data.fees;
+  return (
+    <div className="space-y-6">
+      <div>
+        <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-plum">{formatLongDate(data.today)}</p>
+        <h1 className="mt-1 text-[28px] font-semibold text-sapphire">Fees · {data.school.name}</h1>
+      </div>
+      {!f ? <Card><EmptyState title="Nothing to show" description="Your account has no dashboard figures." /></Card> : (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <StatCard label="Collected" value={formatCurrency(f.collectedMinor / 100)} icon={<Wallet className="h-5 w-5" />} hint={`${formatPercent(f.collectionRate, 1)} of net fees`} href="/admin/fees" />
+          <StatCard label="Outstanding" value={formatCurrency(f.outstandingMinor / 100)} icon={<Wallet className="h-5 w-5" />} tone="sapphire" href="/admin/fees?tab=balances" />
+          <StatCard label="Overdue" value={formatCurrency(f.overdueMinor / 100)} icon={<AlertCircle className="h-5 w-5" />} tone="lavender" hint={`${f.overdueStudents} students`} href="/admin/fees?tab=balances&standing=overdue" />
+          <StatCard label="Net fees" value={formatCurrency(f.netMinor / 100)} icon={<Wallet className="h-5 w-5" />} tone="purple" />
+        </div>
+      )}
+    </div>
   );
 }

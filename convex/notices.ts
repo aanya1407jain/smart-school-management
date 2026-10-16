@@ -1,455 +1,333 @@
 /**
- * Notices and school events backend API.
+ * Notice board (A-05): draft → published → archived.
  *
- * Implements audience targeting (school-wide, role-specific, class-specific,
- * and section-specific) ensuring notices only reach intended recipients.
+ * Who may write:
+ *  - `notices:manage` (admin): any audience (whole school, roles, classes, sections).
+ *  - a teacher: CLASS-SPECIFIC notices only — audience `sections` limited to
+ *    sections in their own scope (subject assignments ∪ class-teacher
+ *    sections). Teachers edit / publish / archive only notices they created.
+ * Who may read:
+ *  - drafts and archived notices: their author and `notices:manage` only;
+ *  - published notices: members in the audience, from `publishDate` until
+ *    `expiresOn` (students/guardians: studentPortal.myNotices; staff: `feed`).
+ * Publishing notifies the audience ONCE (in-app; dedupe key per notice), at
+ * publish time when the notice is already visible (publishDate ≤ today in the
+ * school's timezone), otherwise by a scheduled job on its publish date.
+ *
+ * Lifecycle: draft → published → archived, and archived → restored to DRAFT
+ * (republishing is required to show it again).
+ * Notices are never hard-deleted (no retention rule permits it yet).
  */
-import { v } from "convex/values";
+import { v, type Infer } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
+import { internalMutation, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { schoolMutation, schoolQuery } from "./core/functions";
-import { getInSchool, requirePermission, teacherSectionIds } from "./core/authorization";
-import { invalid, notFound } from "./core/errors";
-import {
-  assertIsoDate,
-  assertNonEmpty,
-  vAudience,
-  vEventKind,
-  vNoticeStatus,
-  vNoticeType,
-  vPriority,
-} from "./core/validators";
+import type { Actor } from "./core/actor";
+import { enrollmentFor, getCurrentAcademicYearId, getInSchool, getSchoolSettings, hasPermission, linkedStudentIds, requireAnyPermission, teacherSectionIds } from "./core/authorization";
+import { conflict, forbidden, invalid, notFound } from "./core/errors";
+import { assertIsoDate, assertNonEmpty, vAudience, vNoticeType, vPriority } from "./core/validators";
+import { todayIn } from "./model/calendar";
 import { writeAudit } from "./model/audit";
-import { notifyUsers, userIdsForStudent } from "./model/notifications";
-import { currentYear } from "./model/studentRecords";
+import { notifyUsers, userIdsForSection } from "./model/notifications";
 
-// ------------------------------------------------------------------ helpers
+type Ctx = QueryCtx & { actor: Actor };
+export type Audience = Infer<typeof vAudience>;
+const MAX_LIST = 200;
+const MAX_RECIPIENTS = 5000;
 
-type Scope =
-  | { isAdmin: true }
-  | { isAdmin: false; role: "teacher"; sectionIds: Set<Id<"sections">>; classIds: Set<Id<"classes">> }
-  | { isAdmin: false; role: "student"; sectionIds: Set<Id<"sections">>; classIds: Set<Id<"classes">> };
-
-async function getCallerScope(ctx: any): Promise<Scope> {
-  const actor = ctx.actor;
-  if (actor.role === "admin") {
-    return { isAdmin: true };
-  }
-
-  const year = await currentYear(ctx, actor.schoolId);
-
-  if (actor.role === "teacher" && actor.teacherId) {
-    const secIds = year ? await teacherSectionIds(ctx, actor.teacherId, year._id) : new Set<Id<"sections">>();
-    const classIds = new Set<Id<"classes">>();
-    for (const sid of secIds) {
-      const s = await ctx.db.get(sid);
-      if (s) classIds.add(s.classId);
-    }
-    return {
-      isAdmin: false,
-      role: "teacher",
-      sectionIds: secIds,
-      classIds,
-    };
-  }
-
-  // Student or guardian
-  const studentIds: Id<"students">[] = [];
-  if (actor.studentId) studentIds.push(actor.studentId);
-  if (actor.guardianId) {
-    const links = await ctx.db
-      .query("guardianLinks")
-      .withIndex("by_guardian", (q: any) => q.eq("guardianId", actor.guardianId))
-      .collect();
-    for (const l of links) {
-      if (l.schoolId === actor.schoolId) studentIds.push(l.studentId);
-    }
-  }
-
-  const studentClassIds = new Set<Id<"classes">>();
-  const studentSectionIds = new Set<Id<"sections">>();
-  if (year) {
-    for (const sid of studentIds) {
-      const enr = await ctx.db
-        .query("enrollments")
-        .withIndex("by_student_year", (q: any) => q.eq("studentId", sid).eq("academicYearId", year._id))
-        .first();
-      if (enr && enr.status === "active") {
-        studentClassIds.add(enr.classId);
-        studentSectionIds.add(enr.sectionId);
-      }
-    }
-  }
-
-  return {
-    isAdmin: false,
-    role: "student",
-    classIds: studentClassIds,
-    sectionIds: studentSectionIds,
-  };
+async function today(ctx: Ctx) {
+  return todayIn((await ctx.db.get(ctx.actor.schoolId))!.timezone);
 }
 
-function noticeMatchesAudience(notice: Doc<"notices">, scope: Scope): boolean {
-  if (scope.isAdmin) return true;
-
-  const a = notice.audience;
-  if (a.kind === "all") return true;
-
-  if (a.kind === "roles") {
-    return a.roles.includes(scope.role);
+/** Validate an audience against the school and (for teachers) their own sections. */
+export async function validateAudience(ctx: Ctx, audience: Audience): Promise<Audience> {
+  const manager = hasPermission(ctx.actor, "notices:manage");
+  if (audience.kind === "all" || audience.kind === "roles") {
+    if (!manager) throw forbidden("Teachers can only address notices to their own sections.");
+    if (audience.kind === "roles" && audience.roles.length === 0) throw invalid("Choose at least one role.", { audience: "Empty" });
+    return audience;
   }
-
-  if (a.kind === "classes") {
-    return a.classIds.some((cid) => scope.classIds.has(cid));
+  if (audience.kind === "classes") {
+    if (!manager) throw forbidden("Teachers can only address notices to their own sections.");
+    if (audience.classIds.length === 0) throw invalid("Choose at least one class.", { audience: "Empty" });
+    for (const id of audience.classIds) await getInSchool(ctx, "classes", id, "Class");
+    return { kind: "classes", classIds: [...new Set(audience.classIds)] };
   }
-
-  if (a.kind === "sections") {
-    return a.sectionIds.some((sid) => scope.sectionIds.has(sid));
+  if (audience.sectionIds.length === 0) throw invalid("Choose at least one section.", { audience: "Empty" });
+  const scope = !manager && ctx.actor.teacherId ? await teacherSectionIds(ctx, ctx.actor.teacherId, await getCurrentAcademicYearId(ctx, ctx.actor.schoolId)) : null;
+  for (const id of audience.sectionIds) {
+    await getInSchool(ctx, "sections", id, "Section");
+    if (!manager && !scope?.has(id)) throw forbidden("You can only address notices to sections you teach.");
   }
+  return { kind: "sections", sectionIds: [...new Set(audience.sectionIds)] };
+}
 
+/** May this member see a published notice with this audience? */
+export async function inAudience(ctx: QueryCtx, actor: Actor, audience: Audience): Promise<boolean> {
+  if (audience.kind === "all") return true;
+  if (audience.kind === "roles") return audience.roles.includes(actor.role);
+  const yearId = await getCurrentAcademicYearId(ctx, actor.schoolId);
+  const sectionIds = new Set<Id<"sections">>();
+  if (actor.teacherId) (await teacherSectionIds(ctx, actor.teacherId, yearId)).forEach((s) => sectionIds.add(s));
+  for (const studentId of await linkedStudentIds(ctx, actor)) {
+    const e = await enrollmentFor(ctx, studentId, yearId);
+    if (e && e.status === "active") sectionIds.add(e.sectionId);
+  }
+  if (audience.kind === "sections") return audience.sectionIds.some((s) => sectionIds.has(s));
+  for (const id of sectionIds) {
+    const s = await ctx.db.get(id);
+    if (s && audience.classIds.includes(s.classId)) return true;
+  }
   return false;
 }
 
-// ------------------------------------------------------------------ notices queries & mutations
+/** Active user ids of the audience (bounded). */
+async function recipients(ctx: MutationCtx, schoolId: Id<"schools">, audience: Audience): Promise<Id<"users">[]> {
+  const members = await ctx.db.query("schoolMemberships").withIndex("by_school_role", (q) => q.eq("schoolId", schoolId)).take(MAX_RECIPIENTS);
+  const active = members.filter((m) => m.status === "active" && m.userId);
+  if (audience.kind === "all") return active.map((m) => m.userId!);
+  if (audience.kind === "roles") return active.filter((m) => audience.roles.includes(m.role)).map((m) => m.userId!);
+  const yearId = await getCurrentAcademicYearId(ctx, schoolId);
+  let sectionIds: Id<"sections">[] = [];
+  if (audience.kind === "sections") sectionIds = audience.sectionIds;
+  else {
+    for (const classId of audience.classIds) {
+      const rows = await ctx.db.query("sections").withIndex("by_class_year", (q) => q.eq("classId", classId).eq("academicYearId", yearId)).collect();
+      sectionIds.push(...rows.filter((s) => s.schoolId === schoolId).map((s) => s._id));
+    }
+  }
+  const ids: Id<"users">[] = [];
+  for (const id of sectionIds) ids.push(...(await userIdsForSection(ctx, schoolId, id)));
+  // Teachers of those sections.
+  for (const m of active.filter((x) => x.teacherId)) {
+    const scope = await teacherSectionIds(ctx, m.teacherId!, yearId);
+    if (sectionIds.some((s) => scope.has(s))) ids.push(m.userId!);
+  }
+  return ids;
+}
 
-export const list = schoolQuery({
+function view(n: Doc<"notices">) {
+  return { noticeId: n._id, title: n.title, body: n.body, type: n.type, priority: n.priority, audience: n.audience, status: n.status, publishDate: n.publishDate, expiresOn: n.expiresOn ?? null, eventDate: n.eventDate ?? null, createdByUserId: n.createdByUserId, publishedAt: n.publishedAt ?? null };
+}
+
+/** `view` plus who wrote it and a readable audience (class / section names resolved inside the school). */
+async function richView(ctx: Ctx, n: Doc<"notices">) {
+  const author = await ctx.db.get(n.createdByUserId);
+  return { ...view(n), authorName: author?.name ?? null, audienceLabel: await audienceLabel(ctx, n.audience) };
+}
+
+export async function audienceLabel(ctx: Ctx, audience: Audience): Promise<string> {
+  if (audience.kind === "all") return "Whole school";
+  if (audience.kind === "roles") {
+    const names: Record<string, string> = { admin: "Administrators", teacher: "Teachers", student: "Students & guardians" };
+    return audience.roles.map((r) => names[r] ?? r).join(", ");
+  }
+  const names: string[] = [];
+  if (audience.kind === "classes") {
+    for (const id of audience.classIds) { const c = await ctx.db.get(id); if (c && c.schoolId === ctx.actor.schoolId) names.push(c.name); }
+  } else {
+    for (const id of audience.sectionIds) { const s = await ctx.db.get(id); if (s && s.schoolId === ctx.actor.schoolId) names.push(`Class ${s.displayName}`); }
+  }
+  return names.join(", ") || "—";
+}
+
+/** Epoch ms of 00:00 on `date` in `timezone` (to schedule the publish-date notification). */
+export function startOfDayMs(date: string, timezone: string): number {
+  const utc = Date.parse(`${date}T00:00:00Z`);
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: timezone, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).formatToParts(utc);
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value);
+  const wall = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second"));
+  return utc - (wall - utc);
+}
+
+/** Notify a published notice's audience once (dedupe key per notice). */
+async function notifyAudience(ctx: MutationCtx, n: Doc<"notices">, exceptUserId: Id<"users"> | null) {
+  const settings = await getSchoolSettings(ctx, n.schoolId);
+  if (!settings.notifications.noticeAlerts) return 0;
+  const users = (await recipients(ctx, n.schoolId, n.audience)).filter((u) => u !== exceptUserId);
+  return await notifyUsers(ctx, n.schoolId, users, {
+    type: "notice", title: n.priority === "normal" ? "New notice" : "Important notice", message: n.title, entity: { table: "notices", id: n._id }, dedupeKey: `notice.published:${n._id}`,
+  });
+}
+
+async function editable(ctx: Ctx, noticeId: Id<"notices">) {
+  requireAnyPermission(ctx.actor, ["notices:manage", "area:teacher"]);
+  const n = await getInSchool(ctx, "notices", noticeId, "Notice");
+  if (!hasPermission(ctx.actor, "notices:manage") && n.createdByUserId !== ctx.actor.userId) throw forbidden("You can only change notices you wrote.");
+  return n;
+}
+
+function validateDates(publishDate: string, expiresOn?: string, eventDate?: string) {
+  assertIsoDate(publishDate, "publishDate");
+  if (expiresOn) {
+    assertIsoDate(expiresOn, "expiresOn");
+    if (expiresOn < publishDate) throw invalid("A notice cannot expire before it is published.", { expiresOn: "Before publish date" });
+  }
+  if (eventDate) assertIsoDate(eventDate, "eventDate");
+}
+
+// ================================================================ writes
+export const createDraft = schoolMutation({
   args: {
-    status: v.optional(vNoticeStatus),
-    type: v.optional(vNoticeType),
-    limit: v.optional(v.number()),
+    title: v.string(), body: v.string(), type: vNoticeType, priority: vPriority, audience: vAudience,
+    publishDate: v.string(), expiresOn: v.optional(v.string()), eventDate: v.optional(v.string()),
   },
-  handler: async (ctx, args) => {
-    const scope = await getCallerScope(ctx);
-    const take = Math.min(Math.max(args.limit ?? 50, 1), 100);
-
-    let rows: Doc<"notices">[];
-    if (scope.isAdmin) {
-      const status = args.status ?? "published";
-      rows = await ctx.db
-        .query("notices")
-        .withIndex("by_school_status_publish", (q) => q.eq("schoolId", ctx.actor.schoolId).eq("status", status))
-        .order("desc")
-        .take(take);
-    } else {
-      const today = new Date().toISOString().slice(0, 10);
-      rows = await ctx.db
-        .query("notices")
-        .withIndex("by_school_status_publish", (q) =>
-          q.eq("schoolId", ctx.actor.schoolId).eq("status", "published").lte("publishDate", today),
-        )
-        .order("desc")
-        .take(take);
-
-      rows = rows.filter((n) => !n.expiresOn || n.expiresOn >= today);
-    }
-
-    if (args.type) {
-      rows = rows.filter((n) => n.type === args.type);
-    }
-
-    return rows.filter((n) => noticeMatchesAudience(n, scope));
-  },
-});
-
-export const get = schoolQuery({
-  args: { noticeId: v.id("notices") },
-  handler: async (ctx, { noticeId }) => {
-    const notice = await getInSchool(ctx, "notices", noticeId, "Notice");
-    const scope = await getCallerScope(ctx);
-
-    if (!noticeMatchesAudience(notice, scope)) {
-      throw notFound("Notice");
-    }
-
-    if (!scope.isAdmin && notice.status !== "published") {
-      throw notFound("Notice");
-    }
-
-    return notice;
-  },
-});
-
-export const create = schoolMutation({
-  args: {
-    title: v.string(),
-    body: v.string(),
-    type: vNoticeType,
-    priority: vPriority,
-    audience: vAudience,
-    status: vNoticeStatus,
-    publishDate: v.string(),
-    expiresOn: v.optional(v.string()),
-    eventDate: v.optional(v.string()),
-  },
-  handler: async (ctx, args) => {
-    requirePermission(ctx.actor, "notices:manage");
-    const title = assertNonEmpty(args.title, "title", 200);
-    const body = assertNonEmpty(args.body, "body", 5000);
-    assertIsoDate(args.publishDate, "publishDate");
-    if (args.expiresOn) assertIsoDate(args.expiresOn, "expiresOn");
-    if (args.eventDate) assertIsoDate(args.eventDate, "eventDate");
-
+  handler: async (ctx, a) => {
+    requireAnyPermission(ctx.actor, ["notices:manage", "area:teacher"]);
+    const audience = await validateAudience(ctx, a.audience);
+    validateDates(a.publishDate, a.expiresOn, a.eventDate);
     const noticeId = await ctx.db.insert("notices", {
-      schoolId: ctx.actor.schoolId,
-      title,
-      body,
-      type: args.type,
-      priority: args.priority,
-      audience: args.audience,
-      status: args.status,
-      publishDate: args.publishDate,
-      expiresOn: args.expiresOn,
-      eventDate: args.eventDate,
-      createdByUserId: ctx.actor.userId,
+      schoolId: ctx.actor.schoolId, title: assertNonEmpty(a.title, "title", 150), body: assertNonEmpty(a.body, "body", 5000),
+      type: a.type, priority: a.priority, audience, status: "draft", publishDate: a.publishDate,
+      ...(a.expiresOn ? { expiresOn: a.expiresOn } : {}), ...(a.eventDate ? { eventDate: a.eventDate } : {}), createdByUserId: ctx.actor.userId,
     });
-
-    await writeAudit(ctx, {
-      schoolId: ctx.actor.schoolId,
-      actor: ctx.actor,
-      action: "notice.created",
-      entity: { table: "notices", id: noticeId },
-      summary: `Created notice "${title}" (${args.status}, priority ${args.priority})`,
-      metadata: { audience: args.audience, type: args.type },
-    });
-
-    if (args.status === "published" && (args.priority === "urgent" || args.priority === "high")) {
-      await dispatchNoticeNotifications(ctx, noticeId, title, body, args.audience);
-    }
-
+    await writeAudit(ctx, { schoolId: ctx.actor.schoolId, actor: ctx.actor, action: "notice.created", entity: { table: "notices", id: noticeId }, summary: `Drafted notice "${a.title.trim()}"` });
     return { noticeId };
   },
 });
 
+/** Edit a draft (published notices are immutable; archive and re-issue instead). */
 export const update = schoolMutation({
   args: {
-    noticeId: v.id("notices"),
-    title: v.optional(v.string()),
-    body: v.optional(v.string()),
-    type: v.optional(vNoticeType),
-    priority: v.optional(vPriority),
-    audience: v.optional(vAudience),
-    status: v.optional(vNoticeStatus),
-    publishDate: v.optional(v.string()),
-    expiresOn: v.optional(v.string()),
-    eventDate: v.optional(v.string()),
+    noticeId: v.id("notices"), title: v.optional(v.string()), body: v.optional(v.string()), type: v.optional(vNoticeType), priority: v.optional(vPriority),
+    audience: v.optional(vAudience), publishDate: v.optional(v.string()), expiresOn: v.optional(v.string()), eventDate: v.optional(v.string()),
   },
-  handler: async (ctx, args) => {
-    requirePermission(ctx.actor, "notices:manage");
-    const notice = await getInSchool(ctx, "notices", args.noticeId, "Notice");
-
+  handler: async (ctx, a) => {
+    const n = await editable(ctx, a.noticeId);
+    if (n.status !== "draft") throw conflict("Only drafts can be edited.");
     const patch: Partial<Doc<"notices">> = {};
-    if (args.title !== undefined) patch.title = assertNonEmpty(args.title, "title", 200);
-    if (args.body !== undefined) patch.body = assertNonEmpty(args.body, "body", 5000);
-    if (args.type !== undefined) patch.type = args.type;
-    if (args.priority !== undefined) patch.priority = args.priority;
-    if (args.audience !== undefined) patch.audience = args.audience;
-    if (args.status !== undefined) patch.status = args.status;
-    if (args.publishDate !== undefined) patch.publishDate = assertIsoDate(args.publishDate, "publishDate");
-    if (args.expiresOn !== undefined) patch.expiresOn = args.expiresOn ? assertIsoDate(args.expiresOn, "expiresOn") : undefined;
-    if (args.eventDate !== undefined) patch.eventDate = args.eventDate ? assertIsoDate(args.eventDate, "eventDate") : undefined;
-
-    await ctx.db.patch(notice._id, patch);
-
-    await writeAudit(ctx, {
-      schoolId: ctx.actor.schoolId,
-      actor: ctx.actor,
-      action: "notice.updated",
-      entity: { table: "notices", id: notice._id },
-      summary: `Updated notice "${patch.title ?? notice.title}"`,
-      metadata: { fields: Object.keys(patch) },
-    });
-
+    if (a.title !== undefined) patch.title = assertNonEmpty(a.title, "title", 150);
+    if (a.body !== undefined) patch.body = assertNonEmpty(a.body, "body", 5000);
+    if (a.type !== undefined) patch.type = a.type;
+    if (a.priority !== undefined) patch.priority = a.priority;
+    if (a.audience !== undefined) patch.audience = await validateAudience(ctx, a.audience);
+    const publishDate = a.publishDate ?? n.publishDate;
+    // "" clears an optional date.
+    const expiresOn = a.expiresOn === "" ? undefined : (a.expiresOn ?? n.expiresOn);
+    const eventDate = a.eventDate === "" ? undefined : (a.eventDate ?? n.eventDate);
+    validateDates(publishDate, expiresOn, eventDate);
+    Object.assign(patch, { publishDate, expiresOn, eventDate });
+    await ctx.db.patch(n._id, patch);
+    await writeAudit(ctx, { schoolId: ctx.actor.schoolId, actor: ctx.actor, action: "notice.updated", entity: { table: "notices", id: n._id }, summary: `Updated notice "${patch.title ?? n.title}"` });
     return { ok: true };
+  },
+});
+
+export const publish = schoolMutation({
+  args: { noticeId: v.id("notices") },
+  handler: async (ctx, { noticeId }) => {
+    const n = await editable(ctx, noticeId);
+    if (n.status === "published") return { ok: true, notified: 0, scheduled: false };
+    if (n.status === "archived") throw conflict("Restore the notice to draft before publishing it again.");
+    // Re-validate: the author's scope may have changed since the draft.
+    await validateAudience(ctx, n.audience);
+    const t = await today(ctx);
+    if (n.expiresOn && n.expiresOn < t) throw invalid("This notice has already expired; change its dates first.", { expiresOn: "In the past" });
+    await ctx.db.patch(n._id, { status: "published", publishedAt: n.publishedAt ?? Date.now() });
+    let notified = 0;
+    let scheduled = false;
+    if (n.publishDate <= t) {
+      notified = await notifyAudience(ctx, { ...n, status: "published" }, ctx.actor.userId);
+    } else {
+      const school = (await ctx.db.get(ctx.actor.schoolId))!;
+      await ctx.scheduler.runAt(startOfDayMs(n.publishDate, school.timezone), internal.notices.notifyOnPublishDate, { noticeId: n._id, exceptUserId: ctx.actor.userId });
+      scheduled = true;
+    }
+    await writeAudit(ctx, { schoolId: ctx.actor.schoolId, actor: ctx.actor, action: "notice.published", entity: { table: "notices", id: n._id }, summary: `Published notice "${n.title}"`, metadata: { notified, scheduled } });
+    return { ok: true, notified, scheduled };
+  },
+});
+
+/**
+ * Scheduled by `publish` for a future publish date: notifies the audience once
+ * the date has arrived in the school's timezone (re-checks; re-schedules in an
+ * hour if it fired early). Does nothing if the notice was archived meanwhile.
+ */
+export const notifyOnPublishDate = internalMutation({
+  args: { noticeId: v.id("notices"), exceptUserId: v.union(v.id("users"), v.null()) },
+  handler: async (ctx, { noticeId, exceptUserId }) => {
+    const n = await ctx.db.get(noticeId);
+    if (!n || n.status !== "published") return { notified: 0 };
+    const school = await ctx.db.get(n.schoolId);
+    if (!school) return { notified: 0 };
+    if (n.publishDate > todayIn(school.timezone)) {
+      await ctx.scheduler.runAfter(60 * 60 * 1000, internal.notices.notifyOnPublishDate, { noticeId, exceptUserId });
+      return { notified: 0 };
+    }
+    return { notified: await notifyAudience(ctx, n, exceptUserId) };
   },
 });
 
 export const archive = schoolMutation({
   args: { noticeId: v.id("notices") },
   handler: async (ctx, { noticeId }) => {
-    requirePermission(ctx.actor, "notices:manage");
-    const notice = await getInSchool(ctx, "notices", noticeId, "Notice");
-    await ctx.db.patch(notice._id, { status: "archived" });
-    await writeAudit(ctx, {
-      schoolId: ctx.actor.schoolId,
-      actor: ctx.actor,
-      action: "notice.archived",
-      entity: { table: "notices", id: notice._id },
-      summary: `Archived notice "${notice.title}"`,
-    });
+    const n = await editable(ctx, noticeId);
+    if (n.status === "archived") return { ok: true };
+    await ctx.db.patch(n._id, { status: "archived" });
+    await writeAudit(ctx, { schoolId: ctx.actor.schoolId, actor: ctx.actor, action: "notice.archived", entity: { table: "notices", id: n._id }, summary: `Archived notice "${n.title}"` });
     return { ok: true };
   },
 });
 
+/**
+ * Undo an archive: the notice always returns to DRAFT. It disappears from every
+ * feed until someone publishes it again (re-validating its audience and dates);
+ * a notice that was published before keeps its dedupe key, so republishing does
+ * not notify the same people twice.
+ */
 export const restore = schoolMutation({
   args: { noticeId: v.id("notices") },
   handler: async (ctx, { noticeId }) => {
-    requirePermission(ctx.actor, "notices:manage");
-    const notice = await getInSchool(ctx, "notices", noticeId, "Notice");
-    await ctx.db.patch(notice._id, { status: "published" });
-    await writeAudit(ctx, {
-      schoolId: ctx.actor.schoolId,
-      actor: ctx.actor,
-      action: "notice.restored",
-      entity: { table: "notices", id: notice._id },
-      summary: `Restored notice "${notice.title}" to published`,
-    });
-    return { ok: true };
+    const n = await editable(ctx, noticeId);
+    if (n.status !== "archived") throw conflict("Only archived notices can be restored.");
+    await ctx.db.patch(n._id, { status: "draft" });
+    await writeAudit(ctx, { schoolId: ctx.actor.schoolId, actor: ctx.actor, action: "notice.restored", entity: { table: "notices", id: n._id }, summary: `Restored notice "${n.title}" to draft` });
+    return { ok: true, status: "draft" as const };
   },
 });
 
-export const remove = schoolMutation({
+// ================================================================ reads
+/** Management list: managers see every notice; teachers see the ones they wrote. */
+export const listManaged = schoolQuery({
+  args: { status: v.optional(v.union(v.literal("draft"), v.literal("published"), v.literal("archived"))) },
+  handler: async (ctx, { status }) => {
+    requireAnyPermission(ctx.actor, ["notices:manage", "area:teacher"]);
+    const statuses = status ? [status] : (["draft", "published", "archived"] as const);
+    const out: Doc<"notices">[] = [];
+    for (const s of statuses) {
+      out.push(...(await ctx.db.query("notices").withIndex("by_school_status_publish", (q) => q.eq("schoolId", ctx.actor.schoolId).eq("status", s)).order("desc").take(MAX_LIST)));
+    }
+    const mine = hasPermission(ctx.actor, "notices:manage") ? out : out.filter((n) => n.createdByUserId === ctx.actor.userId);
+    const out2 = [];
+    for (const n of mine.sort((a, b) => b.publishDate.localeCompare(a.publishDate))) out2.push(await richView(ctx, n));
+    return out2;
+  },
+});
+
+/** Published notices addressed to the caller (any role), visible today. */
+export const feed = schoolQuery({
+  args: {},
+  handler: async (ctx) => {
+    requireAnyPermission(ctx.actor, ["notices:read", "notices:manage"]);
+    const t = await today(ctx);
+    const rows = await ctx.db.query("notices").withIndex("by_school_status_publish", (q) => q.eq("schoolId", ctx.actor.schoolId).eq("status", "published").lte("publishDate", t)).order("desc").take(MAX_LIST);
+    const out = [];
+    for (const n of rows) {
+      if (n.expiresOn && n.expiresOn < t) continue;
+      if (hasPermission(ctx.actor, "notices:manage") || (await inAudience(ctx, ctx.actor, n.audience))) out.push(await richView(ctx, n));
+    }
+    return out;
+  },
+});
+
+export const get = schoolQuery({
   args: { noticeId: v.id("notices") },
   handler: async (ctx, { noticeId }) => {
-    requirePermission(ctx.actor, "notices:manage");
-    const notice = await getInSchool(ctx, "notices", noticeId, "Notice");
-    await ctx.db.delete(notice._id);
-    await writeAudit(ctx, {
-      schoolId: ctx.actor.schoolId,
-      actor: ctx.actor,
-      action: "notice.deleted",
-      entity: { table: "notices", id: notice._id },
-      summary: `Deleted notice "${notice.title}"`,
-    });
-    return { ok: true };
+    const n = await getInSchool(ctx, "notices", noticeId, "Notice");
+    if (hasPermission(ctx.actor, "notices:manage") || n.createdByUserId === ctx.actor.userId) return await richView(ctx, n);
+    const t = await today(ctx);
+    if (n.status === "published" && n.publishDate <= t && (!n.expiresOn || n.expiresOn >= t) && (await inAudience(ctx, ctx.actor, n.audience))) return await richView(ctx, n);
+    throw notFound("Notice");
   },
 });
-
-// ------------------------------------------------------------------ events
-
-export const listEvents = schoolQuery({
-  args: {
-    startDate: v.optional(v.string()),
-    endDate: v.optional(v.string()),
-  },
-  handler: async (ctx, args) => {
-    const scope = await getCallerScope(ctx);
-    let events = await ctx.db
-      .query("events")
-      .withIndex("by_school_start", (q) => q.eq("schoolId", ctx.actor.schoolId))
-      .collect();
-
-    if (args.startDate) {
-      events = events.filter((e) => e.endDate >= args.startDate!);
-    }
-    if (args.endDate) {
-      events = events.filter((e) => e.startDate <= args.endDate!);
-    }
-
-    if (scope.isAdmin) return events;
-    return events.filter((e) => {
-      const a = e.audience;
-      if (a.kind === "all") return true;
-      if (a.kind === "roles") return a.roles.includes(scope.role);
-      if (a.kind === "classes") return a.classIds.some((cid) => scope.classIds.has(cid));
-      if (a.kind === "sections") return a.sectionIds.some((sid) => scope.sectionIds.has(sid));
-      return false;
-    });
-  },
-});
-
-export const createEvent = schoolMutation({
-  args: {
-    title: v.string(),
-    description: v.optional(v.string()),
-    kind: vEventKind,
-    startDate: v.string(),
-    endDate: v.string(),
-    audience: vAudience,
-  },
-  handler: async (ctx, args) => {
-    requirePermission(ctx.actor, "notices:manage");
-    const title = assertNonEmpty(args.title, "title", 200);
-    assertIsoDate(args.startDate, "startDate");
-    assertIsoDate(args.endDate, "endDate");
-    if (args.endDate < args.startDate) {
-      throw invalid("End date must be on or after start date");
-    }
-
-    const eventId = await ctx.db.insert("events", {
-      schoolId: ctx.actor.schoolId,
-      title,
-      description: args.description,
-      kind: args.kind,
-      startDate: args.startDate,
-      endDate: args.endDate,
-      audience: args.audience,
-      createdByUserId: ctx.actor.userId,
-    });
-
-    await writeAudit(ctx, {
-      schoolId: ctx.actor.schoolId,
-      actor: ctx.actor,
-      action: "event.created",
-      entity: { table: "events", id: eventId },
-      summary: `Created ${args.kind} event "${title}" (${args.startDate} – ${args.endDate})`,
-    });
-
-    return { eventId };
-  },
-});
-
-// ------------------------------------------------------------------ notification dispatcher helper
-
-async function dispatchNoticeNotifications(
-  ctx: any,
-  noticeId: Id<"notices">,
-  title: string,
-  body: string,
-  audience: Doc<"notices">["audience"],
-) {
-  const schoolId = ctx.actor.schoolId;
-  const userIds = new Set<Id<"users">>();
-
-  if (audience.kind === "all") {
-    for (const r of ["admin", "teacher", "student"] as const) {
-      const ms = await ctx.db
-        .query("schoolMemberships")
-        .withIndex("by_school_role", (q: any) => q.eq("schoolId", schoolId).eq("role", r))
-        .collect();
-      for (const m of ms) {
-        if (m.status === "active" && m.userId) userIds.add(m.userId);
-      }
-    }
-  } else if (audience.kind === "roles") {
-    for (const r of audience.roles) {
-      const ms = await ctx.db
-        .query("schoolMemberships")
-        .withIndex("by_school_role", (q: any) => q.eq("schoolId", schoolId).eq("role", r))
-        .collect();
-      for (const m of ms) {
-        if (m.status === "active" && m.userId) userIds.add(m.userId);
-      }
-    }
-  } else if (audience.kind === "classes" || audience.kind === "sections") {
-    const year = await currentYear(ctx, schoolId);
-    if (year) {
-      const enrollments = (
-        await ctx.db
-          .query("enrollments")
-          .withIndex("by_school_year", (q: any) => q.eq("schoolId", schoolId).eq("academicYearId", year._id))
-          .collect()
-      ).filter((e: any) => e.status === "active");
-
-      const matchedEnrollments =
-        audience.kind === "classes"
-          ? enrollments.filter((e: any) => audience.classIds.includes(e.classId))
-          : enrollments.filter((e: any) => audience.sectionIds.includes(e.sectionId));
-
-      for (const e of matchedEnrollments) {
-        const studentAndGuardianUserIds = await userIdsForStudent(ctx, schoolId, e.studentId);
-        for (const uid of studentAndGuardianUserIds) {
-          userIds.add(uid);
-        }
-      }
-    }
-  }
-
-  if (userIds.size > 0) {
-    await notifyUsers(ctx, schoolId, userIds, {
-      type: "notice",
-      title: `Notice: ${title}`,
-      message: body.slice(0, 140),
-      href: "/student/notices",
-      entity: { table: "notices", id: noticeId },
-    });
-  }
-}

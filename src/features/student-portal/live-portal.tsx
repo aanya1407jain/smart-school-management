@@ -9,21 +9,17 @@
  */
 import { Component, type ReactNode } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { Bell, CalendarCheck2, CheckCheck, GraduationCap, Hash, IdCard, Lock, School, UserRound, UsersRound } from "lucide-react";
+import { Bell, CalendarCheck2, GraduationCap, Hash, IdCard, Lock, School, UserRound, UsersRound } from "lucide-react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
-import { useSchoolMutation, useSchoolQuery } from "@/lib/convex/membership";
+import { useSchoolQuery } from "@/lib/convex/membership";
 import { getAppError } from "@/lib/convex/errors";
 import { useActiveStudentId, useSession, type DataSource } from "@/features/auth/session-provider";
 import { PasswordCard } from "@/features/profile/profile-page";
-import { CategoryIcon } from "@/features/notifications/category-icon";
-import { Badge, Button, Card, CardBody, CardHeader, EmptyState, LoadingState, PageHeader, ProgressRing, StatCard, StatusBadge, useToast } from "@/components/ui";
+import { Badge, Button, Card, CardBody, CardHeader, EmptyState, LoadingState, PageHeader, ProgressRing, StatCard, StatusBadge } from "@/components/ui";
 import { ROLE_LABELS } from "@/lib/permissions";
-import { formatDate, formatDateTime, relativeTime, todayISO } from "@/lib/utils/dates";
+import { formatDate, todayISO } from "@/lib/utils/dates";
 import { LiveFeesPanel, LiveHomeworkList, LiveNoticesList, LiveResultsList, LiveTimetableGrid } from "./live-records";
-import { cn } from "@/lib/utils/cn";
-import type { NotificationCategory } from "@/types/domain";
 
 // ------------------------------------------------------------------ switch
 /** Renders the demo-data page or the live (Convex) page for the current session. */
@@ -32,8 +28,16 @@ export function PortalPage({ demo, live }: { demo: ReactNode; live: ReactNode })
   return <>{(dataSource as DataSource | null) === "live" ? <LiveBoundary>{live}</LiveBoundary> : demo}</>;
 }
 
+/**
+ * For screens that handle demo and live data themselves: in live mode, server
+ * errors become an in-page message (LiveBoundary) instead of a crashed screen.
+ */
+export function LiveAware({ children }: { children: ReactNode }) {
+  return <PortalPage demo={children} live={children} />;
+}
+
 /** Server errors from live queries become an in-page message instead of a crashed screen. */
-class LiveBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+export class LiveBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null };
   static getDerivedStateFromError(error: Error) { return { error }; }
   render() {
@@ -296,45 +300,6 @@ export function LiveMyAttendance() {
 }
 
 // ------------------------------------------------------------------ notifications
-const CATEGORY: Record<string, NotificationCategory> = {
-  attendance: "attendance", fees: "fees", homework: "homework", examination: "examination", notice: "notice", general: "general", account: "general",
-};
-
-export function LiveNotifications() {
-  const router = useRouter();
-  const { toast } = useToast();
-  const items = useSchoolQuery(api.notifications.list, { limit: 100 });
-  const markRead = useSchoolMutation(api.notifications.markRead);
-  const markAll = useSchoolMutation(api.notifications.markAllRead);
-  if (items === undefined) return <LoadingState variant="table" label="Loading notifications" />;
-  const unread = items.filter((n) => !n.isRead).length;
-  return (
-    <div className="mx-auto max-w-4xl" data-testid="live-notifications">
-      <PageHeader
-        title="Notifications"
-        description={unread ? `You have ${unread} unread notification${unread > 1 ? "s" : ""}.` : "You're all caught up."}
-        actions={unread > 0 && <Button variant="outline" onClick={async () => { await markAll({}); toast({ title: "All notifications marked as read" }); }}><CheckCheck className="h-4 w-4" /> Mark all as read</Button>}
-      />
-      {items.length === 0 ? <Card><EmptyState icon={<Bell className="h-6 w-6" />} title="No notifications" description="Updates from your school will appear here." /></Card> : (
-        <Card className="overflow-hidden">
-          <ul className="divide-y divide-line/60">
-            {items.map((n) => (
-              <li key={n._id} className={cn("flex items-start gap-3 px-4 py-3.5 sm:px-5", !n.isRead && "bg-teal-soft/30")}>
-                <CategoryIcon category={CATEGORY[n.type] ?? "general"} className="mt-0.5" />
-                <button className="min-w-0 flex-1 text-left" onClick={async () => { if (!n.isRead) await markRead({ notificationId: n._id }); if (n.href?.startsWith("/student/")) router.push(n.href); }}>
-                  <p className={cn("text-sm", n.isRead ? "font-medium text-ink-soft" : "font-semibold text-ink")}>{n.title}</p>
-                  <p className="mt-0.5 text-[13px] text-ink-muted">{n.message}</p>
-                  <p className="mt-1 text-[11.5px] text-ink-muted" title={formatDateTime(new Date(n._creationTime).toISOString())}>{relativeTime(new Date(n._creationTime).toISOString())}</p>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </Card>
-      )}
-    </div>
-  );
-}
-
 // ------------------------------------------------------------------ timetable / homework / results / fees / notices
 /** The portal query args: the server picks the linked student; guardians may choose among their linked children. */
 function usePortalArgs() {

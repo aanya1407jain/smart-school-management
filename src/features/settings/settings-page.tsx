@@ -24,17 +24,14 @@ export function SettingsPage() {
   const liveCurrent = useSchoolQuery(api.schools.current, live ? {} : "skip");
   const liveYears = useSchoolQuery(api.academics.listAcademicYears, live ? {} : "skip");
 
-  // Demo fallback query
-  const q = useQuery(() => (live ? Promise.resolve(null as any) : services.lookup.getSchool()), [live]);
+  // Demo data
+  const q = useQuery(() => services.lookup.getSchool(), [live], { enabled: !live });
 
   const adaptedLive = useMemo(() => {
     if (!liveCurrent) return undefined;
-    const currentYear = liveYears?.find((y) => y.isCurrent) ?? (liveYears?.[0] ?? {
-      _id: "none",
-      name: "2026–27",
-      startDate: "2026-04-01",
-      endDate: "2027-03-31",
-    });
+    if (!liveYears) return undefined;
+    // No invented year: when the school has not set one, the Academic year tab says so.
+    const currentYear = liveYears.find((y) => y.isCurrent) ?? null;
 
     const settingsObj: SchoolSettings = {
       attendanceLateCountsAsPresent: liveCurrent.settings.attendance.lateCountsAsPresent,
@@ -64,27 +61,17 @@ export function SettingsPage() {
         website: liveCurrent.school.website ?? "",
         affiliation: liveCurrent.school.affiliation ?? "",
         principalName: "",
-        currentAcademicYearId: currentYear._id as string,
+        currentAcademicYearId: (currentYear?._id as string) ?? "",
         settings: settingsObj,
       },
-      currentYear: {
-        id: currentYear._id,
-        name: currentYear.name,
-        startDate: currentYear.startDate,
-        endDate: currentYear.endDate,
-      },
+      currentYear: currentYear ? { id: currentYear._id as string, name: currentYear.name, startDate: currentYear.startDate, endDate: currentYear.endDate } : null,
+      gradingScheme: liveCurrent.settings.grading.scheme,
     };
   }, [liveCurrent, liveYears]);
 
   const queryState = useMemo<QueryState<any>>(
-    () => ({
-      isLoading: live ? liveCurrent === undefined : q.isLoading,
-      isRefreshing: false,
-      data: live ? adaptedLive : q.data,
-      error: live ? null : q.error,
-      refetch: live ? () => {} : q.refetch,
-    }),
-    [live, liveCurrent, adaptedLive, q.isLoading, q.data, q.error, q.refetch]
+    () => (live ? { isLoading: adaptedLive === undefined, isRefreshing: false, data: adaptedLive, error: null, refetch: () => {} } : q),
+    [live, adaptedLive, q],
   );
 
   return (
@@ -100,13 +87,13 @@ export function SettingsPage() {
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-4">
                     <span className="grid h-12 w-12 place-items-center rounded-2xl bg-teal-soft text-lagoon"><CalendarRange className="h-6 w-6" /></span>
-                    <div><p className="text-[13px] text-ink-muted">Current academic year</p><p className="text-xl font-semibold text-sapphire">{d.currentYear.name}</p><p className="text-sm text-ink-muted">{formatDate(d.currentYear.startDate)} – {formatDate(d.currentYear.endDate)}</p></div>
+                    <div><p className="text-[13px] text-ink-muted">Current academic year</p>{d.currentYear ? <><p className="text-xl font-semibold text-sapphire">{d.currentYear.name}</p><p className="text-sm text-ink-muted">{formatDate(d.currentYear.startDate)} – {formatDate(d.currentYear.endDate)}</p></> : <p className="text-xl font-semibold text-plum">Not set</p>}</div>
                   </div>
                   <LinkButton href="/admin/academics?tab=years" variant="outline">Manage academic years</LinkButton>
                 </div>
               </Card>
             </TabsContent>
-            <TabsContent value="general"><GeneralSettings initial={d.school.settings} /></TabsContent>
+            <TabsContent value="general"><GeneralSettings initial={d.school.settings} gradingScheme={d.gradingScheme} /></TabsContent>
             <TabsContent value="notifications"><NotificationSettings initial={d.school.settings} /></TabsContent>
             <TabsContent value="data"><DemoData /></TabsContent>
           </Tabs>
@@ -170,7 +157,9 @@ function SchoolInfo({ initial }: { initial: SchoolInfoInput }) {
       <FormSection title="Identity">
         {field("name", "School name")}
         {field("tagline", "Tagline")}
-        {field("principalName", "Principal")}
+        {live ? (
+          <FormField label="Principal" hint="Not stored for live schools yet."><Input value="" disabled placeholder="—" /></FormField>
+        ) : field("principalName", "Principal")}
         {field("affiliation", "Board affiliation")}
       </FormSection>
       <FormSection title="Contact">
@@ -185,7 +174,7 @@ function SchoolInfo({ initial }: { initial: SchoolInfoInput }) {
   );
 }
 
-function GeneralSettings({ initial }: { initial: SchoolSettings }) {
+function GeneralSettings({ initial, gradingScheme }: { initial: SchoolSettings; gradingScheme?: string }) {
   const { toast } = useToast();
   const { dataSource } = useSession();
   const live = dataSource === "live";
@@ -207,8 +196,9 @@ function GeneralSettings({ initial }: { initial: SchoolSettings }) {
             lateCountsAsPresent: s.attendanceLateCountsAsPresent,
             lowAttendanceThreshold: s.lowAttendanceThreshold,
           },
+          // Keep the school's grading scheme; only the pass percentage is edited here.
           grading: {
-            scheme: "percentage",
+            scheme: gradingScheme ?? "percentage",
             passPercentage: s.passPercentage,
           },
         });
@@ -303,8 +293,8 @@ function DemoData() {
         <div className="flex items-start gap-4">
           <span className="grid h-12 w-12 place-items-center rounded-2xl bg-teal-soft text-lagoon"><Database className="h-6 w-6" /></span>
           <div>
-            <p className="font-semibold text-sapphire">Production / Live Backend Active <Badge tone="teal" className="ml-1">Live Convex</Badge></p>
-            <p className="max-w-xl text-sm text-ink-muted">You are currently connected to the live Convex database for <strong>{viewer?.school.name ?? "your school"}</strong>. All changes to settings, academic years, students, and attendance are permanently synced to the cloud.</p>
+            <p className="font-semibold text-sapphire">School records <Badge tone="teal" className="ml-1">Live</Badge></p>
+            <p className="max-w-xl text-sm text-ink-muted">You are signed in to <strong>{viewer?.school.name ?? "your school"}</strong>&apos;s live records. Changes made on connected pages are saved to the school&apos;s database; there is no demo data to reset here.</p>
           </div>
         </div>
       </Card>

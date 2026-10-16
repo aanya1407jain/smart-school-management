@@ -6,6 +6,7 @@ import { describe, expect, test } from "vitest";
 import { api } from "../../convex/_generated/api";
 import { as, createSchool, errorCode, makeTest, pastMonday } from "./fixtures";
 
+// Ported from PR #11 (Apporva) to the reconciled reports API.
 describe("AP-03: School settings and profile persistence", () => {
   test("school settings and profile can be fetched and updated with RBAC, validation, and tenancy isolation", async () => {
     const t = makeTest();
@@ -135,13 +136,14 @@ describe("AP-04: Dashboards and reports reconciliation", () => {
       classIds: [A.classId],
       components: [{ label: "Tuition", amountMinor: 2000000 }],
       installments: [{ label: "Annual Fee", dueDate: "2026-05-01", amountMinor: 2000000 }],
+      activate: true,
     });
 
-    await admin.mutation(api.fees.assignStructure, { structureId, studentId: A.studentA });
-    await admin.mutation(api.fees.assignStructure, { structureId, studentId: A.studentB });
+    await admin.mutation(api.fees.assignStructure, { structureId, target: { kind: "students", studentIds: [A.studentA] } });
+    await admin.mutation(api.fees.assignStructure, { structureId, target: { kind: "students", studentIds: [A.studentB] } });
 
     // Apply concession to studentA: 200,000 minor units (₹2,000)
-    await admin.mutation(api.fees.createConcession, {
+    await admin.mutation(api.fees.addConcession, {
       studentId: A.studentA,
       kind: "fixed",
       value: 200000,
@@ -155,6 +157,7 @@ describe("AP-04: Dashboards and reports reconciliation", () => {
       method: "bank_transfer",
       reference: "NEFT-789012",
       paidOn: "2026-04-10",
+      clientRequestId: "reports-test-payment-1",
     });
 
     // 2. Mark attendance for Section 8-A: 1 present
@@ -166,69 +169,57 @@ describe("AP-04: Dashboards and reports reconciliation", () => {
     });
 
     // 3. Create published notice
-    await admin.mutation(api.notices.create, {
+    const { noticeId } = await admin.mutation(api.notices.createDraft, {
       title: "Welcome to Academic Year 2026-27",
       body: "We look forward to an inspiring academic session.",
       type: "notice",
       priority: "normal",
-      status: "published",
       publishDate: "2026-04-01",
       audience: { kind: "all" },
     });
+    await admin.mutation(api.notices.publish, { noticeId });
 
     // 4. Query admin dashboard and reconcile
     const dashboard = await admin.query(api.reports.adminDashboard, {});
-    expect(dashboard).not.toBeNull();
-    if (!dashboard) return;
-
-    // Reconciliation:
-    // Students enrolled: 2 (studentA, studentB)
-    expect(dashboard.studentCount).toBe(2);
-    // Teachers: 2 (classTeacher, subjectTeacher)
-    expect(dashboard.teacherCount).toBe(2);
+    const overview = dashboard.overview!;
+    const fees = dashboard.fees!;
+    // Students enrolled: 2 (studentA, studentB); teachers: 2
+    expect(overview.students).toBe(2);
+    expect(overview.teachers).toBe(2);
 
     // Fees:
     // studentA net: 2,000,000 - 200,000 = 1,800,000; paid: 1,000,000; outstanding: 800,000
     // studentB net: 2,000,000; paid: 0; outstanding: 2,000,000
-    // totalNet: 3,800,000
-    // totalCollected: 1,000,000
-    // totalOutstanding: 2,800,000
-    expect(dashboard.fees.totalNetMinor).toBe(3800000);
-    expect(dashboard.fees.totalCollectedMinor).toBe(1000000);
-    expect(dashboard.fees.totalOutstandingMinor).toBe(2800000);
-    expect(dashboard.fees.feeCollectionRate).toBeCloseTo((1000000 / 3800000) * 100, 2);
+    expect(fees.netMinor).toBe(3800000);
+    expect(fees.collectedMinor).toBe(1000000);
+    expect(fees.outstandingMinor).toBe(2800000);
+    expect(fees.collectionRate).toBeCloseTo((1000000 / 3800000) * 100, 1);
 
     // Fee by class breakdown
-    const grade8Fee = dashboard.fees.feeByClass.find((c: any) => c.name === "Grade 8");
+    const grade8Fee = fees.byClass.find((c) => c.name === "Grade 8");
     expect(grade8Fee).toBeDefined();
-    expect(grade8Fee?.collected).toBe(1000000);
-    expect(grade8Fee?.outstanding).toBe(2800000);
+    expect(grade8Fee?.collectedMinor).toBe(1000000);
+    expect(grade8Fee?.outstandingMinor).toBe(2800000);
 
-    // Attendance percentage: 1 session with 1 present -> 100%
-    expect(dashboard.attendancePercentage).toBe(100);
+    // Attendance percentage: 1 register with 1 present -> 100%
+    expect(overview.attendance?.percentage).toBe(100);
+    expect(overview.attendance?.date).toBe(monday);
 
     // Recent notices
-    expect(dashboard.recentNotices.length).toBeGreaterThanOrEqual(1);
-    expect(dashboard.recentNotices.some((n: any) => n.title.includes("Welcome to Academic Year"))).toBe(true);
+    expect(overview.notices.some((n) => n.title.includes("Welcome to Academic Year"))).toBe(true);
 
     // 5. Query studentStatistics
     const stats = await admin.query(api.reports.studentStatistics, {});
-    expect(stats.totalEnrolled).toBe(2);
-    expect(stats.uniqueGuardians).toBe(1);
-
-    const g8Stat = stats.classStats.find((c: any) => c.name === "Grade 8");
-    expect(g8Stat).toBeDefined();
-    expect(g8Stat?.total).toBe(2);
-
-    const sAStat = stats.sectionStats.find((s: any) => s.name === "8-A");
-    expect(sAStat?.studentsCount).toBe(1);
+    expect(stats.total).toBe(2);
+    expect(stats.guardians).toBe(1);
+    expect(stats.byClass.find((c) => c.name === "Grade 8")?.total).toBe(2);
+    expect(stats.bySection.find((s) => s.label === "8-A")?.students).toBe(1);
 
     // 6. Query attendanceReport
     const attReport = await admin.query(api.reports.attendanceReport, {});
-    expect(attReport.monthly.length).toBeGreaterThanOrEqual(1);
-    const thisMonth = attReport.monthly.find((m: any) => m.month === monday.slice(0, 7));
+    const thisMonth = attReport.monthly.find((m) => m.month === monday.slice(0, 7));
     expect(thisMonth).toBeDefined();
     expect(thisMonth?.percentage).toBe(100);
-    expect(thisMonth?.absentCount).toBe(0);
+    expect(thisMonth?.absent).toBe(0);
   });
 });

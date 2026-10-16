@@ -58,83 +58,34 @@ function Overview() {
   const { dataSource } = useSession();
   const live = dataSource === "live";
 
-  // Live Convex queries
-  const liveSummary = useSchoolQuery(api.fees.collectionSummary, live ? {} : "skip");
-  const liveBalances = useSchoolQuery(api.fees.listBalances, live ? {} : "skip");
+  // Live: one server aggregate over the school's real fee records (model/feeMath.ts).
+  const liveOverview = useSchoolQuery(api.fees.overview, live ? {} : "skip");
 
-  // Demo fallback query
-  const q = useQuery(() => (live ? Promise.resolve(null as any) : services.fees.getSummary()), [live]);
+  // Demo data
+  const q = useQuery(() => services.fees.getSummary(), [live], { enabled: !live });
 
   const adaptedLive = useMemo(() => {
-    if (!liveSummary || !liveBalances) return undefined;
-    const collected = liveSummary.collectedMinor / 100;
-    const outstanding = liveSummary.outstandingMinor / 100;
-    const net = liveSummary.netMinor / 100;
-    const collectionRate = liveSummary.collectionRate;
-    const overdue = liveBalances.reduce((a, r) => a + (r.overdueMinor / 100), 0);
-
-    const standingCounts: Record<FeeStanding, number> = { paid: 0, clear: 0, due_soon: 0, overdue: 0, not_assigned: 0 };
-    for (const r of liveBalances) {
-      if (r.standing === "paid") standingCounts.paid++;
-      else if (r.standing === "overdue") standingCounts.overdue++;
-      else if (r.standing === "partial") standingCounts.due_soon++;
-      else if (r.outstandingMinor === 0) standingCounts.clear++;
-      else standingCounts.due_soon++;
-    }
-
-    const dueSoon = liveBalances
-      .filter((r) => r.standing === "partial" || r.standing === "unpaid")
-      .reduce((a, r) => a + (r.outstandingMinor / 100), 0);
-
-    const months = [
-      { label: "Apr", amount: 0 },
-      { label: "May", amount: 0 },
-      { label: "Jun", amount: 0 },
-      { label: "Jul", amount: 0 },
-      { label: "Aug", amount: 0 },
-      { label: "Sep", amount: 0 },
-      { label: "Oct", amount: collected },
-    ];
-
-    const recentPayments = liveBalances
-      .filter((r) => r.lastPaymentOn)
-      .slice(0, 6)
-      .map((r) => ({
-        id: r.studentId,
-        studentId: r.studentId,
-        studentName: r.name,
-        receiptNo: `REC-${r.admissionNo}`,
-        method: "upi" as PaymentMethod,
-        paidOn: r.lastPaymentOn!,
-        amount: r.paidMinor / 100,
-      }));
-
+    if (!liveOverview) return undefined;
+    const t = liveOverview.totals;
     return {
+      yearLabel: liveOverview.academicYear.name,
       totals: {
-        gross: net,
-        concession: 0,
-        net,
-        paid: collected,
-        outstanding,
-        overdue,
-        dueSoon,
-        collectionRate,
+        gross: t.grossMinor / 100, concession: t.concessionMinor / 100, net: t.netMinor / 100, paid: t.paidMinor / 100,
+        outstanding: t.outstandingMinor / 100, overdue: t.overdueMinor / 100, dueSoon: t.dueSoonMinor / 100, collectionRate: liveOverview.collectionRate,
       },
-      standing: standingCounts,
-      monthly: months,
-      recentPayments,
+      standing: liveOverview.standing,
+      monthly: liveOverview.monthly.map((m) => ({ label: new Date(`${m.month}-01T00:00:00`).toLocaleString("en-IN", { month: "short" }), amount: m.amountMinor / 100 })),
+      recentPayments: liveOverview.recentPayments.map((p) => ({
+        id: p.paymentId, studentId: p.studentId, studentName: p.studentName, receiptNo: p.receiptNo ?? "—", method: p.method as PaymentMethod, paidOn: p.paidOn, amount: p.amountMinor / 100,
+      })),
     };
-  }, [liveSummary, liveBalances]);
+  }, [liveOverview]);
 
   const queryState = useMemo<QueryState<any>>(
-    () => ({
-      isLoading: live ? liveSummary === undefined || liveBalances === undefined : q.isLoading,
-      isRefreshing: false,
-      data: live ? adaptedLive : q.data,
-      error: live ? null : q.error,
-      refetch: live ? () => {} : q.refetch,
-    }),
-    [live, liveSummary, liveBalances, adaptedLive, q.isLoading, q.data, q.error, q.refetch]
+    () => (live
+      ? { isLoading: adaptedLive === undefined, isRefreshing: false, data: adaptedLive, error: null, refetch: () => {} }
+      : q),
+    [live, adaptedLive, q],
   );
 
   return (
@@ -148,7 +99,7 @@ function Overview() {
             <StatCard label="Due in 30 days" value={formatCurrency(s.totals.dueSoon)} icon={<Clock className="h-5 w-5" />} tone="purple" hint={`${s.standing.due_soon} students · concessions ${formatCurrency(s.totals.concession)}`} />
           </div>
           <div className="grid gap-4 lg:grid-cols-3">
-            <ChartCard className="lg:col-span-2" title="Monthly collections" description="Payments received per month, 2026–27">
+            <ChartCard className="lg:col-span-2" title="Monthly collections" description={`Payments received per month, ${s.yearLabel ?? "2026–27"}`}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={s.monthly} margin={{ top: 8, right: 8, left: 4, bottom: 0 }}>
                   <CartesianGrid vertical={false} stroke={CHART_GRID} />
@@ -175,6 +126,7 @@ function Overview() {
           </div>
           <Card>
             <CardHeader title="Recent payments" action={<Link href="/admin/fees?tab=payments" className="text-[13px] font-medium text-lagoon hover:underline">All payments</Link>} />
+            {s.recentPayments.length === 0 && <EmptyState title="No payments yet" description="Payments recorded by the school office appear here." />}
             <ul className="divide-y divide-line/60 px-5 pb-2">
               {s.recentPayments.map((p: any) => (
                 <li key={p.id} className="flex items-center justify-between gap-3 py-3">
@@ -206,26 +158,30 @@ function Balances() {
   const [standing, setStanding] = useState<string>(params.get("standing") ?? "");
   const [dueBy, setDueBy] = useState("");
 
+  // Live: balances computed on the server from real fee records; all filters applied there.
   const liveBalances = useSchoolQuery(
     api.fees.listBalances,
     live
       ? {
           classId: (classId as Id<"classes">) || undefined,
           sectionId: (sectionId as Id<"sections">) || undefined,
-          standing: standing === "all" || !standing ? undefined : (standing as any),
-          search: search || undefined,
+          standing: (standing || undefined) as FeeStanding | undefined,
+          search: search.trim() || undefined,
+          dueBy: dueBy || undefined,
         }
       : "skip"
   );
 
+  // Demo data
   const q = useQuery(
-    () => (live ? Promise.resolve([]) : services.fees.listBalances({ search, classId, sectionId, standing: (standing || "all") as FeeStanding | "all" })),
-    [live, search, classId, sectionId, standing]
+    () => services.fees.listBalances({ search, classId, sectionId, standing: (standing || "all") as FeeStanding | "all" }),
+    [live, search, classId, sectionId, standing],
+    { enabled: !live },
   );
 
   const liveRows = useMemo(() => {
     if (!liveBalances) return undefined;
-    return liveBalances.map((r) => ({
+    return liveBalances.rows.map((r) => ({
       studentId: r.studentId,
       name: r.name,
       admissionNo: r.admissionNo,
@@ -235,24 +191,20 @@ function Balances() {
       outstanding: r.outstandingMinor / 100,
       overdue: r.overdueMinor / 100,
       standing: r.standing,
-      nextDue: r.lastPaymentOn ? { label: "Fee installment", dueDate: r.lastPaymentOn } : null,
+      nextDue: r.nextDue ? { label: r.nextDue.label, dueDate: r.nextDue.dueDate } : null,
       lastPayment: r.lastPaymentOn,
     }));
   }, [liveBalances]);
 
-  const rawRows = live ? (liveRows ?? []) : (q.data ?? []);
-  const rows = rawRows.filter((r) => !dueBy || (r.nextDue && r.nextDue.dueDate <= dueBy));
+  type BalanceRow = { studentId: string; name: string; admissionNo: string; classLabel: string; net: number; paid: number; outstanding: number; standing: FeeStanding; nextDue: { label: string; dueDate: string } | null; lastPayment: string | null };
+  const rows: BalanceRow[] = live ? (liveRows ?? []) : (q.data ?? []).filter((r) => !dueBy || (r.nextDue && r.nextDue.dueDate <= dueBy));
   const total = rows.reduce((a, r) => a + r.outstanding, 0);
 
   const queryState = useMemo<QueryState<any>>(
-    () => ({
-      isLoading: live ? liveBalances === undefined : q.isLoading,
-      isRefreshing: false,
-      data: rows,
-      error: live ? null : q.error,
-      refetch: live ? () => {} : q.refetch,
-    }),
-    [live, liveBalances, rows, q.isLoading, q.error, q.refetch]
+    () => (live
+      ? { isLoading: liveRows === undefined, isRefreshing: false, data: liveRows, error: null, refetch: () => {} }
+      : { ...q, data: q.data === undefined ? undefined : rows }),
+    [live, liveRows, rows, q],
   );
 
   const sectionOptions = useMemo(
@@ -382,8 +334,9 @@ function Structures() {
 
   const liveStructures = useSchoolQuery(api.fees.listStructures, live ? {} : "skip");
   const assignStructureMutation = useSchoolMutation(api.fees.assignStructure);
+  const setStatusMutation = useSchoolMutation(api.fees.setStructureStatus);
 
-  const q = useQuery(() => (live ? Promise.resolve([]) : services.fees.listStructures()), [live]);
+  const q = useQuery(() => services.fees.listStructures(), [live], { enabled: !live });
   const [createOpen, setCreateOpen] = useState(false);
   const [assignId, setAssignId] = useState<string | null>(null);
   const [assigning, setAssigning] = useState(false);
@@ -392,20 +345,16 @@ function Structures() {
   const liveRows = useMemo(() => {
     if (!liveStructures) return undefined;
     return liveStructures.map((fs) => ({
-      id: fs._id,
+      id: fs.structureId as string,
       name: fs.name,
+      status: fs.status,
       classNames: fs.classNames,
-      classIds: fs.classIds,
+      classIds: fs.classIds as string[],
       total: fs.totalMinor / 100,
       components: fs.components.map((c, i) => ({ id: `c-${i}`, label: c.label, amount: c.amountMinor / 100 })),
-      installments: fs.installments.map((ins, i) => ({
-        id: `ins-${i}`,
-        label: ins.label,
-        dueDate: ins.dueDate,
-        share: fs.totalMinor > 0 ? ins.amountMinor / fs.totalMinor : 0,
-      })),
+      installments: fs.installments.map((ins, i) => ({ id: `ins-${i}`, label: ins.label, dueDate: ins.dueDate, share: fs.totalMinor > 0 ? ins.amountMinor / fs.totalMinor : 0 })),
       assignedCount: fs.assignedCount,
-      eligibleCount: fs.assignedCount,
+      eligibleCount: fs.eligibleCount,
     }));
   }, [liveStructures]);
 
@@ -413,14 +362,8 @@ function Structures() {
   const target = rows.find((s) => s.id === assignId);
 
   const queryState = useMemo<QueryState<any>>(
-    () => ({
-      isLoading: live ? liveStructures === undefined : q.isLoading,
-      isRefreshing: false,
-      data: rows,
-      error: live ? null : q.error,
-      refetch: live ? () => {} : q.refetch,
-    }),
-    [live, liveStructures, rows, q.isLoading, q.error, q.refetch]
+    () => (live ? { isLoading: liveRows === undefined, isRefreshing: false, data: liveRows, error: null, refetch: () => {} } : q),
+    [live, liveRows, q],
   );
 
   return (
@@ -444,7 +387,10 @@ function Structures() {
                 </div>
                 <div className="flex items-center justify-between border-t border-line/60 px-5 py-3">
                   <span className="flex items-center gap-1.5 text-[13px] text-ink-muted"><Users className="h-4 w-4" /> Assigned to {fs.assignedCount} of {fs.eligibleCount} students</span>
-                  {fs.assignedCount < fs.eligibleCount ? <Button size="sm" onClick={() => setAssignId(fs.id)}>Assign to class</Button> : <Badge tone="teal">All assigned</Badge>}
+                  {fs.status === "draft" ? (
+                    <Button size="sm" variant="outline" onClick={async () => { try { await setStatusMutation({ structureId: fs.id as Id<"feeStructures">, status: "active" }); toast({ title: "Structure activated", description: "It can now be assigned." }); } catch (e) { toast({ title: "Could not activate", description: (e as Error).message, tone: "error" }); } }}>Activate</Button>
+                  ) : fs.status === "archived" ? <Badge>Archived</Badge>
+                  : fs.assignedCount < fs.eligibleCount ? <Button size="sm" onClick={() => setAssignId(fs.id)}>Assign to class</Button> : <Badge tone="teal">{fs.eligibleCount ? "All assigned" : "No enrolled students"}</Badge>}
                 </div>
               </Card>
             ))}
@@ -463,19 +409,16 @@ function Structures() {
           if (live) {
             setAssigning(true);
             try {
-              if (target && (target as any).classIds?.length) {
-                let count = 0;
-                for (const cid of (target as any).classIds) {
-                  const res = await assignStructureMutation({
-                    structureId: assignId as Id<"feeStructures">,
-                    classId: cid,
-                  });
-                  count += res.assignedStudents;
-                }
-                toast({ title: `Assigned to ${count} students`, description: "Students and guardians were notified." });
+              let assigned = 0;
+              let skipped = 0;
+              for (const cid of (target as { classIds?: string[] } | undefined)?.classIds ?? []) {
+                const res = await assignStructureMutation({ structureId: assignId as Id<"feeStructures">, target: { kind: "class", classId: cid as Id<"classes"> } });
+                assigned += res.assigned;
+                skipped += res.skipped.length;
               }
-            } catch (err: any) {
-              toast({ title: "Assignment failed", description: err?.message, tone: "error" });
+              toast({ title: `Assigned to ${assigned} student${assigned === 1 ? "" : "s"}`, description: skipped ? `${skipped} already had it or are not eligible.` : undefined });
+            } catch (err) {
+              toast({ title: "Assignment failed", description: (err as Error).message, tone: "error" });
             } finally {
               setAssigning(false);
               setAssignId(null);
@@ -496,15 +439,17 @@ function CreateStructureModal({ open, onOpenChange, onCreated }: { open: boolean
   const { dataSource } = useSession();
   const live = dataSource === "live";
   const opts = useAcademicOptions();
-  const [name, setName] = useState("Transport-free Activity Fee 2026–27");
+  // Demo personas get the sample values; real accounts start from an empty form.
+  const [name, setName] = useState(live ? "" : "Transport-free Activity Fee 2026–27");
   const [classIds, setClassIds] = useState<string[]>([]);
-  const [components, setComponents] = useState([{ label: "Annual activity fee", amount: 3000 }]);
-  const [installments, setInstallments] = useState([{ label: "One-time", dueDate: "2026-11-15", share: 100 }]);
+  const [components, setComponents] = useState(live ? [{ label: "", amount: 0 }] : [{ label: "Annual activity fee", amount: 3000 }]);
+  const [installments, setInstallments] = useState(live ? [{ label: "Installment 1", dueDate: "", share: 100 }] : [{ label: "One-time", dueDate: "2026-11-15", share: 100 }]);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const createStructureMutation = useSchoolMutation(api.fees.createStructure);
   const m = useMutation(services.fees.createStructure);
+  useEffect(() => { if (open) setError(null); }, [open]);
 
   const total = components.reduce((a, c) => a + (Number(c.amount) || 0), 0);
   const shares = installments.reduce((a, i) => a + (Number(i.share) || 0), 0);
@@ -530,11 +475,13 @@ function CreateStructureModal({ open, onOpenChange, onCreated }: { open: boolean
           label: c.label,
           amountMinor: Math.round((Number(c.amount) || 0) * 100),
         }));
+        if (shares !== 100) throw new Error("Installment shares must add up to 100%.");
         const res = await createStructureMutation({
           name,
           classIds: classIds as Id<"classes">[],
           components: compPayload,
           installments: insPayload,
+          activate: true,
         });
         if (res?.structureId) {
           toast({ title: "Fee structure created", description: "Now assign it to students." });
@@ -605,55 +552,49 @@ function Payments() {
   const [to, setTo] = useState("");
   const [receiptId, setReceiptId] = useState<string | null>(null);
 
-  // Live Convex query
+  // Live: payments of the current year with their real receipt numbers (filters applied on the server).
   const livePayments = useSchoolQuery(
     api.fees.listPayments,
     live
       ? {
           classId: classId ? (classId as Id<"classes">) : undefined,
-          method: method || undefined,
+          method: (method || undefined) as PaymentMethod | undefined,
           from: from || undefined,
           to: to || undefined,
-          search: search || undefined,
+          search: search.trim() || undefined,
         }
       : "skip"
   );
 
-  // Demo fallback query
+  // Demo data
   const q = useQuery(
-    () => (live ? Promise.resolve(null as any) : services.fees.listPayments({ search, classId, method, from: from || undefined, to: to || undefined })),
-    [live, search, classId, method, from, to]
+    () => services.fees.listPayments({ search, classId, method, from: from || undefined, to: to || undefined }),
+    [live, search, classId, method, from, to],
+    { enabled: !live },
   );
 
   const adaptedLive = useMemo(() => {
     if (!livePayments) return undefined;
-    return livePayments.map((p) => ({
-      id: p.id,
+    return livePayments.rows.map((p) => ({
+      id: p.paymentId as string,
       paymentId: p.paymentId,
       receiptId: p.receiptId,
-      receiptNo: p.receiptNo,
+      receiptNo: p.receiptNo ?? "—",
       paidOn: p.paidOn,
       studentId: p.studentId,
       studentName: p.studentName,
       admissionNo: p.admissionNo,
-      classId: p.classId ?? "",
       classLabel: p.classLabel,
       method: p.method,
-      reference: p.reference,
+      reference: p.reference ?? "—",
       amount: p.amountMinor / 100,
-      status: p.status,
+      reversed: p.reversed,
     }));
   }, [livePayments]);
 
   const queryState = useMemo<QueryState<any>>(
-    () => ({
-      isLoading: live ? livePayments === undefined : q.isLoading,
-      isRefreshing: false,
-      data: live ? adaptedLive : q.data,
-      error: live ? null : q.error,
-      refetch: live ? () => {} : q.refetch,
-    }),
-    [live, livePayments, adaptedLive, q.isLoading, q.data, q.error, q.refetch]
+    () => (live ? { isLoading: adaptedLive === undefined, isRefreshing: false, data: adaptedLive, error: null, refetch: () => {} } : q),
+    [live, adaptedLive, q],
   );
 
   const rows = queryState.data ?? [];
@@ -697,7 +638,7 @@ function Payments() {
           <div className="flex flex-wrap items-center gap-2">
             {queryState.data && (
               <p className="text-[13px] text-ink-muted">
-                {rows.length} payments · <span className="font-semibold text-ink">{formatCurrency(rows.reduce((a: number, p: any) => a + (p.amount || 0), 0))}</span>
+                {rows.length} payments{livePayments?.truncated ? " (showing the latest)" : ""} · <span className="font-semibold text-ink">{formatCurrency(rows.filter((p: any) => !p.reversed).reduce((a: number, p: any) => a + (p.amount || 0), 0))}</span>
               </p>
             )}
             {hasActiveFilters && (
@@ -748,9 +689,10 @@ function Payments() {
                 { key: "student", header: "Student", cell: (p: any) => <Link href={`/admin/fees/${p.studentId}`} className="hover:text-lagoon"><span className="font-medium text-ink">{p.studentName}</span> <span className="text-[12px] text-ink-muted">· {p.classLabel}</span></Link> },
                 { key: "method", header: "Method", cell: (p: any) => (PAYMENT_METHOD_LABELS as Record<string, string>)[p.method] ?? p.method },
                 { key: "ref", header: "Reference", cell: (p: any) => <span className="font-mono text-[12.5px]">{p.reference}</span> },
-                { key: "amount", header: "Amount", align: "right", cell: (p: any) => <span className="font-semibold text-ink">{formatCurrency(p.amount)}</span> },
+                { key: "amount", header: "Amount", align: "right", cell: (p: any) => <span className={p.reversed ? "font-semibold text-ink-muted line-through" : "font-semibold text-ink"}>{formatCurrency(p.amount)}</span> },
+                { key: "state", header: "", cell: (p: any) => (p.reversed ? <Badge tone="lavender">Reversed</Badge> : null) },
               ]}
-              rowActions={(p: any) => <Button size="sm" variant="ghost" onClick={() => setReceiptId(p.receiptId)}><Receipt className="h-4 w-4" /> View</Button>}
+              rowActions={(p: any) => (p.receiptId ? <Button size="sm" variant="ghost" onClick={() => setReceiptId(p.receiptId)}><Receipt className="h-4 w-4" /> View</Button> : null)}
             />
           )}
         </QueryView>

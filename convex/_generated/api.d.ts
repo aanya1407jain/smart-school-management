@@ -21,8 +21,11 @@ import type * as core_errors from "../core/errors.js";
 import type * as core_functions from "../core/functions.js";
 import type * as core_permissions from "../core/permissions.js";
 import type * as core_validators from "../core/validators.js";
+import type * as events from "../events.js";
+import type * as exams from "../exams.js";
 import type * as fees from "../fees.js";
 import type * as files from "../files.js";
+import type * as homework from "../homework.js";
 import type * as http from "../http.js";
 import type * as imports from "../imports.js";
 import type * as memberships from "../memberships.js";
@@ -31,7 +34,10 @@ import type * as model_accounts from "../model/accounts.js";
 import type * as model_audit from "../model/audit.js";
 import type * as model_calendar from "../model/calendar.js";
 import type * as model_counters from "../model/counters.js";
+import type * as model_feeData from "../model/feeData.js";
+import type * as model_feeMath from "../model/feeMath.js";
 import type * as model_grading from "../model/grading.js";
+import type * as model_homeworkAccess from "../model/homeworkAccess.js";
 import type * as model_importSpecs from "../model/importSpecs.js";
 import type * as model_importers from "../model/importers.js";
 import type * as model_loginIds from "../model/loginIds.js";
@@ -49,7 +55,9 @@ import type * as seed from "../seed.js";
 import type * as seedData_asterAcademy from "../seedData/asterAcademy.js";
 import type * as seedData_types from "../seedData/types.js";
 import type * as setup from "../setup.js";
+import type * as staff from "../staff.js";
 import type * as studentPortal from "../studentPortal.js";
+import type * as timetable from "../timetable.js";
 import type * as users from "../users.js";
 
 import type {
@@ -72,8 +80,11 @@ declare const fullApi: ApiFromModules<{
   "core/functions": typeof core_functions;
   "core/permissions": typeof core_permissions;
   "core/validators": typeof core_validators;
+  events: typeof events;
+  exams: typeof exams;
   fees: typeof fees;
   files: typeof files;
+  homework: typeof homework;
   http: typeof http;
   imports: typeof imports;
   memberships: typeof memberships;
@@ -82,7 +93,10 @@ declare const fullApi: ApiFromModules<{
   "model/audit": typeof model_audit;
   "model/calendar": typeof model_calendar;
   "model/counters": typeof model_counters;
+  "model/feeData": typeof model_feeData;
+  "model/feeMath": typeof model_feeMath;
   "model/grading": typeof model_grading;
+  "model/homeworkAccess": typeof model_homeworkAccess;
   "model/importSpecs": typeof model_importSpecs;
   "model/importers": typeof model_importers;
   "model/loginIds": typeof model_loginIds;
@@ -100,7 +114,9 @@ declare const fullApi: ApiFromModules<{
   "seedData/asterAcademy": typeof seedData_asterAcademy;
   "seedData/types": typeof seedData_types;
   setup: typeof setup;
+  staff: typeof staff;
   studentPortal: typeof studentPortal;
+  timetable: typeof timetable;
   users: typeof users;
 }>;
 

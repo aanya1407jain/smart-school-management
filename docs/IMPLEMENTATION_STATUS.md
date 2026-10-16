@@ -305,3 +305,71 @@ returns `{ page, isDone, continueCursor }`; `studentHistory` returns `range`; ti
 - **Still demo-only:** My Classes / admin Students list rosters and student renames use the in-browser demo data
   (demo roll numbers are not renumbered on rename).
 
+---
+
+## 18. Backend completion A-00 – A-06 (16 Oct 2026, uncommitted)
+- **A-00 live staff sessions:** school-created admins/teachers were sent to "records aren't available in this
+  preview" because the session only had a live path for student-portal accounts. They now get the live
+  workspace for their server-derived role (no demo personas, no client-claimed role); pages still on demo data
+  are gated for live accounts (`isLiveRoute`). Tests: `tests/convex/live-staff-session.test.ts`.
+- **A-01 authorization:** new shared `isSubjectTeacherOf` / `requireSubjectTeacher` (persisted
+  `teacherAssignments` only) used by marks entry, homework and timetable validation; direct-call matrix in
+  `tests/convex/a01-authorization.test.ts` (forged cross-school ids, unauthenticated, role matrix).
+- **A-02 fees** (`convex/fees.ts`), **A-03 exams** (`convex/exams.ts`), **A-04 timetable/homework**
+  (`convex/timetable.ts`, `convex/homework.ts`), **A-05 notices/events/staff** (`convex/notices.ts`,
+  `convex/events.ts`, `convex/staff.ts`), **A-06 files/reports** (homework & submission attachments in
+  `convex/files.ts`, `src/lib/convex/use-file-upload.ts`, `convex/reports.ts`) and
+  `academics.updateStudentProfile` (rename renumbers the active section). Contracts:
+  `docs/BACKEND_API_CONTRACTS.md`.
+- **Schema (additive, optional fields/indexes only):** `feePayments.clientRequestId` + `by_school_request`,
+  `studentFees.by_structure`, `timetableEntries.by_school_day_period`, `notifications.dedupeKey` +
+  `by_user_dedupe`, file kinds `homework_attachment` / `submission_attachment`, owner types `homework` /
+  `submission`. No data migration is needed.
+- **Not done here:** connecting the admin/teacher fee, exam, timetable, homework, notice, report and staff
+  SCREENS to these functions (portal work for Trisha / Apporva); payment gateway; outbound SMS/email/push;
+  report-card PDFs; promotion / year rollover.
+
+
+---
+
+## 19. Integration pass: academics (Trisha), finance & communications (Apporva, PR #11) (17 Oct 2026, uncommitted)
+- **Not merged:** PR #11 is not merged. Its backend (`fees` / `notices` / `reports`) duplicated the A-02/A-05/A-06
+  modules with weaker guarantees; one authoritative module of each is kept (the A-0x ones) and the functions
+  PR #11's screens needed were added to it: `fees.overview / listBalances / listPayments`, `notices.restore`,
+  `notifications.remove`, `reports.adminDashboard / studentStatistics / attendanceReport`. PR #11's tests for
+  guardian switching and settings were ported to this API (`guardian-child-switching.test.ts`,
+  `reports-settings.test.ts`).
+- **Fixed from the audit:** retry-safe payments (UI sends one `clientRequestId` per intended payment),
+  overpayment / future-date / foreign-allocation rejection, receipt sequencing, notice audiences validated
+  against the school, notification when a draft (or a future-dated notice) is published, notice lifecycle
+  without hard delete, percentage concessions in every total, finance-only dashboard scope, school-local
+  dates, indexed school-year fee reads (no table scans, no per-student ledger queries). Regression tests:
+  `tests/convex/integration-regressions.test.ts`.
+- **Academics (fec0ceb):** type errors fixed; the live workspace uses `useSchoolQuery`, keeps the server's roster
+  order, has no invented year, and restores class teachers, subject teachers, class curriculum, current year
+  and enrolment of unplaced students. Demo personas keep the original demo workspace
+  (`academics-workspace-demo.tsx`).
+- **Screens now on live data** (in addition to §18): admin Dashboard, Students list + edit, Academics, Fees
+  (overview, balances, structures, payments, ledger, receipts, concessions, collect-fee picker), Notices,
+  Notifications (one centre for every role), Reports (students, attendance, fees, published exam
+  performance), Settings; teacher My Classes, Homework (+ review), Examinations + marks entry, Timetable,
+  Notices.
+- **Still demo-only for live accounts (gated):** admin Examinations, Timetable, Homework, Teachers & Staff
+  (incl. leave), teacher Dashboard, the academic-trend report tab and per-student attendance bands.
+- **Schema (additive):** `studentFees.by_school_year`, `feeConcessions.by_school_year`,
+  `feePayments.by_school_year`, optional `notices.publishedAt`.
+
+## 20. PR #12 made mergeable with `main` (PR #11 merged there) (17 Oct 2026)
+
+- `origin/main` (fddb52c, PR #11) merged into `feat/convex-backend-foundation`; 17 conflicts resolved file by file.
+  One backend per module is kept (the A-0x versions: retry-safe payments, overpayment rejection, FIFO allocation,
+  school/student/fee/payment ownership checks, school-timezone dates, indexed queries). PR #11's screens were
+  already ported onto this backend, so its UI calls to `notices.create/list/remove`, `fees.getStudentLedger/getReceipt/
+  createConcession` are not reintroduced.
+- Kept from PR #11: `notifications.clearAll` (own inbox only, batched), `vitest` `testTimeout: 20000`, its notice,
+  fee, guardian and reports tests (rewritten against the final API — none deleted).
+- Not kept: notice hard delete (`notices.remove`; notices are archived, never deleted), caller-supplied payment
+  allocations (FIFO is the rule), `read-excel-file` caret (dependencies stay pinned), `next-env.d.ts` dev path.
+- **Behaviour change:** `notices.restore` now always returns an archived notice to **draft**; it must be published
+  again (re-validated; no second notification thanks to the per-notice dedupe key). Demo service matches.
+- Removed the accidental tracked file `"\357\200\233OA"` (terminal `git log` output).

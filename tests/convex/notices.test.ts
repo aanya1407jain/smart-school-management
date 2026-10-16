@@ -1,174 +1,125 @@
 /**
  * In-process tests for Notices, Audience Targeting, and Events (AP-02).
+ * Originally written in PR #11 against its notices API; adapted to the final
+ * API: `createDraft` → `publish` → `archive` → `restore` (back to DRAFT,
+ * republishing required), `feed` for readers, events in `convex/events.ts`.
+ * Notices are never hard-deleted.
  * Run with: npx vitest run tests/convex/notices.test.ts
  */
 import { describe, expect, test } from "vitest";
+import type { FunctionArgs } from "convex/server";
 import { api } from "../../convex/_generated/api";
+import type { Id } from "../../convex/_generated/dataModel";
 import { as, createSchool, errorCode, makeTest } from "./fixtures";
 
+type Client = Awaited<ReturnType<typeof as>>;
+type Audience = FunctionArgs<typeof api.notices.createDraft>["audience"];
+
+const feedIds = async (c: Client) => new Set((await c.query(api.notices.feed, {})).map((n) => n.noticeId as Id<"notices">));
+
 describe("Notices and school events (AP-02)", () => {
-  test("lifecycle: create, publish, update, archive, restore, and delete", async () => {
+  test("lifecycle: draft, publish, archive, restore to draft, republish — never hard-deleted", async () => {
     const t = makeTest();
     const f = await createSchool(t, "school-notices-1");
     const admin = await as(t, f.users.admin);
     const teacher = await as(t, f.users.classTeacher);
 
-    // Non-admin cannot create notice
-    const nonAdminErr = await errorCode(
-      teacher.mutation(api.notices.create, {
-        title: "Staff Meeting",
-        body: "All teachers gather in hall.",
-        type: "notice",
-        priority: "normal",
-        audience: { kind: "roles", roles: ["teacher"] },
-        status: "published",
-        publishDate: "2026-05-01",
-      }),
-    );
-    expect(nonAdminErr).toBe("FORBIDDEN");
+    // A teacher cannot address the whole staff (only their own sections).
+    expect(await errorCode(teacher.mutation(api.notices.createDraft, {
+      title: "Staff Meeting", body: "All teachers gather in hall.", type: "notice", priority: "normal",
+      audience: { kind: "roles", roles: ["teacher"] }, publishDate: "2026-05-01",
+    }))).toBe("FORBIDDEN");
 
-    // Admin creates draft notice
-    const { noticeId } = await admin.mutation(api.notices.create, {
-      title: "Science Fair 2026",
-      body: "Annual school science fair preparations begin.",
-      type: "event",
-      priority: "normal",
-      audience: { kind: "all" },
-      status: "draft",
-      publishDate: "2026-05-01",
+    const { noticeId } = await admin.mutation(api.notices.createDraft, {
+      title: "Science Fair 2026", body: "Annual school science fair preparations begin.", type: "event", priority: "normal",
+      audience: { kind: "all" }, publishDate: "2026-04-01",
     });
-    expect(noticeId).toBeDefined();
+    expect((await feedIds(teacher)).has(noticeId)).toBe(false); // drafts are private
+    expect(await errorCode(teacher.query(api.notices.get, { noticeId }))).toBe("NOT_FOUND");
 
-    // Teacher cannot see draft notice
-    const teacherList1 = await teacher.query(api.notices.list, {});
-    expect(teacherList1.some((n) => n._id === noticeId)).toBe(false);
+    const published = await admin.mutation(api.notices.publish, { noticeId });
+    expect(published.scheduled).toBe(false);
+    expect((await feedIds(teacher)).has(noticeId)).toBe(true);
+    const notifiedOnce = (await teacher.query(api.notifications.list, {})).filter((n) => n.type === "notice").length;
+    expect(notifiedOnce).toBe(1);
 
-    // Admin publishes notice
-    await admin.mutation(api.notices.update, {
-      noticeId,
-      status: "published",
-      publishDate: "2026-04-01", // already published as of today
-    });
-
-    // Now teacher sees the published notice
-    const teacherList2 = await teacher.query(api.notices.list, {});
-    expect(teacherList2.some((n) => n._id === noticeId)).toBe(true);
-
-    // Archive notice
     await admin.mutation(api.notices.archive, { noticeId });
-    const teacherList3 = await teacher.query(api.notices.list, {});
-    expect(teacherList3.some((n) => n._id === noticeId)).toBe(false);
+    expect((await feedIds(teacher)).has(noticeId)).toBe(false);
+    expect(await errorCode(admin.mutation(api.notices.publish, { noticeId }))).toBe("CONFLICT"); // restore first
 
-    // Restore notice
-    await admin.mutation(api.notices.restore, { noticeId });
-    const teacherList4 = await teacher.query(api.notices.list, {});
-    expect(teacherList4.some((n) => n._id === noticeId)).toBe(true);
+    // Restore returns the notice to DRAFT: it stays off the board until republished.
+    const restored = await admin.mutation(api.notices.restore, { noticeId });
+    expect(restored.status).toBe("draft");
+    expect((await admin.query(api.notices.get, { noticeId })).status).toBe("draft");
+    expect((await feedIds(teacher)).has(noticeId)).toBe(false);
+    expect(await errorCode(admin.mutation(api.notices.restore, { noticeId }))).toBe("CONFLICT"); // only archived notices
 
-    // Delete notice
-    await admin.mutation(api.notices.remove, { noticeId });
-    const teacherList5 = await teacher.query(api.notices.list, {});
-    expect(teacherList5.some((n) => n._id === noticeId)).toBe(false);
+    await admin.mutation(api.notices.publish, { noticeId });
+    expect((await feedIds(teacher)).has(noticeId)).toBe(true);
+    // Republishing does not notify the same people twice.
+    expect((await teacher.query(api.notifications.list, {})).filter((n) => n.type === "notice")).toHaveLength(notifiedOnce);
+
+    // There is no hard delete: archiving is how a notice leaves the board.
+    expect("remove" in api.notices).toBe(false);
+    await admin.mutation(api.notices.archive, { noticeId });
+    expect((await feedIds(teacher)).has(noticeId)).toBe(false);
+    expect((await admin.query(api.notices.listManaged, { status: "archived" })).some((n) => n.noticeId === noticeId)).toBe(true);
   });
 
-  test("audience targeting: school-wide, role-specific, class-specific, and section-specific privacy", async () => {
+  test("audience targeting: school-wide, role-specific, and section-specific privacy", async () => {
     const t = makeTest();
     const f = await createSchool(t, "school-notices-2");
     const admin = await as(t, f.users.admin);
-    const classTeacher = await as(t, f.users.classTeacher); // teaches section A
-    const student = await as(t, f.users.student); // enrolled in section A, Grade 8
-
+    const classTeacher = await as(t, f.users.classTeacher); // class teacher of 8-A
+    const student = await as(t, f.users.student); // enrolled in 8-A
     const today = "2026-04-01";
+    const post = async (title: string, audience: Audience) => {
+      const { noticeId } = await admin.mutation(api.notices.createDraft, { title, body: `${title} body`, type: "notice", priority: "normal", audience, publishDate: today });
+      await admin.mutation(api.notices.publish, { noticeId });
+      return noticeId;
+    };
 
-    // 1. School-wide notice
-    const { noticeId: allNoticeId } = await admin.mutation(api.notices.create, {
-      title: "School Reopening Notice",
-      body: "Welcome to the new academic year.",
-      type: "notice",
-      priority: "normal",
-      audience: { kind: "all" },
-      status: "published",
-      publishDate: today,
-    });
+    const allNoticeId = await post("School Reopening Notice", { kind: "all" });
+    const teacherNoticeId = await post("Staff Evaluation Meeting", { kind: "roles", roles: ["teacher"] });
+    const sectionANoticeId = await post("Section 8-A Project Submission", { kind: "sections", sectionIds: [f.sectionA] });
+    const sectionBNoticeId = await post("Section 8-B Field Trip", { kind: "sections", sectionIds: [f.sectionB] });
 
-    // 2. Teacher-only notice
-    const { noticeId: teacherNoticeId } = await admin.mutation(api.notices.create, {
-      title: "Staff Evaluation Meeting",
-      body: "Confidential teacher meeting.",
-      type: "notice",
-      priority: "normal",
-      audience: { kind: "roles", roles: ["teacher"] },
-      status: "published",
-      publishDate: today,
-    });
+    const studentSees = await feedIds(student);
+    expect(studentSees.has(allNoticeId)).toBe(true);
+    expect(studentSees.has(sectionANoticeId)).toBe(true);
+    expect(studentSees.has(teacherNoticeId)).toBe(false);
+    expect(studentSees.has(sectionBNoticeId)).toBe(false);
+    expect(await errorCode(student.query(api.notices.get, { noticeId: teacherNoticeId }))).toBe("NOT_FOUND");
 
-    // 3. Section A only notice
-    const { noticeId: sectionANoticeId } = await admin.mutation(api.notices.create, {
-      title: "Section 8-A Project Submission",
-      body: "Maths assignment for 8-A only.",
-      type: "notice",
-      priority: "normal",
-      audience: { kind: "sections", sectionIds: [f.sectionA] },
-      status: "published",
-      publishDate: today,
-    });
+    const teacherSees = await feedIds(classTeacher);
+    expect(teacherSees.has(allNoticeId)).toBe(true);
+    expect(teacherSees.has(teacherNoticeId)).toBe(true);
+    expect(teacherSees.has(sectionANoticeId)).toBe(true);
 
-    // 4. Section B only notice
-    const { noticeId: sectionBNoticeId } = await admin.mutation(api.notices.create, {
-      title: "Section 8-B Field Trip",
-      body: "Exclusively for 8-B.",
-      type: "notice",
-      priority: "normal",
-      audience: { kind: "sections", sectionIds: [f.sectionB] },
-      status: "published",
-      publishDate: today,
-    });
-
-    // Student A (enrolled in Section A):
-    const studentNotices = await student.query(api.notices.list, {});
-    const studentNoticeIds = new Set(studentNotices.map((n: any) => n._id));
-
-    // Can see: allNotice and sectionANotice
-    expect(studentNoticeIds.has(allNoticeId)).toBe(true);
-    expect(studentNoticeIds.has(sectionANoticeId)).toBe(true);
-
-    // CANNOT see: teacherNotice or sectionBNotice
-    expect(studentNoticeIds.has(teacherNoticeId)).toBe(false);
-    expect(studentNoticeIds.has(sectionBNoticeId)).toBe(false);
-
-    // Trying to get teacherNotice directly throws NOT_FOUND
-    const privacyErr = await errorCode(student.query(api.notices.get, { noticeId: teacherNoticeId }));
-    expect(privacyErr).toBe("NOT_FOUND");
-
-    // Teacher:
-    const teacherNotices = await classTeacher.query(api.notices.list, {});
-    const teacherNoticeIds = new Set(teacherNotices.map((n: any) => n._id));
-    expect(teacherNoticeIds.has(allNoticeId)).toBe(true);
-    expect(teacherNoticeIds.has(teacherNoticeId)).toBe(true);
+    // Audience ids are validated against the caller's school.
+    const other = await createSchool(t, "school-notices-2b");
+    expect(await errorCode(admin.mutation(api.notices.createDraft, {
+      title: "Wrong school", body: "x", type: "notice", priority: "normal", audience: { kind: "sections", sectionIds: [other.sectionA] }, publishDate: today,
+    }))).toBe("NOT_FOUND");
   });
 
-  test("urgent priority notice dispatches notifications to intended audience", async () => {
+  test("an urgent notice notifies its intended audience on publish", async () => {
     const t = makeTest();
     const f = await createSchool(t, "school-notices-3");
     const admin = await as(t, f.users.admin);
     const student = await as(t, f.users.student);
 
-    // Create urgent school-wide notice
-    await admin.mutation(api.notices.create, {
-      title: "Heavy Rain Holiday Alert",
-      body: "School is closed tomorrow due to heavy rainfall warning.",
-      type: "holiday",
-      priority: "urgent",
-      audience: { kind: "all" },
-      status: "published",
-      publishDate: "2026-04-01",
+    const { noticeId } = await admin.mutation(api.notices.createDraft, {
+      title: "Heavy Rain Holiday Alert", body: "School is closed tomorrow due to heavy rainfall warning.", type: "holiday", priority: "urgent",
+      audience: { kind: "all" }, publishDate: "2026-04-01",
     });
+    const { notified } = await admin.mutation(api.notices.publish, { noticeId });
+    expect(notified).toBeGreaterThan(0);
 
-    // Student receives the notification
-    const studentNotifs = await student.query(api.notifications.list, {});
-    const urgentNotif = studentNotifs.find((n) => n.title.includes("Heavy Rain"));
-    expect(urgentNotif).toBeDefined();
-    expect(urgentNotif?.type).toBe("notice");
-    expect(urgentNotif?.message).toContain("School is closed tomorrow");
+    const urgent = (await student.query(api.notifications.list, {})).find((n) => n.message.includes("Heavy Rain"));
+    expect(urgent).toBeDefined();
+    expect(urgent?.type).toBe("notice");
+    expect(urgent?.title).toBe("Important notice");
   });
 
   test("events creation and audience query", async () => {
@@ -176,22 +127,23 @@ describe("Notices and school events (AP-02)", () => {
     const f = await createSchool(t, "school-notices-4");
     const admin = await as(t, f.users.admin);
     const student = await as(t, f.users.student);
+    const teacher = await as(t, f.users.classTeacher);
 
-    const { eventId } = await admin.mutation(api.notices.createEvent, {
-      title: "Sports Day 2026",
-      description: "Inter-house athletics championship",
-      kind: "event",
-      startDate: "2026-11-15",
-      endDate: "2026-11-16",
-      audience: { kind: "all" },
+    expect(await errorCode(teacher.mutation(api.events.create, {
+      title: "Staff picnic", kind: "event", startDate: "2026-11-20", endDate: "2026-11-20", audience: { kind: "all" },
+    }))).toBe("FORBIDDEN");
+
+    const { eventId } = await admin.mutation(api.events.create, {
+      title: "Sports Day 2026", description: "Inter-house athletics championship", kind: "event",
+      startDate: "2026-11-15", endDate: "2026-11-16", audience: { kind: "all" },
     });
     expect(eventId).toBeDefined();
-
-    const events = await student.query(api.notices.listEvents, {
-      startDate: "2026-11-01",
-      endDate: "2026-11-30",
+    await admin.mutation(api.events.create, {
+      title: "8-B trip", kind: "event", startDate: "2026-11-18", endDate: "2026-11-18", audience: { kind: "sections", sectionIds: [f.sectionB] },
     });
-    expect(events.length).toBe(1);
+
+    const events = await student.query(api.events.list, { from: "2026-11-01", to: "2026-11-30" });
+    expect(events).toHaveLength(1); // the 8-B trip is not addressed to an 8-A student
     expect(events[0].title).toBe("Sports Day 2026");
   });
 });
