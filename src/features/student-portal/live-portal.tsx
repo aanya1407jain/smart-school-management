@@ -225,7 +225,7 @@ function StudentRecord({ p }: { p: OkProfile }) {
               <Field label="Academic year" value={p.academicYear?.name ?? "Not set"} testId="profile-year" />
               <Field label="Class" value={p.enrollment?.className ?? "—"} testId="profile-class" />
               <Field label="Section" value={p.enrollment?.sectionName ?? "—"} testId="profile-section" />
-              <Field label="Roll number" value={p.enrollment?.rollNo ?? "—"} />
+              <Field label="Roll number" value={p.enrollment?.rollNo ?? "—"} testId="profile-roll" />
               <Field label="Class teacher" value={p.enrollment?.classTeacher ?? "—"} />
               <Field label="Room" value={p.enrollment?.room ?? "—"} />
               <Field label="Enrollment status" value={p.enrollment ? <StatusBadge status={p.enrollment.status} label={p.enrollment.status.charAt(0).toUpperCase() + p.enrollment.status.slice(1)} /> : "Not enrolled"} />
@@ -355,4 +355,3 @@ export function LiveNotices() {
   if (n.state === "no_student_record") return <MissingRecord />;
   return (<div className="mx-auto max-w-4xl"><PageHeader title="Notices" description="Announcements for the whole school, students, and your class." /><LiveNoticesList notices={n.notices} /></div>);
 }
-
