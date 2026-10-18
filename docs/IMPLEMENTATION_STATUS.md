@@ -1,5 +1,67 @@
 # Implementation status — Smart School Management System
 
+_Status as of **18 Oct 2026** (MVP-completion pass, uncommitted on `feat/convex-backend-foundation` @ `9ffbbc6`, whose tree equals `origin/main` @ `a9cf740`). Verified against an isolated **sandbox** Convex backend (local, throwaway — never a shared or production deployment). Evidence: `docs/VERIFICATION_REPORT.md`. Open items: `docs/REMAINING_WORK.md`._
+
+Status words: **DONE** = implemented for real (school-created) accounts on Convex, server-enforced, and covered by automated tests that ran against Convex (convex-test and/or the sandbox E2E/integration runs). **PARTIAL** = usable, with named gaps. Mock-layer tests (`scripts/*.test.ts`) are never counted as proof of a live workflow.
+
+## A. Module status (live accounts)
+
+| Requirement module | Status | What a school-created account can do now | Remaining (see REMAINING_WORK) |
+|---|---|---|---|
+| Authentication & users | **DONE** | Login ID sign-in, forced temporary-password change, admin-issued resets, suspend/reactivate (sessions revoked), **admin-portal office logins incl. accountant-only (restricted admin)**, access changes audited | Self-service email/SMS reset deliberately not built (no approved provider) |
+| Student management | **DONE** | Admit, edit, list (roster order), profile with attendance/results/homework/fees, **documents (admins upload/delete; admins + family read)**, **enrollment history**, **withdraw / complete / transfer section** (renumbered, history kept) | — |
+| Academic management | **DONE** | Years, classes, sections, subjects, curriculum, class & subject teachers, enrolment | — |
+| Teacher & staff | **DONE** (no payroll by design) | **Teacher records list/edit/deactivate, daily staff attendance, leave apply/withdraw (teacher), approve/reject (admin) with one notification**; teacher & admin **profiles** | New teachers are added via Accounts & Import (single row or file); no separate "add teacher" form |
+| Student attendance | **DONE** | Class-teacher marking/correction, admin view, student/guardian view | — |
+| Examinations & results | **DONE** | **Exam create/edit, papers, status lifecycle, marks-entry progress, admin & teacher marks entry, publish (gated on complete marks), published results, printable report card**, notifications once per family member | — |
+| Timetable | **DONE** | **Admin builder: periods, per-section weekly grid, subject + qualified teacher + room, clash checks on server**; teacher and student views | — |
+| Homework | **DONE** | Teacher create/edit/close, **attachments**, review with feedback; student submit (text and/or file); **admin oversight by section** | — |
+| Fee management | **DONE** | Structures (**edit while unused; name/classes always**), assignment, payments, receipts, concessions, **reversal / concession revoke / cancel assignment with reason + confirmation (append-only, audited, accountant-aware)** | — |
+| Notices & events | **DONE** | Notices with audiences, **events/holidays calendar UI (admin manage, everyone views)**, **teacher class-notice composer** | — |
+| Dashboards & reports | **DONE** | Admin dashboard (finance-only for accountants), **live teacher dashboard**, reports (tabs follow permissions), **per-student low-attendance list using the school threshold** | Attendance "bands per student" chart still not computed for live data |
+| Notifications | **DONE** | In-app list, mark read, remove, **clear all**, producers for attendance, homework, exams (once), notices, fees (payment), **fee-due reminders (daily job, one per installment & recipient, respects setting)**, leave decisions | Fee-reminder cron verified in convex-test only; not yet observed on a cloud deployment |
+| Student-focused portal | **DONE** | Dashboard, attendance, timetable, homework (submit with file), results + report card, fees, notices + calendar, profile; guardians switch children | — |
+| Audit log | **DONE** (P2) | **Admin audit-log viewer** (paginated, filter by action, actor named) | — |
+
+Demo personas of the seeded demo school still use the mock services (by design, `PortalPage demo/live`); demo and live components are now separate files (§C).
+
+## B. Changes in this pass (18 Oct 2026)
+
+Backend (Convex):
+- `core/permissions.ts` — an **admin** membership with the `accountant` set resolves to **exactly** the accountant permissions (restricted admin). `isAccountantOnly()` helper.
+- `accounts.ts` — `create` accepts `{kind:"staff", displayName, email?, accountantOnly}` (admin-portal login); `listStaffAccounts`; `listPeople` students readable with `students:read:all` (account details only with `users:manage`).
+- `profile.ts` (new) — `mine`, `updateMine` (admin rename; teacher own phone), audited.
+- `staff.ts` — `listTeachers`, `updateTeacher` (validated, audited, sign-in display name kept in step).
+- `academics.ts` — `enrollmentHistory`.
+- `files.ts` — `student_document` reads limited to `students:write` (admins) + linked student/guardian; `listForOwner` applies the rule per file kind.
+- `fees.ts` — `revokeConcession` validates the reason before writing.
+- `reports.ts` — `lowAttendance` (school threshold + late rule, section filter, bounded).
+- `feeReminders.ts` + `crons.ts` (new) — daily fan-out, paginated per school, dedupe keys `fees.due:<installment>` / `fees.overdue:<installment>`, skipped when the school setting is off or the school is not active.
+- `audit.ts` — `feed` (paginated, actor named) and `actions`.
+- `dashboards.ts` (new) — `teacherOverview`. `exams.ts` — `progress`, richer `sectionResults`. `homework.ts` — submission counts. `studentPortal.myResults` — report-card header. `model/studentRecords.ts` — attachment ids, section label, timetable ids.
+
+Frontend (live slots only; demo slots unchanged):
+- Live: teacher dashboard, exams admin + detail + marks (admin/teacher), timetable builder, admin homework oversight, homework attachments/edit, events panel, teacher class-notice composer, report card, fee corrections panel, structure edit, notifications clear-all, low-attendance list, staff access panel (Accounts → "Office & access"), teachers & staff workspace, staff profile + my leave, student documents / enrollment history / withdraw / transfer, audit-log page.
+- Navigation: `/admin/teachers`, `/admin/examinations`, `/admin/timetable`, `/admin/homework`, `/admin/audit` (new), `/admin/profile` (new nav item), `/teacher/dashboard`, `/teacher/profile` flagged live.
+- Report tabs and student write actions follow permissions (accountant-only sees Fees only).
+
+## C. Demo / live separation
+
+Convex-wired components that had been placed in demo slots were restored to their mock versions (`homework-manager.tsx`, `marks-entry.tsx`, `my-homework-demo.tsx`) and the live slots use the Convex components (`my-homework.tsx`, `teacher-live.tsx`, `*-live.tsx`). This — not missing functions — was the cause of the earlier E2E stop.
+
+## D. Decisions recorded
+
+- **Accountant** = restricted admin (no new primary role), server-enforced, audited (`membership.access_changed`, `account.created`).
+- **Student documents**: upload/delete by administrators only (audited); readable by administrators and the student/linked guardians; teachers and accountant-only logins cannot read them.
+- **Password reset**: administrator-issued temporary password (Accounts → … → Reset password; forced change at next sign-in; sessions revoked) plus operator break-glass `setup:issueTemporaryPassword`. No email/SMS reset until a provider and design are approved.
+- **No payroll/HR**: staff attendance is one daily status; leave is apply/decide only.
+
+---
+
+# Archive — previous audits and change log (kept for history; superseded by the sections above)
+
+## Archived: 12 Oct 2026 audit
+
 _Audit date: 12 Oct 2026 (contract fixes applied the same day on `feat/convex-backend-foundation`, uncommitted — see §11) · audited code: GitHub `main` @ `6fda652` (PR #1 merged; identical to local `feat/convex-backend-foundation` @ `1b807b5`) · auditor: backend/integration lead (Aanya) with Claude._
 
 Every statement below was checked against the code, not the README. "Tested" means an automated test exercises it.

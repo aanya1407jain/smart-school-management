@@ -186,7 +186,8 @@ describe("student portal modules (live accounts)", () => {
     expect(tt.state === "ok" && tt.section === "8-B" && tt.lessons.length === 1).toBe(true); // 8-B's real timetable
     const hw = await me.query(api.studentPortal.myHomework, {});
     expect(hw.state === "ok" && hw.homework.map((h) => [h.title, h.submission])).toEqual([["B only", null]]);
-    expect((await me.query(api.studentPortal.myResults, {}))).toEqual({ state: "ok", results: [] });
+    // The report-card header (school name, student name and admission number) comes with the results.
+    expect((await me.query(api.studentPortal.myResults, {}))).toEqual({ state: "ok", school: "School alpha", student: { name: "Kabir Rao", admissionNo: "NEW-1" }, results: [] });
     const fees = await me.query(api.studentPortal.myFees, {});
     expect(fees.state === "ok" && fees.obligations.length === 0 && fees.totals.grossMinor === 0).toBe(true);
     const n = await me.query(api.studentPortal.myNotices, { today: TODAY });

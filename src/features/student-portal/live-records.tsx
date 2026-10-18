@@ -6,10 +6,12 @@
  * convex/model/studentRecords.ts) and say so plainly when there is nothing.
  * Amounts arrive in minor units (paise).
  */
-import { Megaphone } from "lucide-react";
+import { useState } from "react";
+import { FileText, Megaphone } from "lucide-react";
 import type { FunctionReturnType } from "convex/server";
 import type { api } from "@convex/_generated/api";
-import { Badge, Card, CardHeader, EmptyState, StatusBadge } from "@/components/ui";
+import { Badge, Button, Card, CardHeader, EmptyState, StatusBadge } from "@/components/ui";
+import { ReportCardModal } from "@/features/examinations/report-card";
 import { formatCurrency, formatPercent } from "@/lib/utils/format";
 import { dueLabel, formatClock, formatDate, todayISO, WEEKDAY_NAMES } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils/cn";
@@ -25,7 +27,10 @@ const rupees = (minor: number) => formatCurrency(minor / 100);
 const METHOD: Record<string, string> = { cash: "Cash", upi: "UPI", card: "Card", bank_transfer: "Bank transfer", cheque: "Cheque", online: "Online" };
 
 // ------------------------------------------------------------------ results
-export function LiveResultCard({ r }: { r: LiveResult }) {
+type ReportHeader = { school: string; student: { name: string; admissionNo: string } };
+
+export function LiveResultCard({ r, header }: { r: LiveResult; header?: ReportHeader }) {
+  const [card, setCard] = useState(false);
   return (
     <Card className="overflow-hidden" data-testid="live-result">
       <div className="flex items-start justify-between gap-3 border-b border-line/60 bg-gradient-to-r from-alabaster to-white px-5 py-4">
@@ -66,13 +71,27 @@ export function LiveResultCard({ r }: { r: LiveResult }) {
           </tr>
         </tfoot>
       </table>
+      {header && (
+        <div className="flex justify-end border-t border-line/60 px-5 py-3">
+          <Button size="sm" variant="outline" onClick={() => setCard(true)}><FileText className="h-4 w-4" /> Report card</Button>
+          <ReportCardModal
+            open={card}
+            onOpenChange={setCard}
+            data={{
+              schoolName: header.school, studentName: header.student.name, admissionNo: header.student.admissionNo, classLabel: r.sectionLabel,
+              examName: r.examName, term: r.term, startDate: r.startDate, subjects: r.subjects.map((x) => ({ ...x, subjectId: x.subjectId as string })),
+              totalMarks: r.totalMarks, maxMarks: r.maxMarks, percentage: r.percentage, grade: r.grade, rank: r.rank, sectionSize: r.sectionSize,
+            }}
+          />
+        </div>
+      )}
     </Card>
   );
 }
 
-export function LiveResultsList({ results }: { results: LiveResult[] }) {
+export function LiveResultsList({ results, header }: { results: LiveResult[]; header?: ReportHeader }) {
   if (results.length === 0) return <Card><EmptyState title="No published results yet" description="Results appear here once the school publishes an examination." /></Card>;
-  return <div className="grid gap-4 lg:grid-cols-2">{results.map((r) => <LiveResultCard key={r.examId} r={r} />)}</div>;
+  return <div className="grid gap-4 lg:grid-cols-2">{results.map((r) => <LiveResultCard key={r.examId} r={r} header={header} />)}</div>;
 }
 
 // ------------------------------------------------------------------ fees

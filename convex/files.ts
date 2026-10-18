@@ -90,6 +90,12 @@ async function requireFileRead(ctx: Ctx, file: Doc<"files">) {
     case "school":
       return; // any member of the school
     case "student":
+      // Student documents (certificates, ID proofs…): administrators (students:write) and the
+      // student / linked guardians only — not subject or class teachers, not the accountant set.
+      if (file.kind === "student_document") {
+        await requireStudentAccess(ctx, file.ownerId as Id<"students">, { all: "students:write", own: "profile:read:own" });
+        return;
+      }
       await requireStudentAccess(ctx, file.ownerId as Id<"students">, { all: "students:read:all", assigned: "students:read:assigned", own: "profile:read:own" });
       return;
     case "teacher":
@@ -173,8 +179,15 @@ export const listForOwner = schoolQuery({
   handler: async (ctx, { ownerType, ownerId }) => {
     const rows = await ctx.db.query("files").withIndex("by_owner", (q) => q.eq("schoolId", ctx.actor.schoolId).eq("ownerType", ownerType).eq("ownerId", ownerId)).collect();
     if (rows.length === 0) return [];
-    await requireFileRead(ctx, rows[0]); // same owner → same rule
-    return rows.map((f) => ({ _id: f._id, kind: f.kind, fileName: f.fileName, contentType: f.contentType, size: f.size, uploadedAt: f._creationTime }));
+    // Same owner → same rule per kind (student documents are stricter than other student files).
+    const readable = new Map<string, boolean>();
+    let firstError: unknown = null;
+    for (const f of rows) {
+      if (readable.has(f.kind)) continue;
+      try { await requireFileRead(ctx, f); readable.set(f.kind, true); } catch (e) { readable.set(f.kind, false); firstError ??= e; }
+    }
+    if (![...readable.values()].some(Boolean)) throw firstError; // no access at all → the usual NOT_FOUND / FORBIDDEN
+    return rows.filter((f) => readable.get(f.kind)).map((f) => ({ _id: f._id, kind: f.kind, fileName: f.fileName, contentType: f.contentType, size: f.size, uploadedAt: f._creationTime }));
   },
 });
 

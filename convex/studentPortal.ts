@@ -115,7 +115,8 @@ export const myResults = schoolQuery({
   handler: async (ctx, { studentId }) => {
     const student = await resolvePortalStudent(ctx, studentId, "results:read:own");
     if (!student) return { state: "no_student_record" as const };
-    return { state: "ok" as const, results: await publishedResults(ctx, student) };
+    const school = (await ctx.db.get(ctx.actor.schoolId))!;
+    return { state: "ok" as const, school: school.name, student: { name: fullName(student), admissionNo: student.admissionNo }, results: await publishedResults(ctx, student) };
   },
 });
 

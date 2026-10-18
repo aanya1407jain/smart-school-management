@@ -305,9 +305,10 @@ export const revokeConcession = schoolMutation({
   handler: async (ctx, { concessionId, reason }) => {
     requirePermission(ctx.actor, "fees:manage");
     const c = await getInSchool(ctx, "feeConcessions", concessionId, "Concession");
+    const why = assertNonEmpty(reason, "reason", 300);
     if (c.status === "revoked") return { ok: true };
     await ctx.db.patch(c._id, { status: "revoked" });
-    await writeAudit(ctx, { schoolId: ctx.actor.schoolId, actor: ctx.actor, action: "fees.concession_revoked", entity: { table: "feeConcessions", id: c._id }, summary: "Revoked a concession", metadata: { reason: assertNonEmpty(reason, "reason", 300) } });
+    await writeAudit(ctx, { schoolId: ctx.actor.schoolId, actor: ctx.actor, action: "fees.concession_revoked", entity: { table: "feeConcessions", id: c._id }, summary: "Revoked a concession", metadata: { reason: why } });
     return { ok: true };
   },
 });

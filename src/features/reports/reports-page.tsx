@@ -22,22 +22,37 @@ import { formatDate, todayISO } from "@/lib/utils/dates";
 import { downloadCsv } from "@/lib/utils/csv";
 import { useAcademicOptions } from "@/features/shared/use-academic-options";
 import { PAYMENT_METHOD_LABELS } from "@/lib/constants/labels";
+import { LiveLowAttendance } from "./low-attendance-live";
 
 export function ReportsPage() {
   const params = useSearchParams();
   const router = useRouter();
-  const [tab, setTab] = useState(params.get("tab") ?? "students");
-  useEffect(() => { const t = params.get("tab"); if (t) setTab(t); }, [params]);
+  const { can } = useSession();
+  // Tabs follow the server's permissions: school-wide reports need reports:read (attendance also
+  // attendance:read:all); finance needs reports:finance or fees:manage (e.g. an accountant-only login).
+  const schoolWide = can("reports:read");
+  const tabs = [
+    ...(schoolWide ? [{ value: "students", label: "Student statistics" }] : []),
+    ...(schoolWide || can("attendance:read:all") ? [{ value: "attendance", label: "Attendance" }] : []),
+    ...(can("reports:finance") || can("fees:manage") ? [{ value: "fees", label: "Fees" }] : []),
+    ...(schoolWide ? [{ value: "exams", label: "Examination performance" }, { value: "academic", label: "Academic performance" }] : []),
+  ];
+  const allowed = new Set(tabs.map((t) => t.value));
+  const fallback = tabs[0]?.value ?? "students";
+  const [tab, setTabState] = useState(params.get("tab") ?? fallback);
+  const setTab = (t: string) => setTabState(allowed.has(t) ? t : fallback);
+  useEffect(() => { const t = params.get("tab"); if (t) setTabState(allowed.has(t) ? t : fallback); }, [params]); // eslint-disable-line react-hooks/exhaustive-deps
+  const current = allowed.has(tab) ? tab : fallback;
   return (
     <div>
       <PageHeader title="Reports" description="Every figure and chart is computed live from school records — change the data and the reports follow." />
-      <Tabs value={tab} onValueChange={(t) => { setTab(t); router.replace(`/admin/reports?tab=${t}`, { scroll: false }); }}>
-        <TabsList items={[{ value: "students", label: "Student statistics" }, { value: "attendance", label: "Attendance" }, { value: "fees", label: "Fees" }, { value: "exams", label: "Examination performance" }, { value: "academic", label: "Academic performance" }]} />
-        <TabsContent value="students"><StudentStats /></TabsContent>
-        <TabsContent value="attendance"><AttendanceReport /></TabsContent>
-        <TabsContent value="fees"><FeeReport /></TabsContent>
-        <TabsContent value="exams"><ExamReport /></TabsContent>
-        <TabsContent value="academic"><AcademicReport /></TabsContent>
+      <Tabs value={current} onValueChange={(t) => { setTab(t); router.replace(`/admin/reports?tab=${t}`, { scroll: false }); }}>
+        <TabsList items={tabs} />
+        {allowed.has("students") && <TabsContent value="students"><StudentStats /></TabsContent>}
+        {allowed.has("attendance") && <TabsContent value="attendance"><AttendanceReport /></TabsContent>}
+        {allowed.has("fees") && <TabsContent value="fees"><FeeReport /></TabsContent>}
+        {allowed.has("exams") && <TabsContent value="exams"><ExamReport /></TabsContent>}
+        {allowed.has("academic") && <TabsContent value="academic"><AcademicReport /></TabsContent>}
       </Tabs>
     </div>
   );
@@ -116,7 +131,7 @@ function AttendanceReport() {
   const live = dataSource === "live";
 
   // Live: register totals per month and per section (this academic year, school-local dates).
-  // Per-student bands and the below-threshold list are not computed for live data yet (shown as such).
+  // Per-student bands are not computed for live data (shown as such); the below-threshold list is LiveLowAttendance.
   const liveAtt = useSchoolQuery(api.reports.attendanceReport, live ? {} : "skip");
   const q = useQuery(() => services.reports.getAttendanceReport(), [live], { enabled: !live });
 
@@ -183,6 +198,7 @@ function AttendanceReport() {
               </BarChart>
             </ResponsiveContainer>
           </ChartCard>
+          {live && <LiveLowAttendance />}
           {d.lowAttendance !== null && <Card>
             <CardHeader title={`Students below ${d.threshold}%`} description="Follow up with these students and their guardians" />
             <div className="p-5">

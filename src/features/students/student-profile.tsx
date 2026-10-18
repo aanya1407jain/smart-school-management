@@ -12,6 +12,7 @@ import { services } from "@/lib/services";
 import { useQuery as useDemoQuery } from "@/lib/hooks/use-query";
 import { DemoStudentProfileBody } from "./demo-student-profile";
 import { LiveFeesPanel, LiveHomeworkList, LiveResultsList, homeworkState, type LiveFees } from "@/features/student-portal/live-records";
+import { EnrollmentActions, EnrollmentHistory, StudentDocuments } from "./student-records-live";
 import {
   Avatar, Badge, Card, CardHeader, EmptyState, GlassCard, LinkButton, ProgressRing, StatusBadge, Tabs, TabsContent, TabsList,
 } from "@/components/ui";
@@ -206,7 +207,7 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
     ...(p.fees ? [{ value: "fees", label: "Fees" }] : []),
     { value: "exams", label: "Examinations", count: p.results.length },
     { value: "homework", label: "Homework", count: p.homework.length },
-    { value: "documents", label: "Documents", count: s.documents.length },
+    ...(p.access !== "assigned" ? [{ value: "documents", label: "Documents" }] : []),
     { value: "guardian", label: "Guardian" },
   ];
 
@@ -307,6 +308,9 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
               <Info icon={<UserRound />} label="Section" value={safe(p.enrollment?.sectionName)} />
               <Info icon={<UserRound />} label="Roll no." value={p.enrollment?.rollNo != null ? String(p.enrollment.rollNo) : dash} />
             </dl>
+            {isAdmin && s.id && p.enrollment?.status === "active" && (
+              <EnrollmentActions studentId={s.id} enrollmentId={p.enrollment.enrollmentId as string} sectionLabel={p.classLabel} studentName={name} />
+            )}
             {p.teachers.length > 0 && (
               <>
                 <CardHeader title="Subjects & teachers" />
@@ -321,6 +325,7 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
               </>
             )}
           </Card>
+          {p.access !== "assigned" && s.id && <div className="mt-4"><EnrollmentHistory studentId={s.id} /></div>}
         </TabsContent>
 
         <TabsContent value="attendance">
@@ -394,38 +399,11 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
           <LiveHomeworkList homework={p.homework} />
         </TabsContent>
 
-        <TabsContent value="documents">
-          <Card>
-            {s.documents.length === 0 ? (
-              <EmptyState
-                title="No documents uploaded"
-                description="Document upload will be available once file storage is connected."
-                icon={<FileText className="h-6 w-6" />}
-              />
-            ) : (
-              <ul className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
-                {s.documents.map((d: any, i: number) => (
-                  <li key={d.id ?? d._id ?? i} className="flex items-center gap-3 rounded-xl border border-line/70 bg-alabaster/50 p-3.5">
-                    <span className="grid h-10 w-10 place-items-center rounded-xl bg-white text-lagoon shadow-soft"><FileText className="h-5 w-5" aria-hidden /></span>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-ink">{d.name ?? "Document"}</p>
-                      <p className="text-[12px] text-ink-muted">
-                        {[d.kind && titleCase(d.kind), d.sizeKb != null && `${d.sizeKb} KB`, d.uploadedAt && formatShortDate(d.uploadedAt)].filter(Boolean).join(" · ")}
-                      </p>
-                    </div>
-                    <button
-                      className="rounded-lg p-2 text-ink-muted hover:bg-white hover:text-ink"
-                      aria-label={`Download ${d.name ?? "document"}`}
-                      title="File storage arrives with the backend"
-                    >
-                      <Download className="h-4 w-4" />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-        </TabsContent>
+        {p.access !== "assigned" && s.id && (
+          <TabsContent value="documents">
+            <StudentDocuments studentId={s.id} canManage={isAdmin} />
+          </TabsContent>
+        )}
 
         <TabsContent value="guardian">
           {p.guardians.length === 0 ? (
