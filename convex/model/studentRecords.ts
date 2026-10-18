@@ -196,7 +196,10 @@ export async function homeworkFor(ctx: QueryCtx, student: Doc<"students">, secti
       assignedOn: h.assignedOn,
       dueDate: h.dueDate,
       homeworkStatus: h.status,
-      submission: sub && sub.schoolId === student.schoolId ? { status: sub.status, submittedAt: sub.submittedAt, feedback: sub.feedback ?? null } : null,
+      attachmentFileIds: h.attachmentFileIds,
+      submission: sub && sub.schoolId === student.schoolId
+        ? { submissionId: sub._id, status: sub.status, submittedAt: sub.submittedAt, content: sub.content ?? null, feedback: sub.feedback ?? null }
+        : null,
     });
   }
   return out;

@@ -139,6 +139,8 @@ describe("student portal modules (live accounts)", () => {
     expect(tt.state === "ok" && tt.section === "8-A" && tt.lessons.length === 1 && tt.lessons[0].teacher === "Subject T").toBe(true);
     const hw = await me.query(api.studentPortal.myHomework, {});
     expect(hw.state === "ok" && hw.homework.map((h) => [h.title, h.submission?.status, h.submission?.feedback])).toEqual([["Fractions sheet", "reviewed", "Well done"]]);
+    // The fields the student homework screen renders: homework status, attachments, and the student's own submission text.
+    expect(hw.state === "ok" && hw.homework.map((h) => [h.homeworkStatus, h.attachmentFileIds, h.submission?.content, typeof h.submission?.submissionId])).toEqual([["active", [], null, "string"]]);
     const res = await me.query(api.studentPortal.myResults, {});
     expect(res.state === "ok" && res.results.map((r) => [r.examName, r.percentage, r.rank, r.sectionSize])).toEqual([["Unit Test 1", 82, 1, 1]]);
     const fees = await me.query(api.studentPortal.myFees, {});
