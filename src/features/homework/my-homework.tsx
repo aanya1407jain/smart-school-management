@@ -3,6 +3,7 @@
 import { Component, useMemo, useState, type ReactNode } from "react";
 import { CheckCircle2, ClipboardList, GraduationCap, MessageSquare, Paperclip, Send, UserX } from "lucide-react";
 import { useMutation, useQuery } from "convex/react";
+import type { FunctionReturnType } from "convex/server";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { useActiveStudentId, useSession } from "@/features/auth/session-provider";
@@ -15,26 +16,9 @@ import { cn } from "@/lib/utils/cn";
 
 type Filter = "todo" | "submitted" | "reviewed" | "all";
 
-type Submission = {
-  submissionId: Id<"homeworkSubmissions">;
-  status: "submitted" | "late" | "reviewed";
-  submittedAt: number;
-  content: string | null;
-  feedback: string | null;
-};
-
-type HomeworkRow = {
-  homeworkId: Id<"homework">;
-  title: string;
-  description: string;
-  assignedOn: string;
-  dueDate: string;
-  status: "active" | "closed";
-  subject: string;
-  teacher: string;
-  attachmentFileIds: string[];
-  submission: Submission | null;
-};
+/** One row of `studentPortal.myHomework` exactly as the server returns it (homework status is `homeworkStatus`). */
+type HomeworkRow = Extract<FunctionReturnType<typeof api.studentPortal.myHomework>, { state: "ok" }>["homework"][number];
+type Submission = NonNullable<HomeworkRow["submission"]>;
 
 /** What the student sees as the item's status badge. */
 type DisplayStatus = "pending" | "overdue" | "closed" | Submission["status"];
@@ -57,10 +41,10 @@ function errorMessage(e: unknown): string {
 }
 
 function toItem(h: HomeworkRow, today: string): Item {
-  const isOverdue = h.status === "active" && !h.submission && !!h.dueDate && h.dueDate < today;
+  const isOverdue = h.homeworkStatus === "active" && !h.submission && !!h.dueDate && h.dueDate < today;
   const displayStatus: DisplayStatus = h.submission
     ? h.submission.status
-    : h.status === "closed"
+    : h.homeworkStatus === "closed"
       ? "closed"
       : isOverdue
         ? "overdue"
@@ -71,7 +55,7 @@ function toItem(h: HomeworkRow, today: string): Item {
 function matchesStatus(h: Item, f: Filter) {
   switch (f) {
     case "todo":
-      return h.status === "active" && !h.submission;
+      return h.homeworkStatus === "active" && !h.submission;
     case "submitted":
       return !!h.submission && (h.submission.status === "submitted" || h.submission.status === "late");
     case "reviewed":
@@ -138,7 +122,7 @@ function MyHomeworkInner({ studentId }: { studentId: string | null }) {
 
   const items = useMemo<Item[]>(() => {
     if (!data || data.state !== "ok") return [];
-    return (data.homework as HomeworkRow[]).map((h) => toItem(h, today));
+    return data.homework.map((h) => toItem(h, today));
   }, [data, today]);
 
   const subjectOptions = useMemo(
@@ -206,7 +190,7 @@ function MyHomeworkInner({ studentId }: { studentId: string | null }) {
           <li key={h.homeworkId}>
             <HomeworkCard
               h={h}
-              canSubmit={!isGuardian && h.status === "active" && h.submission?.status !== "reviewed"}
+              canSubmit={!isGuardian && h.homeworkStatus === "active" && h.submission?.status !== "reviewed"}
               onSubmit={() => setSubmitId(h.homeworkId)}
             />
           </li>
@@ -299,7 +283,7 @@ function HomeworkCard({ h, canSubmit, onSubmit }: { h: Item; canSubmit: boolean;
         </div>
         <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
           <span className={cn("text-sm font-semibold", h.isOverdue ? "text-plum" : "text-ink-soft")}>
-            {h.submission ? "Done" : h.status === "closed" ? "Closed" : dueLabel(h.dueDate)}
+            {h.submission ? "Done" : h.homeworkStatus === "closed" ? "Closed" : dueLabel(h.dueDate)}
           </span>
           {canSubmit && (
             <Button size="sm" variant={h.submission ? "outline" : "primary"} onClick={onSubmit}>

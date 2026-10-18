@@ -226,7 +226,7 @@ function MarksSheet({ area, paperId, sectionId }: { area: Area; paperId: string;
           <Badge tone="sapphire">{stats.entered}/{students.length} entered</Badge>
           <Badge tone="teal">Average {stats.avg === null ? "—" : `${stats.avg.toFixed(1)}%`}</Badge>
           {locked && (
-            <Badge tone="mauve">
+            <Badge tone="lavender">
               <Lock className="h-3 w-3" /> Locked
             </Badge>
           )}
