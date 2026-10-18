@@ -420,10 +420,41 @@ export const sectionResults = schoolQuery({
     if (exam.status !== "published") throw notFound("Published results");
     const rows = await ctx.db.query("results").withIndex("by_exam_section", (q) => q.eq("examId", exam._id).eq("sectionId", section._id)).collect();
     const out = [];
+    const subjectNames = new Map<string, string>();
     for (const r of rows) {
       const s = await ctx.db.get(r.studentId);
-      out.push({ studentId: r.studentId, name: s ? fullName(s) : "", totalMarks: r.totalMarks, maxMarks: r.maxMarks, percentage: r.percentage, grade: r.grade ?? null, rank: r.rank ?? null, passed: r.subjects.every((x) => x.passed), subjects: r.subjects });
+      const subjects = [];
+      for (const x of r.subjects) {
+        if (!subjectNames.has(x.subjectId)) subjectNames.set(x.subjectId, (await ctx.db.get(x.subjectId))?.name ?? "Subject");
+        subjects.push({ ...x, subject: subjectNames.get(x.subjectId)!, marks: x.isAbsent ? null : (x.marks ?? null), grade: x.grade ?? null });
+      }
+      out.push({ studentId: r.studentId, name: s ? fullName(s) : "", admissionNo: s?.admissionNo ?? "", totalMarks: r.totalMarks, maxMarks: r.maxMarks, percentage: r.percentage, grade: r.grade ?? null, rank: r.rank ?? null, passed: r.subjects.every((x) => x.passed), subjects });
     }
     return out.sort((a, b) => (a.rank ?? 1e9) - (b.rank ?? 1e9) || a.name.localeCompare(b.name));
+  },
+});
+
+/**
+ * Marks-entry progress of an exam: every paper × section that sits it, with
+ * how many active students have a mark row (a number or "absent").
+ * `ready` is true when publish would succeed (every paper complete).
+ */
+export const progress = schoolQuery({
+  args: { examId: v.id("exams") },
+  handler: async (ctx, { examId }) => {
+    requirePermission(ctx.actor, "exams:manage");
+    const exam = await getInSchool(ctx, "exams", examId, "Exam");
+    const sections = await sectionsOfExam(ctx, exam);
+    const rows = [];
+    for (const p of await papersOf(ctx, exam)) {
+      const subject = await ctx.db.get(p.subjectId);
+      for (const section of sections.filter((s) => s.classId === p.classId)) {
+        const total = (await activeRoster(ctx, section._id)).length;
+        const entered = (await ctx.db.query("marks").withIndex("by_paper_section", (q) => q.eq("examSubjectId", p._id).eq("sectionId", section._id)).collect()).length;
+        rows.push({ examSubjectId: p._id, subject: subject?.name ?? "", sectionId: section._id, section: section.displayName, entered: Math.min(entered, total), total });
+      }
+    }
+    rows.sort((a, b) => a.section.localeCompare(b.section, undefined, { numeric: true }) || a.subject.localeCompare(b.subject));
+    return { rows, ready: rows.length > 0 && rows.every((r) => r.entered >= r.total) };
   },
 });

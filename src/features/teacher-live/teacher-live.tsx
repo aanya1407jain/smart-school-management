@@ -14,11 +14,14 @@ import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { useSchoolMutation, useSchoolQuery } from "@/lib/convex/membership";
 import {
-  Badge, Button, Card, CardHeader, Checkbox, DataTable, EmptyState, FormField, Input, LoadingState, Modal, PageHeader, Select, StatusBadge, Textarea, useToast,
+  Badge, Button, Card, CardHeader, Checkbox, DataTable, EmptyState, FormField, Input, LinkButton, LoadingState, Modal, PageHeader, Select, StatCard, StatusBadge, Textarea, useToast,
 } from "@/components/ui";
-import { formatDate, todayISO } from "@/lib/utils/dates";
+import { formatDate, formatLongDate, greeting, todayISO } from "@/lib/utils/dates";
+import { useSession } from "@/features/auth/session-provider";
+import { AttachmentList, UploadButton } from "@/features/shared/attachments";
+import { getAppError } from "@/lib/convex/errors";
 
-const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const errText = (e: unknown) => getAppError(e)?.message ?? (e instanceof Error ? e.message : String(e));
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const clock = (t: string) => {
   const [h, m] = t.split(":").map(Number);
@@ -124,6 +127,7 @@ export function LiveTeacherHomework() {
             { key: "t", header: "Homework", primary: true, cell: (h) => <Link href={`/teacher/homework/${h.homeworkId}`} className="font-semibold text-ink hover:text-lagoon">{h.title}</Link> },
             { key: "c", header: "Class", cell: (h) => `${h.section} · ${h.subject}` },
             { key: "d", header: "Due", cell: (h) => <span className={h.status === "active" && h.dueDate < today ? "text-plum" : undefined}>{formatDate(h.dueDate)}</span> },
+            { key: "n", header: "Submitted", cell: (h) => `${h.submitted}/${h.students} · ${h.reviewed} reviewed` },
             { key: "s", header: "Status", cell: (h) => <StatusBadge status={h.status === "active" ? "active" : "closed"} /> },
           ]}
           rowActions={(h) => (h.status === "active" ? <Button size="sm" variant="ghost" onClick={async () => { try { await close({ homeworkId: h.homeworkId }); toast({ title: "Homework closed" }); } catch (e) { toast({ title: "Could not close", description: errText(e), tone: "error" }); } }}>Close</Button> : null)}
@@ -177,13 +181,23 @@ export function LiveTeacherHomeworkDetail({ homeworkId }: { homeworkId: string }
   const data = useSchoolQuery(api.homework.submissions, { homeworkId: homeworkId as Id<"homework"> });
   const review = useSchoolMutation(api.homework.review);
   const [feedback, setFeedback] = useState<Record<string, string>>({});
+  const [editing, setEditing] = useState(false);
   if (data === undefined) return <LoadingState variant="table" label="Loading submissions" />;
   const h = data.homework;
   const submitted = data.students.filter((s) => s.submission).length;
   return (
     <div className="space-y-5">
       <PageHeader title={h.title} description={`Class ${h.section} · ${h.subject} · due ${formatDate(h.dueDate)} · ${submitted}/${data.students.length} submitted`} actions={<Link href="/teacher/homework" className="text-[13px] font-medium text-lagoon hover:underline">All homework</Link>} />
-      <Card className="p-5"><p className="whitespace-pre-line text-sm text-ink-soft">{h.description}</p></Card>
+      <Card className="space-y-3 p-5">
+        <p className="whitespace-pre-line text-sm text-ink-soft">{h.description}</p>
+        <div>
+          <p className="mb-1.5 text-[12px] font-semibold uppercase tracking-wide text-ink-muted">Attachments for students</p>
+          <AttachmentList ownerType="homework" ownerId={h.homeworkId} canRemove={h.status === "active"} emptyText="No files attached." />
+          {h.status === "active" && <div className="mt-2"><UploadButton ownerType="homework" ownerId={h.homeworkId} kind="homework_attachment" /></div>}
+        </div>
+        {h.status === "active" && <div className="flex justify-end"><Button size="sm" variant="outline" onClick={() => setEditing(true)}>Edit homework</Button></div>}
+      </Card>
+      {editing && <EditHomeworkModal homework={h} onClose={() => setEditing(false)} />}
       <Card>
         <CardHeader title="Submissions" description="Students in roll-number order; missing work is shown too." />
         <ul className="divide-y divide-line/60">
@@ -195,6 +209,7 @@ export function LiveTeacherHomeworkDetail({ homeworkId }: { homeworkId: string }
                 {s.submission ? <StatusBadge status={s.submission.status} /> : <Badge tone="neutral">Not submitted</Badge>}
               </div>
               {s.submission?.content && <p className="mt-1.5 whitespace-pre-line pl-10 text-[13px] text-ink-soft">{s.submission.content}</p>}
+              {s.submission && s.submission.attachmentFileIds.length > 0 && <div className="mt-1.5 pl-10"><AttachmentList ownerType="submission" ownerId={s.submission.submissionId} compact /></div>}
               {s.submission && (s.submission.status === "reviewed" ? (
                 <p className="mt-1.5 pl-10 text-[12.5px] text-lagoon">Feedback: {s.submission.feedback}</p>
               ) : (
@@ -211,6 +226,40 @@ export function LiveTeacherHomeworkDetail({ homeworkId }: { homeworkId: string }
         </ul>
       </Card>
     </div>
+  );
+}
+
+function EditHomeworkModal({ homework, onClose }: { homework: { homeworkId: Id<"homework">; title: string; description: string; dueDate: string; assignedOn: string }; onClose: () => void }) {
+  const { toast } = useToast();
+  const update = useSchoolMutation(api.homework.update);
+  const [title, setTitle] = useState(homework.title);
+  const [description, setDescription] = useState(homework.description);
+  const [dueDate, setDueDate] = useState(homework.dueDate);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const save = async () => {
+    if (!title.trim() || !description.trim() || !dueDate) return setError("Title, instructions and due date are required.");
+    setBusy(true);
+    setError(null);
+    try {
+      await update({ homeworkId: homework.homeworkId, title: title.trim(), description: description.trim(), dueDate });
+      toast({ title: "Homework updated" });
+      onClose();
+    } catch (e) {
+      setError(errText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal open onOpenChange={(o) => !o && onClose()} title="Edit homework" size="md" footer={<><Button variant="outline" onClick={onClose}>Cancel</Button><Button loading={busy} onClick={save}>Save changes</Button></>}>
+      <div className="space-y-4">
+        <FormField label="Title" required><Input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={150} /></FormField>
+        <FormField label="Instructions" required><Textarea rows={4} value={description} onChange={(e) => setDescription(e.target.value)} /></FormField>
+        <FormField label="Due date" required hint="Cannot be earlier than the day it was set."><Input type="date" min={homework.assignedOn} value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></FormField>
+        {error && <p role="alert" className="text-[13px] text-plum">{error}</p>}
+      </div>
+    </Modal>
   );
 }
 
@@ -239,41 +288,49 @@ export function LiveTeacherExams() {
   );
 }
 
-export function LiveMarksEntry() {
+export function LiveMarksEntry({ area = "teacher" }: { area?: "teacher" | "admin" }) {
   const params = useSearchParams();
   const router = useRouter();
+  const base = area === "admin" ? "/admin/examinations/marks" : "/teacher/examinations/marks";
   const exams = useSchoolQuery(api.exams.list, {});
   const open = useMemo(() => (exams ?? []).filter((e) => e.status === "in_progress" || e.status === "marks_entry"), [exams]);
   const examId = params.get("examId") ?? open[0]?.examId ?? "";
   const exam = useSchoolQuery(api.exams.get, examId ? { examId: examId as Id<"exams"> } : "skip");
-  const teaching = useSchoolQuery(api.academics.myTeaching, {});
-  const sections = useSchoolQuery(api.academics.listSections, {});
-  // Papers this teacher can mark: a paper of the exam whose class + subject matches one of their persisted assignments.
+  const teaching = useSchoolQuery(api.academics.myTeaching, area === "teacher" ? {} : "skip");
+  const sections = useSchoolQuery(api.academics.listSections, area === "teacher" ? {} : "skip");
+  const progress = useSchoolQuery(api.exams.progress, area === "admin" && examId ? { examId: examId as Id<"exams"> } : "skip");
+  // Teachers: papers matching their persisted subject assignments. Admins (marks:enter:any): every paper × section.
   const slots = useMemo(() => {
-    if (!exam || !teaching || !sections) return [];
-    const classOf = new Map(sections.map((s) => [s._id as string, s.classId as string]));
     const out: { key: string; examSubjectId: Id<"examSubjects">; sectionId: Id<"sections">; label: string }[] = [];
+    if (area === "admin") {
+      for (const r of progress?.rows ?? []) out.push({ key: `${r.examSubjectId}:${r.sectionId}`, examSubjectId: r.examSubjectId, sectionId: r.sectionId, label: `${r.section} · ${r.subject} (${r.entered}/${r.total})` });
+      return out;
+    }
+    if (!exam || !teaching || !sections) return out;
+    const classOf = new Map(sections.map((s) => [s._id as string, s.classId as string]));
     for (const a of teaching.assignments) {
       const paper = exam.papers.find((p) => p.subjectId === a.subjectId && p.classId === classOf.get(a.sectionId));
       if (paper) out.push({ key: `${paper.examSubjectId}:${a.sectionId}`, examSubjectId: paper.examSubjectId, sectionId: a.sectionId, label: `${a.sectionName} · ${paper.subject}` });
     }
     return out;
-  }, [exam, teaching, sections]);
-  const [slotKey, setSlotKey] = useState("");
-  useEffect(() => { if (!slots.some((s) => s.key === slotKey)) setSlotKey(slots[0]?.key ?? ""); }, [slots, slotKey]);
+  }, [area, progress, exam, teaching, sections]);
+  const wanted = params.get("paper") && params.get("section") ? `${params.get("paper")}:${params.get("section")}` : "";
+  const [slotKey, setSlotKey] = useState(wanted);
+  useEffect(() => { if (!slots.some((s) => s.key === slotKey)) setSlotKey(slots.find((s) => s.key === wanted)?.key ?? slots[0]?.key ?? ""); }, [slots, slotKey, wanted]);
   const slot = slots.find((s) => s.key === slotKey);
 
-  if (exams === undefined || teaching === undefined || sections === undefined || (examId && exam === undefined)) return <LoadingState variant="table" label="Loading marks entry" />;
+  const loading = exams === undefined || (examId && exam === undefined) || (area === "teacher" ? teaching === undefined || sections === undefined : examId && progress === undefined);
+  if (loading) return <LoadingState variant="table" label="Loading marks entry" />;
   return (
     <div className="space-y-5">
-      <PageHeader title="Marks entry" description="Only papers of the subjects you are assigned to teach in each section are listed." />
-      {open.length === 0 ? <Card><EmptyState icon={<Lock className="h-6 w-6" />} title="No examination is open for marks entry" /></Card> : (
+      <PageHeader title="Marks entry" description={area === "admin" ? "Enter or correct marks for any paper and section of an exam that is open for marks entry." : "Only papers of the subjects you are assigned to teach in each section are listed."} />
+      {open.length === 0 ? <Card><EmptyState icon={<Lock className="h-6 w-6" />} title="No examination is open for marks entry" description={area === "admin" ? "Start an exam from Examinations to open marks entry." : undefined} /></Card> : (
         <>
           <div className="flex flex-wrap gap-2">
-            <Select aria-label="Examination" value={examId} onChange={(e) => router.replace(`/teacher/examinations/marks?examId=${e.target.value}`)} className="w-64">{open.map((e) => <option key={e.examId} value={e.examId}>{e.name}</option>)}</Select>
-            <Select aria-label="Paper" value={slotKey} onChange={(e) => setSlotKey(e.target.value)} className="w-64" disabled={slots.length === 0}>{slots.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</Select>
+            <Select aria-label="Examination" value={examId} onChange={(e) => router.replace(`${base}?examId=${e.target.value}`)} className="w-64">{open.map((e) => <option key={e.examId} value={e.examId}>{e.name}</option>)}</Select>
+            <Select aria-label="Paper" value={slotKey} onChange={(e) => setSlotKey(e.target.value)} className="w-72" disabled={slots.length === 0}>{slots.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</Select>
           </div>
-          {!slot ? <Card><EmptyState title="Nothing to mark in this examination" description="None of this exam's papers are for a subject you teach." /></Card> : <MarksSheet key={slot.key} examSubjectId={slot.examSubjectId} sectionId={slot.sectionId} />}
+          {!slot ? <Card><EmptyState title="Nothing to mark in this examination" description={area === "admin" ? "Add papers to the exam first." : "None of this exam's papers are for a subject you teach."} /></Card> : <MarksSheet key={slot.key} examSubjectId={slot.examSubjectId} sectionId={slot.sectionId} />}
         </>
       )}
     </div>
@@ -337,5 +394,125 @@ function MarksSheet({ examSubjectId, sectionId }: { examSubjectId: Id<"examSubje
         )}
       </div>
     </Card>
+  );
+}
+
+// ------------------------------------------------------------------ dashboard (landing page)
+/** The live teacher landing page: today's work from Convex for the signed-in teacher only. */
+export function LiveTeacherDashboard() {
+  const d = useSchoolQuery(api.dashboards.teacherOverview, {});
+  const notices = useSchoolQuery(api.notices.feed, {});
+  const { user } = useSession();
+  if (d === undefined) return <LoadingState variant="cards" label="Loading your day" />;
+  const pendingRegisters = d.isWorkingDay ? d.classTeacherOf.filter((s) => !s.registerMarked) : [];
+  const toReview = d.homeworkToReview.reduce((a, h) => a + h.pending, 0);
+  const marksLeft = d.marksTasks.reduce((a, t) => a + (t.total - t.entered), 0);
+  const nothingAssigned = d.classTeacherOf.length === 0 && d.assignments.length === 0;
+  return (
+    <div className="space-y-6" data-testid="live-teacher-dashboard">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-plum">{formatLongDate(d.today)}</p>
+          <h1 className="mt-1 text-[28px] font-semibold text-sapphire">{greeting()}{user?.displayName ? `, ${user.displayName}` : ""}</h1>
+          <p className="mt-1 text-sm text-ink-muted">
+            {d.classTeacherOf.length > 0 ? <>Class teacher of <strong className="text-ink">{d.classTeacherOf.map((s) => s.displayName).join(", ")}</strong> · </> : null}
+            {d.assignments.length} subject assignment{d.assignments.length === 1 ? "" : "s"}
+            {!d.isWorkingDay && " · Not a school day"}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <LinkButton href="/teacher/homework" variant="outline"><Plus className="h-4 w-4" /> Homework</LinkButton>
+          <LinkButton href="/teacher/attendance"><CalendarDays className="h-4 w-4" /> {d.classTeacherOf.length ? "Mark attendance" : "View attendance"}</LinkButton>
+        </div>
+      </div>
+
+      {!d.hasTeacherRecord || nothingAssigned ? (
+        <Card><EmptyState icon={<Users className="h-6 w-6" />} title="No classes assigned yet" description="Once the school office assigns you a section or subjects in Academics, your registers, lessons, homework and marks tasks appear here." /></Card>
+      ) : null}
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard label="Registers to mark today" value={pendingRegisters.length} hint={d.isWorkingDay ? (d.classTeacherOf.length ? `${d.classTeacherOf.length - pendingRegisters.length}/${d.classTeacherOf.length} marked` : "You are not a class teacher") : "Not a school day"} icon={<CalendarDays className="h-5 w-5" />} tone="sapphire" href="/teacher/attendance" />
+        <StatCard label="Lessons today" value={d.todayLessons.length} hint={d.todayLessons.length ? `First at ${clock(d.todayLessons[0].startTime)}` : "None scheduled"} icon={<BookOpenCheck className="h-5 w-5" />} tone="teal" href="/teacher/timetable" />
+        <StatCard label="Submissions to review" value={toReview} hint={`${d.homeworkToReview.length} homework item${d.homeworkToReview.length === 1 ? "" : "s"}`} icon={<ClipboardList className="h-5 w-5" />} tone="purple" href="/teacher/homework" />
+        <StatCard label="Marks to enter" value={marksLeft} hint={`${d.marksTasks.length} paper${d.marksTasks.length === 1 ? "" : "s"} open`} icon={<Save className="h-5 w-5" />} tone="lavender" href="/teacher/examinations/marks" />
+      </div>
+
+      <div className="grid gap-5 lg:grid-cols-2">
+        <Card>
+          <CardHeader title="Today's lessons" description={d.isWorkingDay ? "From the school's published timetable." : "No lessons on non-working days."} />
+          <div className="p-5 pt-2">
+            {d.todayLessons.length === 0 ? <EmptyState icon={<CalendarDays className="h-6 w-6" />} title="No lessons scheduled today" description="Lessons appear here once the school places them in the timetable." /> : (
+              <ul className="divide-y divide-line/60">
+                {d.todayLessons.map((l) => (
+                  <li key={l.entryId} className="flex items-center gap-3 py-2.5">
+                    <span className="w-28 shrink-0 text-[12.5px] text-ink-muted">{clock(l.startTime)}–{clock(l.endTime)}</span>
+                    <span className="font-medium text-ink">{l.subject}</span>
+                    <span className="text-[12.5px] text-ink-muted">Class {l.section}{l.room ? ` · ${l.room}` : ""}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </Card>
+        <Card>
+          <CardHeader title="Attendance registers" description="Sections you own as class teacher." />
+          <div className="p-5 pt-2">
+            {d.classTeacherOf.length === 0 ? <EmptyState title="You are not a class teacher" description="Only a section's class teacher marks its register." /> : (
+              <ul className="divide-y divide-line/60">
+                {d.classTeacherOf.map((s) => (
+                  <li key={s.sectionId} className="flex items-center justify-between gap-3 py-2.5">
+                    <span><span className="font-medium text-ink">Class {s.displayName}</span> <span className="text-[12.5px] text-ink-muted">· {s.students} students</span></span>
+                    {s.registerMarked ? <Badge tone="teal">Marked today</Badge> : d.isWorkingDay ? <Link href={`/teacher/attendance?section=${s.sectionId}`} className="text-[13px] font-medium text-lagoon hover:underline">Mark now</Link> : <Badge tone="neutral">No school today</Badge>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </Card>
+        <Card>
+          <CardHeader title="Homework to review" description="Your open homework with submissions waiting for feedback." />
+          <div className="p-5 pt-2">
+            {d.homeworkToReview.length === 0 ? <EmptyState title="Nothing waiting for review" /> : (
+              <ul className="divide-y divide-line/60">
+                {d.homeworkToReview.map((h) => (
+                  <li key={h.homeworkId} className="flex items-center justify-between gap-3 py-2.5">
+                    <Link href={`/teacher/homework/${h.homeworkId}`} className="min-w-0"><span className="block truncate font-medium text-ink hover:text-lagoon">{h.title}</span><span className="text-[12px] text-ink-muted">Class {h.section} · {h.subject} · due {formatDate(h.dueDate)}</span></Link>
+                    <Badge tone="lavender">{h.pending} to review</Badge>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </Card>
+        <Card>
+          <CardHeader title="Marks to enter" description="Papers you are assigned to, in exams open for marks entry." />
+          <div className="p-5 pt-2">
+            {d.marksTasks.length === 0 ? <EmptyState title="No marks pending" /> : (
+              <ul className="divide-y divide-line/60">
+                {d.marksTasks.map((t) => (
+                  <li key={`${t.examSubjectId}:${t.sectionId}`} className="flex items-center justify-between gap-3 py-2.5">
+                    <Link href={`/teacher/examinations/marks?examId=${t.examId}`} className="min-w-0"><span className="block font-medium text-ink hover:text-lagoon">{t.label}</span><span className="text-[12px] text-ink-muted">{t.examName}</span></Link>
+                    <span className="text-[12.5px] text-ink-soft">{t.entered}/{t.total} entered</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader title="Recent notices" action={<Link href="/teacher/notices" className="text-[13px] font-medium text-lagoon hover:underline">All notices</Link>} />
+        <div className="p-5 pt-2">
+          {notices === undefined ? <LoadingState variant="inline" /> : notices.length === 0 ? <EmptyState title="No notices" /> : (
+            <ul className="divide-y divide-line/60">
+              {notices.slice(0, 4).map((n) => (
+                <li key={n.noticeId} className="py-2.5"><p className="font-medium text-ink">{n.title}</p><p className="text-[12px] text-ink-muted">{formatDate(n.publishDate)} · {n.audienceLabel}</p></li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </Card>
+    </div>
   );
 }

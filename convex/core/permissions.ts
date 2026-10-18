@@ -97,14 +97,28 @@ export const ROLE_LABELS: Record<Role, string> = {
   student: "Student",
 };
 
-/** Resolve the effective permission set for a role + optional sets. */
+/**
+ * Resolve the effective permission set for a role + optional sets.
+ *
+ * RESTRICTED ADMIN: an ADMIN membership carrying the "accountant" set gets
+ * EXACTLY the accountant permissions (finance only) — not the full admin set.
+ * This is how a school gives its accountant an office login without a new
+ * primary role. On any other role a set is additive (legacy; not creatable
+ * through the API).
+ */
 export function resolvePermissions(role: Role | null | undefined, permissionSets: readonly string[] = []): Set<Permission> {
+  if (role === "admin" && permissionSets.includes("accountant")) return new Set<Permission>(PERMISSION_SETS.accountant);
   const set = new Set<Permission>(role ? ROLE_PERMISSIONS[role] : []);
   for (const name of permissionSets) {
     const extra = (PERMISSION_SETS as Record<string, readonly Permission[]>)[name];
     extra?.forEach((p) => set.add(p));
   }
   return set;
+}
+
+/** True when an admin membership is restricted to the accountant (finance-only) permissions. */
+export function isAccountantOnly(role: Role | null | undefined, permissionSets: readonly string[] = []): boolean {
+  return role === "admin" && permissionSets.includes("accountant");
 }
 
 export function isRole(value: unknown): value is Role {

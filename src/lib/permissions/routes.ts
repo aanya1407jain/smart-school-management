@@ -29,6 +29,7 @@ export const ROUTE_RULES: RouteRule[] = [
   { pattern: r("/admin/notifications"), anyOf: ["notifications:read"] },
   { pattern: r("/admin/reports"), anyOf: ["reports:read", "reports:finance"] },
   { pattern: r("/admin/settings"), anyOf: ["settings:manage"] },
+  { pattern: r("/admin/audit"), anyOf: ["audit:read"] },
   { pattern: r("/admin/profile"), anyOf: ["profile:read:own"] },
   // Teacher workspace
   { pattern: r("/teacher/dashboard"), anyOf: ["area:teacher"] },

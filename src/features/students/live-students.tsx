@@ -12,14 +12,17 @@ import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { useSchoolMutation, useSchoolPaginatedQuery, useSchoolQuery } from "@/lib/convex/membership";
 import { Avatar, Button, Card, EmptyState, FormField, Input, LinkButton, LoadingState, PageHeader, Select, Textarea, useToast } from "@/components/ui";
+import { useSession } from "@/features/auth/session-provider";
 
 export function LiveStudentsList() {
+  const { can } = useSession();
+  const canWrite = can("students:write");
   const sections = useSchoolQuery(api.academics.listSections, {});
   const [sectionId, setSectionId] = useState("");
   const list = useSchoolPaginatedQuery(api.accounts.listPeople, { kind: "student", ...(sectionId ? { sectionId: sectionId as Id<"sections"> } : {}) }, { initialNumItems: 50 });
   return (
     <div>
-      <PageHeader title="Students" description="Active students in roll-number order (first name, then last name)." actions={<LinkButton href="/admin/students/new"><UserPlus className="h-4 w-4" /> Admit student</LinkButton>} />
+      <PageHeader title="Students" description="Active students in roll-number order (first name, then last name)." actions={canWrite ? <LinkButton href="/admin/students/new"><UserPlus className="h-4 w-4" /> Admit student</LinkButton> : undefined} />
       <Card className="mb-4 p-4">
         <Select aria-label="Section" value={sectionId} onChange={(e) => setSectionId(e.target.value)} className="w-56">
           <option value="">All sections</option>
@@ -39,7 +42,7 @@ export function LiveStudentsList() {
                   <span className="block font-semibold text-ink">{p.name}</span>
                   <span className="block text-[12px] text-ink-muted">{p.number} · {p.detail}</span>
                 </Link>
-                <Link href={`/admin/students/${p.personId}/edit`} className="text-[13px] font-medium text-lagoon hover:underline">Edit</Link>
+                {canWrite && <Link href={`/admin/students/${p.personId}/edit`} className="text-[13px] font-medium text-lagoon hover:underline">Edit</Link>}
               </li>
             ))}
           </ul>

@@ -113,7 +113,9 @@ describe("cross-school ids are NOT_FOUND", () => {
     const fileId = await t.run((ctx) => ctx.db.insert("files", { schoolId: A.schoolId, storageId: storage2, kind: "student_document", ownerType: "student", ownerId: A.studentA, fileName: "tc.pdf", contentType: "application/pdf", size: 8, uploadedByUserId: A.users.admin }));
     expect((await admin.query(api.files.getUrl, { fileId })).fileName).toBe("tc.pdf");
     expect(await errorCode((await as(t, A.users.guardian)).query(api.files.getUrl, { fileId }))).toBe("NO_ERROR");
-    expect(await errorCode((await as(t, A.users.subjectTeacher)).query(api.files.getUrl, { fileId }))).toBe("NO_ERROR");
+    // Student documents are visible to administrators and the student's family only
+    // (MVP decision "Admins only, audited"): a teacher of the student's section is refused.
+    expect(await errorCode((await as(t, A.users.subjectTeacher)).query(api.files.getUrl, { fileId }))).toBe("NOT_FOUND");
     const otherAdmin = await as(t, B.users.admin);
     expect(await errorCode(otherAdmin.query(api.files.getUrl, { fileId }))).toBe("NOT_FOUND");
   });

@@ -18,6 +18,7 @@ import { formatDate, todayISO } from "@/lib/utils/dates";
 import { PAYMENT_METHOD_LABELS } from "@/lib/constants/labels";
 import { FeeObligationsTable, PaymentsTable, ReceiptModal } from "./fee-tables";
 import { useMemo } from "react";
+import { LiveFeeCorrections } from "./fee-corrections-live";
 
 export function StudentLedger({ studentId }: { studentId: string }) {
   const params = useSearchParams();
@@ -164,6 +165,7 @@ export function StudentLedger({ studentId }: { studentId: string }) {
                   <CardHeader title="Payments & receipts" />
                   <div className="p-5"><PaymentsTable payments={l.payments} /></div>
                 </Card>
+                {live && liveLedger && <LiveFeeCorrections ledger={liveLedger} />}
               </>
             )}
 

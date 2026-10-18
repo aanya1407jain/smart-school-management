@@ -1,8 +1,7 @@
 "use client";
 
-import { Component, useMemo, useState, type ReactNode } from "react";
+import { Component, useMemo, useRef, useState, type ReactNode } from "react";
 import { CheckCircle2, ClipboardList, GraduationCap, MessageSquare, Paperclip, Send, UserX } from "lucide-react";
-import { useMutation, useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
@@ -11,6 +10,9 @@ import {
   Badge, Button, Card, EmptyState, FilterBar, FilterSelect, FormField, LoadingState, Modal, PageHeader, Segmented, StatusBadge, Textarea, useToast,
 } from "@/components/ui";
 import { FormError } from "@/features/shared/form-error";
+import { AttachmentList } from "@/features/shared/attachments";
+import { useSchoolMutation, useSchoolQuery } from "@/lib/convex/membership";
+import { checkUploadFile, useFileUpload } from "@/lib/convex/use-file-upload";
 import { dueLabel, formatDate, formatDateTime, todayISO } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils/cn";
 
@@ -113,7 +115,7 @@ function MyHomeworkInner({ studentId }: { studentId: string | null }) {
 
   // The server resolves the student from the session; studentId only chooses
   // among students already linked to this membership (guardians with several children).
-  const data = useQuery(
+  const data = useSchoolQuery(
     api.studentPortal.myHomework,
     studentId ? { studentId: studentId as Id<"students"> } : {}
   );
@@ -205,8 +207,8 @@ function MyHomeworkInner({ studentId }: { studentId: string | null }) {
         title="My Homework"
         description={
           section
-            ? `Homework set for Class ${section}. Submit before the deadline — your teacher is notified instantly.`
-            : "Homework set for your class. Submit before the deadline — your teacher is notified instantly."
+            ? `Homework set for Class ${section}. Submit before the deadline; work handed in after it is marked late.`
+            : "Homework set for your class. Submit before the deadline; work handed in after it is marked late."
         }
       />
       <Card className="mb-5 p-4">
@@ -262,9 +264,10 @@ function HomeworkCard({ h, canSubmit, onSubmit }: { h: Item; canSubmit: boolean;
             {h.teacher && <>{h.teacher} · </>}set {formatDate(h.assignedOn)} · deadline {formatDate(h.dueDate)}
           </p>
           {attachments > 0 && (
-            <p className="mt-1 flex items-center gap-1 text-[12px] text-ink-muted">
-              <Paperclip className="h-3.5 w-3.5" /> {attachments} attachment{attachments === 1 ? "" : "s"} from your teacher
-            </p>
+            <div className="mt-2">
+              <p className="mb-1 flex items-center gap-1 text-[12px] text-ink-muted"><Paperclip className="h-3.5 w-3.5" /> From your teacher</p>
+              <AttachmentList ownerType="homework" ownerId={h.homeworkId} compact />
+            </div>
           )}
           {h.submission && (
             <div className="mt-3 rounded-xl bg-alabaster p-3 text-[13px]">
@@ -273,6 +276,7 @@ function HomeworkCard({ h, canSubmit, onSubmit }: { h: Item; canSubmit: boolean;
                 {h.submission.status === "late" ? "Submitted late" : "Submitted"} {formatDateTime(new Date(h.submission.submittedAt).toISOString())}
               </p>
               {h.submission.content && <p className="mt-1 whitespace-pre-line text-ink-soft">{h.submission.content}</p>}
+              {h.submission.attachmentFileIds.length > 0 && <div className="mt-1.5"><AttachmentList ownerType="submission" ownerId={h.submission.submissionId} compact /></div>}
               {h.submission.feedback && (
                 <p className="mt-2 flex items-start gap-1.5 text-lagoon">
                   <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {h.submission.feedback}
@@ -314,7 +318,10 @@ function SubmitModal({
   onClose: () => void;
 }) {
   const { toast } = useToast();
-  const submitHomework = useMutation(api.homework.submit);
+  const submitHomework = useSchoolMutation(api.homework.submit);
+  const { upload } = useFileUpload();
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [file, setFile] = useState<File | null>(null);
   const [content, setContent] = useState(initialContent);
   const [error, setError] = useState<Error | null>(null);
   const [busy, setBusy] = useState(false);
@@ -324,11 +331,14 @@ function SubmitModal({
     setError(null);
     try {
       const trimmed = content.trim();
+      if (!trimmed && !file && !resubmit) throw new Error("Write an answer or attach a file before submitting.");
+      if (file) { const problem = checkUploadFile(file); if (problem) throw new Error(problem); }
       // The server derives the student from the session — never send a studentId.
-      await submitHomework({ homeworkId, ...(trimmed ? { content: trimmed } : {}) });
+      const r = await submitHomework({ homeworkId, ...(trimmed ? { content: trimmed } : {}) });
+      if (file) await upload(file, { kind: "submission_attachment", ownerType: "submission", ownerId: r.submissionId });
       toast({
-        title: late ? "Submitted late" : resubmit ? "Homework resubmitted" : "Homework submitted",
-        description: "Your teacher has been notified.",
+        title: r.status === "late" ? "Submitted late" : resubmit ? "Homework resubmitted" : "Homework submitted",
+        description: "Your teacher can now review it.",
       });
       onClose();
     } catch (e) {
@@ -364,8 +374,15 @@ function SubmitModal({
           </p>
         )}
         <FormField label="Your answer or note" hint="Describe what you've done, or paste your answer.">
-          <Textarea rows={6} value={content} onChange={(e) => setContent(e.target.value)} />
+          <Textarea rows={6} value={content} onChange={(e) => setContent(e.target.value)} maxLength={8000} />
         </FormField>
+        <div>
+          <input ref={fileInput} type="file" className="sr-only" aria-label="Attach a file" accept="application/pdf,image/png,image/jpeg,image/webp" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" size="sm" variant="outline" onClick={() => fileInput.current?.click()}><Paperclip className="h-4 w-4" /> {file ? "Change file" : "Attach a file"}</Button>
+            <span className="text-[12.5px] text-ink-muted">{file ? file.name : "Optional · PDF, PNG, JPEG or WebP, up to 10 MB"}</span>
+          </div>
+        </div>
         <FormError error={error} />
       </div>
     </Modal>

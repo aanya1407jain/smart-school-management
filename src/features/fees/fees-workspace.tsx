@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { AlertCircle, CircleDollarSign, Clock, Download, Layers, Plus, Receipt, RotateCcw, Trash2, Users, Wallet } from "lucide-react";
+import { AlertCircle, CircleDollarSign, Clock, Download, Layers, Pencil, Plus, Receipt, RotateCcw, Trash2, Users, Wallet } from "lucide-react";
 import type { FeeStanding } from "@/lib/services/derive";
 import type { PaymentMethod } from "@/types/domain";
 import { services } from "@/lib/services";
@@ -338,6 +338,7 @@ function Structures() {
 
   const q = useQuery(() => services.fees.listStructures(), [live], { enabled: !live });
   const [createOpen, setCreateOpen] = useState(false);
+  const [editing, setEditing] = useState<StructureEdit | null>(null);
   const [assignId, setAssignId] = useState<string | null>(null);
   const [assigning, setAssigning] = useState(false);
   const assign = useMutation(services.fees.assignStructure);
@@ -355,6 +356,7 @@ function Structures() {
       installments: fs.installments.map((ins, i) => ({ id: `ins-${i}`, label: ins.label, dueDate: ins.dueDate, share: fs.totalMinor > 0 ? ins.amountMinor / fs.totalMinor : 0 })),
       assignedCount: fs.assignedCount,
       eligibleCount: fs.eligibleCount,
+      inUse: fs.inUse,
     }));
   }, [liveStructures]);
 
@@ -387,10 +389,15 @@ function Structures() {
                 </div>
                 <div className="flex items-center justify-between border-t border-line/60 px-5 py-3">
                   <span className="flex items-center gap-1.5 text-[13px] text-ink-muted"><Users className="h-4 w-4" /> Assigned to {fs.assignedCount} of {fs.eligibleCount} students</span>
+                  <span className="flex items-center gap-2">
+                  {live && fs.status !== "archived" && (
+                    <Button size="sm" variant="ghost" aria-label={`Edit ${fs.name}`} onClick={() => setEditing({ id: fs.id, name: fs.name, classIds: fs.classIds, inUse: fs.inUse, components: fs.components.map((c: any) => ({ label: c.label, amount: c.amount })), installments: fs.installments.map((i: any) => ({ label: i.label, dueDate: i.dueDate, share: Math.round(i.share * 10000) / 100 })) })}><Pencil className="h-4 w-4" /> Edit</Button>
+                  )}
                   {fs.status === "draft" ? (
                     <Button size="sm" variant="outline" onClick={async () => { try { await setStatusMutation({ structureId: fs.id as Id<"feeStructures">, status: "active" }); toast({ title: "Structure activated", description: "It can now be assigned." }); } catch (e) { toast({ title: "Could not activate", description: (e as Error).message, tone: "error" }); } }}>Activate</Button>
                   ) : fs.status === "archived" ? <Badge>Archived</Badge>
                   : fs.assignedCount < fs.eligibleCount ? <Button size="sm" onClick={() => setAssignId(fs.id)}>Assign to class</Button> : <Badge tone="teal">{fs.eligibleCount ? "All assigned" : "No enrolled students"}</Badge>}
+                  </span>
                 </div>
               </Card>
             ))}
@@ -398,6 +405,7 @@ function Structures() {
         )}
       </QueryView>
       <CreateStructureModal open={createOpen} onOpenChange={setCreateOpen} onCreated={(id) => setAssignId(id)} />
+      {editing && <CreateStructureModal key={editing.id} open editing={editing} onOpenChange={(o) => !o && setEditing(null)} onCreated={() => setEditing(null)} />}
       <ConfirmDialog
         open={!!assignId}
         onOpenChange={(o) => !o && setAssignId(null)}
@@ -434,16 +442,21 @@ function Structures() {
   );
 }
 
-function CreateStructureModal({ open, onOpenChange, onCreated }: { open: boolean; onOpenChange: (o: boolean) => void; onCreated: (id: string) => void }) {
+/** A LIVE structure being edited. Amounts/installments are locked once any student has been assigned it (server-enforced too). */
+type StructureEdit = { id: string; name: string; classIds: string[]; inUse: boolean; components: { label: string; amount: number }[]; installments: { label: string; dueDate: string; share: number }[] };
+
+function CreateStructureModal({ open, onOpenChange, onCreated, editing }: { open: boolean; onOpenChange: (o: boolean) => void; onCreated: (id: string) => void; editing?: StructureEdit }) {
   const { toast } = useToast();
   const { dataSource } = useSession();
   const live = dataSource === "live";
   const opts = useAcademicOptions();
   // Demo personas get the sample values; real accounts start from an empty form.
-  const [name, setName] = useState(live ? "" : "Transport-free Activity Fee 2026–27");
-  const [classIds, setClassIds] = useState<string[]>([]);
-  const [components, setComponents] = useState(live ? [{ label: "", amount: 0 }] : [{ label: "Annual activity fee", amount: 3000 }]);
-  const [installments, setInstallments] = useState(live ? [{ label: "Installment 1", dueDate: "", share: 100 }] : [{ label: "One-time", dueDate: "2026-11-15", share: 100 }]);
+  const [name, setName] = useState(editing ? editing.name : live ? "" : "Transport-free Activity Fee 2026–27");
+  const [classIds, setClassIds] = useState<string[]>(editing?.classIds ?? []);
+  const [components, setComponents] = useState(editing ? editing.components : live ? [{ label: "", amount: 0 }] : [{ label: "Annual activity fee", amount: 3000 }]);
+  const [installments, setInstallments] = useState(editing ? editing.installments : live ? [{ label: "Installment 1", dueDate: "", share: 100 }] : [{ label: "One-time", dueDate: "2026-11-15", share: 100 }]);
+  const locked = !!editing?.inUse;
+  const updateStructureMutation = useSchoolMutation(api.fees.updateStructure);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -452,7 +465,7 @@ function CreateStructureModal({ open, onOpenChange, onCreated }: { open: boolean
   useEffect(() => { if (open) setError(null); }, [open]);
 
   const total = components.reduce((a, c) => a + (Number(c.amount) || 0), 0);
-  const shares = installments.reduce((a, i) => a + (Number(i.share) || 0), 0);
+  const shares = Math.round(installments.reduce((a, i) => a + (Number(i.share) || 0), 0) * 100) / 100;
 
   const submit = async () => {
     if (live) {
@@ -475,6 +488,18 @@ function CreateStructureModal({ open, onOpenChange, onCreated }: { open: boolean
           label: c.label,
           amountMinor: Math.round((Number(c.amount) || 0) * 100),
         }));
+        if (editing) {
+          if (!locked && shares !== 100) throw new Error("Installment shares must add up to 100%.");
+          await updateStructureMutation({
+            structureId: editing.id as Id<"feeStructures">,
+            name,
+            classIds: classIds as Id<"classes">[],
+            ...(locked ? {} : { components: compPayload, installments: insPayload }),
+          });
+          toast({ title: "Fee structure updated" });
+          onCreated(editing.id);
+          return;
+        }
         if (shares !== 100) throw new Error("Installment shares must add up to 100%.");
         const res = await createStructureMutation({
           name,
@@ -500,9 +525,10 @@ function CreateStructureModal({ open, onOpenChange, onCreated }: { open: boolean
   };
 
   return (
-    <Modal open={open} onOpenChange={onOpenChange} title="New fee structure" description="Define components and how the total is split into installments." size="lg"
-      footer={<><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button loading={pending || m.isPending} onClick={submit}>Create structure</Button></>}>
+    <Modal open={open} onOpenChange={onOpenChange} title={editing ? "Edit fee structure" : "New fee structure"} description="Define components and how the total is split into installments." size="lg"
+      footer={<><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button loading={pending || m.isPending} onClick={submit}>{editing ? "Save changes" : "Create structure"}</Button></>}>
       <div className="space-y-5">
+        {locked && <p role="note" className="rounded-lg bg-lavender/30 px-3 py-2 text-[13px] text-ink-soft">Students are already assigned this structure, so amounts and installments are locked. Use a concession, or create a new structure. The name and classes can still change.</p>}
         <FormField label="Name" required error={m.fieldErrors.name}><Input value={name} onChange={(e) => setName(e.target.value)} /></FormField>
         <fieldset>
           <legend className="mb-2 text-[13px] font-medium text-ink-soft">Applies to classes <span className="text-plum">*</span></legend>
@@ -513,12 +539,12 @@ function CreateStructureModal({ open, onOpenChange, onCreated }: { open: boolean
           <div className="space-y-2">
             {components.map((c, i) => (
               <div key={i} className="grid grid-cols-[1fr_140px_36px] gap-2">
-                <Input aria-label="Component label" value={c.label} onChange={(e) => setComponents(components.map((x, j) => j === i ? { ...x, label: e.target.value } : x))} />
-                <Input aria-label="Amount" type="number" min={0} value={c.amount} onChange={(e) => setComponents(components.map((x, j) => j === i ? { ...x, amount: Number(e.target.value) } : x))} />
-                <Button variant="ghost" size="icon" aria-label="Remove component" onClick={() => setComponents(components.filter((_, j) => j !== i))} disabled={components.length === 1}><Trash2 className="h-4 w-4" /></Button>
+                <Input aria-label="Component label" disabled={locked} value={c.label} onChange={(e) => setComponents(components.map((x, j) => j === i ? { ...x, label: e.target.value } : x))} />
+                <Input aria-label="Amount" disabled={locked} type="number" min={0} value={c.amount} onChange={(e) => setComponents(components.map((x, j) => j === i ? { ...x, amount: Number(e.target.value) } : x))} />
+                <Button variant="ghost" size="icon" aria-label="Remove component" onClick={() => setComponents(components.filter((_, j) => j !== i))} disabled={locked || components.length === 1}><Trash2 className="h-4 w-4" /></Button>
               </div>
             ))}
-            <Button size="sm" variant="ghost" onClick={() => setComponents([...components, { label: "", amount: 0 }])}><Plus className="h-4 w-4" /> Add component</Button>
+            <Button size="sm" variant="ghost" disabled={locked} onClick={() => setComponents([...components, { label: "", amount: 0 }])}><Plus className="h-4 w-4" /> Add component</Button>
           </div>
         </div>
         <div>
@@ -526,13 +552,13 @@ function CreateStructureModal({ open, onOpenChange, onCreated }: { open: boolean
           <div className="space-y-2">
             {installments.map((ins, i) => (
               <div key={i} className="grid grid-cols-[1fr_160px_90px_36px] gap-2">
-                <Input aria-label="Installment label" value={ins.label} onChange={(e) => setInstallments(installments.map((x, j) => j === i ? { ...x, label: e.target.value } : x))} />
-                <Input aria-label="Due date" type="date" value={ins.dueDate} onChange={(e) => setInstallments(installments.map((x, j) => j === i ? { ...x, dueDate: e.target.value } : x))} />
-                <Input aria-label="Share percent" type="number" min={0} max={100} value={ins.share} onChange={(e) => setInstallments(installments.map((x, j) => j === i ? { ...x, share: Number(e.target.value) } : x))} />
-                <Button variant="ghost" size="icon" aria-label="Remove installment" onClick={() => setInstallments(installments.filter((_, j) => j !== i))} disabled={installments.length === 1}><Trash2 className="h-4 w-4" /></Button>
+                <Input aria-label="Installment label" disabled={locked} value={ins.label} onChange={(e) => setInstallments(installments.map((x, j) => j === i ? { ...x, label: e.target.value } : x))} />
+                <Input aria-label="Due date" disabled={locked} type="date" value={ins.dueDate} onChange={(e) => setInstallments(installments.map((x, j) => j === i ? { ...x, dueDate: e.target.value } : x))} />
+                <Input aria-label="Share percent" disabled={locked} type="number" min={0} max={100} value={ins.share} onChange={(e) => setInstallments(installments.map((x, j) => j === i ? { ...x, share: Number(e.target.value) } : x))} />
+                <Button variant="ghost" size="icon" aria-label="Remove installment" onClick={() => setInstallments(installments.filter((_, j) => j !== i))} disabled={locked || installments.length === 1}><Trash2 className="h-4 w-4" /></Button>
               </div>
             ))}
-            <Button size="sm" variant="ghost" onClick={() => setInstallments([...installments, { label: `Installment ${installments.length + 1}`, dueDate: "", share: 0 }])}><Plus className="h-4 w-4" /> Add installment</Button>
+            <Button size="sm" variant="ghost" disabled={locked} onClick={() => setInstallments([...installments, { label: `Installment ${installments.length + 1}`, dueDate: "", share: 0 }])}><Plus className="h-4 w-4" /> Add installment</Button>
           </div>
         </div>
         <FormError error={error ? new Error(error) : m.error} />

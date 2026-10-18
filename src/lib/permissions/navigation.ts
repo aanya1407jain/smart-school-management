@@ -7,7 +7,7 @@ import { hasAnyPermission, type Permission } from "./permissions";
  */
 export type NavIcon =
   | "dashboard" | "students" | "academics" | "teachers" | "attendance" | "fees" | "exams" | "timetable"
-  | "homework" | "notices" | "notifications" | "reports" | "settings" | "classes" | "results" | "profile" | "accounts";
+  | "homework" | "notices" | "notifications" | "reports" | "settings" | "classes" | "results" | "profile" | "accounts" | "audit";
 
 export interface NavItem {
   label: string;
@@ -33,7 +33,7 @@ const ADMIN_NAV: NavGroup[] = [
     items: [
       { label: "Students", href: "/admin/students", icon: "students", anyOf: ["students:read:all"], live: true },
       { label: "Academics", href: "/admin/academics", icon: "academics", anyOf: ["academics:manage"], live: true },
-      { label: "Teachers & Staff", href: "/admin/teachers", icon: "teachers", anyOf: ["staff:manage"] },
+      { label: "Teachers & Staff", href: "/admin/teachers", icon: "teachers", anyOf: ["staff:manage"], live: true },
       { label: "Accounts & Import", href: "/admin/accounts", icon: "accounts", anyOf: ["users:manage", "students:write", "staff:manage"], live: true },
     ],
   },
@@ -42,9 +42,9 @@ const ADMIN_NAV: NavGroup[] = [
     items: [
       { label: "Attendance", href: "/admin/attendance", icon: "attendance", anyOf: ["attendance:read:all"], live: true },
       { label: "Fees", href: "/admin/fees", icon: "fees", anyOf: ["fees:manage"], live: true },
-      { label: "Examinations", href: "/admin/examinations", icon: "exams", anyOf: ["exams:manage"] },
-      { label: "Timetable", href: "/admin/timetable", icon: "timetable", anyOf: ["timetable:manage"] },
-      { label: "Homework", href: "/admin/homework", icon: "homework", anyOf: ["homework:read:all"] },
+      { label: "Examinations", href: "/admin/examinations", icon: "exams", anyOf: ["exams:manage"], live: true },
+      { label: "Timetable", href: "/admin/timetable", icon: "timetable", anyOf: ["timetable:manage"], live: true },
+      { label: "Homework", href: "/admin/homework", icon: "homework", anyOf: ["homework:read:all"], live: true },
     ],
   },
   {
@@ -53,13 +53,15 @@ const ADMIN_NAV: NavGroup[] = [
       { label: "Notices & Events", href: "/admin/notices", icon: "notices", anyOf: ["notices:manage"], live: true },
       { label: "Notifications", href: "/admin/notifications", icon: "notifications", anyOf: ["notifications:read"], live: true },
       { label: "Reports", href: "/admin/reports", icon: "reports", anyOf: ["reports:read", "reports:finance"], live: true },
+      { label: "Audit log", href: "/admin/audit", icon: "audit", anyOf: ["audit:read"], live: true },
       { label: "Settings", href: "/admin/settings", icon: "settings", anyOf: ["settings:manage"], live: true },
+      { label: "Profile", href: "/admin/profile", icon: "profile", anyOf: ["profile:read:own"], live: true },
     ],
   },
 ];
 
 const TEACHER_NAV: NavGroup[] = [
-  { label: "Overview", items: [{ label: "Dashboard", href: "/teacher/dashboard", icon: "dashboard", anyOf: ["area:teacher"] }] },
+  { label: "Overview", items: [{ label: "Dashboard", href: "/teacher/dashboard", icon: "dashboard", anyOf: ["area:teacher"], live: true }] },
   {
     label: "Teaching",
     items: [
@@ -75,7 +77,7 @@ const TEACHER_NAV: NavGroup[] = [
     items: [
       { label: "Notices", href: "/teacher/notices", icon: "notices", anyOf: ["notices:read"], live: true },
       { label: "Notifications", href: "/teacher/notifications", icon: "notifications", anyOf: ["notifications:read"], live: true },
-      { label: "Profile", href: "/teacher/profile", icon: "profile", anyOf: ["profile:read:own"] },
+      { label: "Profile", href: "/teacher/profile", icon: "profile", anyOf: ["profile:read:own"], live: true },
     ],
   },
 ];

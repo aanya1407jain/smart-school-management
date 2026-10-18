@@ -52,6 +52,7 @@ import { useAcademicOptions } from "@/features/shared/use-academic-options";
 import { AUDIENCE_LABELS, NOTICE_TYPE_LABELS, PRIORITY_LABELS } from "@/lib/constants/labels";
 import { formatDate, formatLongDate, todayISO } from "@/lib/utils/dates";
 import { NoticeListItem } from "./notice-list-item";
+import { LiveEventsPanel } from "./events-live";
 
 export function toConvexAudience(audience: Notice["audience"]) {
   if (audience.scope === "school") {
@@ -312,6 +313,7 @@ export function NoticesManager() {
           </Button>
         }
       />
+      {live && <LiveEventsPanel manage />}
       <Card className="mb-5 p-4">{bar}</Card>
       <QueryView query={queryState} loading="table">
         {(noticeList) =>
@@ -478,7 +480,7 @@ export function NoticesManager() {
   );
 }
 
-function ComposeModal({ existing, onClose }: { existing?: NoticeView; onClose: () => void }) {
+function ComposeModal({ existing, onClose, teacherMode = false }: { existing?: NoticeView; onClose: () => void; teacherMode?: boolean }) {
   const { toast } = useToast();
   const { dataSource } = useSession();
   const live = dataSource === "live";
@@ -504,7 +506,7 @@ function ComposeModal({ existing, onClose }: { existing?: NoticeView; onClose: (
           title: "",
           body: "",
           type: "notice",
-          audience: { scope: "school" },
+          audience: teacherMode ? { scope: "sections", sectionIds: [] } : { scope: "school" },
           publishDate: todayISO(),
           eventDate: null,
           priority: "normal",
@@ -610,16 +612,19 @@ function ComposeModal({ existing, onClose }: { existing?: NoticeView; onClose: (
     <Modal
       open
       onOpenChange={(o) => !o && onClose()}
-      title={existing ? "Edit notice" : "New notice"}
+      title={existing ? "Edit notice" : teacherMode ? "New class notice" : "New notice"}
+      description={teacherMode ? "Only the sections you teach are listed. Their students and guardians are notified once." : undefined}
       size="lg"
       footer={
         <>
           <Button variant="outline" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button variant="outline" onClick={() => save("draft")} disabled={busy}>
-            Save draft
-          </Button>
+          {!teacherMode && (
+            <Button variant="outline" onClick={() => save("draft")} disabled={busy}>
+              Save draft
+            </Button>
+          )}
           <Button loading={busy} onClick={() => save("published")}>
             <Megaphone className="h-4 w-4" /> {existing?.status === "published" ? "Save changes" : "Publish"}
           </Button>
@@ -675,8 +680,8 @@ function ComposeModal({ existing, onClose }: { existing?: NoticeView; onClose: (
         </FormField>
 
         <FormField label="Audience" required error={errors.audience} className="sm:col-span-2">
-          <Select value={form.audience.scope} onChange={(e) => setScope(e.target.value as NoticeAudienceScope)}>
-            {Object.entries(AUDIENCE_LABELS).map(([k, v]) => (
+          <Select value={form.audience.scope} onChange={(e) => setScope(e.target.value as NoticeAudienceScope)} disabled={teacherMode}>
+            {Object.entries(AUDIENCE_LABELS).filter(([k]) => !teacherMode || k === "sections").map(([k, v]) => (
               <option key={k} value={k}>
                 {v}
               </option>
@@ -836,8 +841,10 @@ function NoticeDetail({
 // ------------------------------------------------------------------ Teacher / Student board
 
 export function NoticeBoard() {
-  const { dataSource } = useSession();
+  const { dataSource, user } = useSession();
   const live = dataSource === "live";
+  const canCompose = live && user?.role === "teacher";
+  const [composing, setComposing] = useState(false);
 
   const { filters, bar, hasActiveFilters, resetFilters, deps } = useNoticeFilters(false);
 
@@ -856,7 +863,13 @@ export function NoticeBoard() {
 
   return (
     <div>
-      <PageHeader title="Notices" description="Announcements, events and holidays relevant to you." />
+      <PageHeader
+        title="Notices"
+        description="Announcements, events and holidays relevant to you."
+        actions={canCompose ? <Button onClick={() => setComposing(true)}><Megaphone className="h-4 w-4" /> Post class notice</Button> : undefined}
+      />
+      {composing && <ComposeModal teacherMode onClose={() => setComposing(false)} />}
+      {live && <LiveEventsPanel />}
       <Card className="mb-5 p-4">{bar}</Card>
       <QueryView query={queryState} loading="table">
         {(noticeList) => {

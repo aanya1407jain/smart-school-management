@@ -21,8 +21,9 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { internalAction, internalMutation, type ActionCtx, type QueryCtx } from "./_generated/server";
 import { schoolAction, schoolQuery } from "./core/functions";
 import { requireActor, type Actor } from "./core/actor";
-import { getCurrentAcademicYearId, getInSchool, requirePermission } from "./core/authorization";
+import { getCurrentAcademicYearId, getInSchool, hasPermission, requirePermission } from "./core/authorization";
 import { AppError, forbidden, invalid } from "./core/errors";
+import { assertNonEmpty } from "./core/validators";
 import { fullName, teacherDisplayName } from "./model/academics";
 import { generateTemporaryPassword, PASSWORD_PROVIDER, provisionAccount, reserveAccount, temporaryPasswordFields } from "./model/accounts";
 import { accountTarget, writeAudit } from "./model/audit";
@@ -33,6 +34,12 @@ const vPersonRef = v.union(
   v.object({ kind: v.literal("student"), studentId: v.id("students") }),
   v.object({ kind: v.literal("teacher"), teacherId: v.id("teachers") }),
   v.object({ kind: v.literal("guardian"), guardianId: v.id("guardians") }),
+  /**
+   * Office staff with an ADMIN-portal login that is not linked to a teacher
+   * record (e.g. a second administrator, or the accountant). `accountantOnly`
+   * restricts it to the finance permission set (core/permissions.ts).
+   */
+  v.object({ kind: v.literal("staff"), displayName: v.string(), email: v.optional(v.string()), accountantOnly: v.boolean() }),
 );
 
 type AccountState = "pending" | "active" | "suspended";
@@ -65,6 +72,10 @@ export const reserveForPerson = internalMutation({
       const t = await getInSchool(scoped, "teachers", person.teacherId, "Teacher");
       displayName = `${t.firstName} ${t.lastName}`;
       reserved = await reserveAccount(ctx, { ...base, role: "teacher", kind: "teacher", displayName, email: t.email, teacherId: t._id });
+    } else if (person.kind === "staff") {
+      displayName = assertNonEmpty(person.displayName, "displayName", 120);
+      const email = person.email?.trim() ? assertNonEmpty(person.email, "email", 200) : undefined;
+      reserved = await reserveAccount(ctx, { ...base, role: "admin", kind: "admin", displayName, email, permissionSets: person.accountantOnly ? ["accountant"] : [] });
     } else {
       const g = await getInSchool(scoped, "guardians", person.guardianId, "Guardian");
       displayName = g.name;
@@ -250,7 +261,12 @@ export const listPeople = schoolQuery({
   args: { kind: v.union(v.literal("student"), v.literal("teacher")), sectionId: v.optional(v.id("sections")), paginationOpts: paginationOptsValidator },
   handler: async (ctx, { kind, sectionId, paginationOpts }) => {
     const { actor } = ctx;
-    requirePermission(actor, "users:manage");
+    // Students: account managers, or anyone who may read every student record (the
+    // admin students list); sign-in account details are returned only to users:manage.
+    // Teachers: account managers only.
+    if (kind === "student" && !hasPermission(actor, "users:manage")) requirePermission(actor, "students:read:all");
+    else requirePermission(actor, "users:manage");
+    const withAccounts = hasPermission(actor, "users:manage");
     if (kind === "student") {
       if (sectionId) {
         const section = await getInSchool({ ...ctx, actor }, "sections", sectionId, "Section");
@@ -268,7 +284,7 @@ export const listPeople = schoolQuery({
           page.push({
             personId: s._id as string, name: fullName(s), number: s.admissionNo, detail: `Class ${section.displayName}`,
             rollNo: e.rollNo ?? null,
-            account: await accountFor(ctx, actor, "studentId", s._id),
+            account: withAccounts ? await accountFor(ctx, actor, "studentId", s._id) : null,
           });
         }
         return { ...result, page };
@@ -286,7 +302,7 @@ export const listPeople = schoolQuery({
         page.push({
           personId: s._id as string, name: fullName(s), number: s.admissionNo, detail: section ? `Class ${section.displayName}` : "Not enrolled",
           rollNo: enr?.rollNo ?? null,
-          account: await accountFor(ctx, actor, "studentId", s._id),
+          account: withAccounts ? await accountFor(ctx, actor, "studentId", s._id) : null,
         });
       }
       return { ...result, page };
@@ -302,5 +318,26 @@ export const listPeople = schoolQuery({
       });
     }
     return { ...result, page };
+  },
+});
+
+/**
+ * Administrative (admin-portal) logins of the school — principals, office
+ * staff and accountant-only logins — with their access state. Bounded.
+ * Change access with memberships.updateAccess (suspend / reactivate,
+ * accountant-only) and passwords with issueTemporaryPassword.
+ */
+export const MAX_STAFF_ACCOUNTS = 500;
+export const listStaffAccounts = schoolQuery({
+  args: {},
+  handler: async (ctx) => {
+    requirePermission(ctx.actor, "users:manage");
+    const rows = await ctx.db.query("schoolMemberships").withIndex("by_school_role", (q) => q.eq("schoolId", ctx.actor.schoolId).eq("role", "admin")).take(MAX_STAFF_ACCOUNTS);
+    return rows
+      .map((m) => ({
+        membershipId: m._id, loginId: m.loginId ?? null, displayName: m.displayName, email: m.email ?? null,
+        state: accountState(m), accountantOnly: m.permissionSets.includes("accountant"), isSelf: m._id === ctx.actor.membershipId,
+      }))
+      .sort((a, b) => a.displayName.localeCompare(b.displayName));
   },
 });

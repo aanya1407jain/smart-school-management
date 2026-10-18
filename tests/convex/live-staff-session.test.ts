@@ -105,14 +105,20 @@ describe("live admin / teacher sessions", () => {
       // Connected in the integration pass (finance & communications, academics, teacher screens):
       "/admin/dashboard", "/admin/students", "/admin/students/abc/edit", "/admin/academics", "/admin/fees", "/admin/fees/abc123", "/admin/notices", "/admin/reports", "/admin/settings",
       "/teacher/classes", "/teacher/homework", "/teacher/homework/abc", "/teacher/examinations", "/teacher/examinations/marks", "/teacher/timetable", "/teacher/notices",
+      // Connected in the MVP-completion pass (exams lifecycle, timetable builder, homework oversight,
+      // teachers & staff, teacher landing page, staff profiles, audit log):
+      "/admin/examinations", "/admin/examinations/abc", "/admin/examinations/marks", "/admin/timetable", "/admin/homework", "/admin/teachers",
+      "/admin/audit", "/admin/profile", "/teacher/dashboard", "/teacher/profile",
     ]) {
       expect(isLiveRoute(p), p).toBe(true);
     }
-    // Still demo-data only: live accounts get the "not connected yet" screen there.
-    for (const p of ["/admin/examinations", "/admin/examinations/abc", "/admin/timetable", "/admin/homework", "/admin/teachers", "/teacher/dashboard"]) {
+    // Pages that are not in the navigation are never live by accident.
+    for (const p of ["/admin/unknown", "/teacher/payroll", "/admin/payroll/run"]) {
       expect(isLiveRoute(p), p).toBe(false);
     }
-    expect(liveNavItems({ role: "teacher", permissionSets: [] }).map((i) => i.href)).toEqual(["/teacher/classes", "/teacher/attendance", "/teacher/homework", "/teacher/examinations", "/teacher/timetable", "/teacher/notices", "/teacher/notifications"]);
-    expect(liveNavItems({ role: "admin", permissionSets: [] }).map((i) => i.href)).toEqual(["/admin/dashboard", "/admin/students", "/admin/academics", "/admin/accounts", "/admin/attendance", "/admin/fees", "/admin/notices", "/admin/notifications", "/admin/reports", "/admin/settings"]);
+    expect(liveNavItems({ role: "teacher", permissionSets: [] }).map((i) => i.href)).toEqual(["/teacher/dashboard", "/teacher/classes", "/teacher/attendance", "/teacher/homework", "/teacher/examinations", "/teacher/timetable", "/teacher/notices", "/teacher/notifications", "/teacher/profile"]);
+    expect(liveNavItems({ role: "admin", permissionSets: [] }).map((i) => i.href)).toEqual(["/admin/dashboard", "/admin/students", "/admin/academics", "/admin/teachers", "/admin/accounts", "/admin/attendance", "/admin/fees", "/admin/examinations", "/admin/timetable", "/admin/homework", "/admin/notices", "/admin/notifications", "/admin/reports", "/admin/audit", "/admin/settings", "/admin/profile"]);
+    // A restricted (accountant-only) admin sees finance pages only.
+    expect(liveNavItems({ role: "admin", permissionSets: ["accountant"] }).map((i) => i.href)).toEqual(["/admin/dashboard", "/admin/students", "/admin/fees", "/admin/notifications", "/admin/reports", "/admin/profile"]);
   });
 });

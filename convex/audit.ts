@@ -4,6 +4,7 @@
  * the change; there are no public write/delete functions.
  */
 import { v } from "convex/values";
+import { paginationOptsValidator } from "convex/server";
 import { internalQuery } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { schoolQuery } from "./core/functions";
@@ -67,5 +68,49 @@ export const accountCreationReport = internalQuery({
       if (recorded && recorded !== m.role) problems.push({ loginId, problem: `audit_target_role_${recorded}_but_membership_${m.role}` });
     }
     return { found: true as const, accountCreatedEvents: rows.length, byActorRole, byTargetRole, problems: problems.slice(0, 200) };
+  },
+});
+
+/**
+ * The audit-log viewer (admin: audit:read): newest first, paginated, optionally
+ * one action ("fees.payment_reversed"). Each row names the acting member as
+ * they appear in THIS school (membership display name + Login ID), or
+ * "System" for jobs. Metadata is returned as recorded — writeAudit never
+ * stores passwords, tokens or other secrets.
+ */
+export const feed = schoolQuery({
+  args: { action: v.optional(v.string()), paginationOpts: paginationOptsValidator },
+  handler: async (ctx, { action, paginationOpts }) => {
+    requirePermission(ctx.actor, "audit:read");
+    const schoolId = ctx.actor.schoolId;
+    const q = action
+      ? ctx.db.query("auditLogs").withIndex("by_school_action", (x) => x.eq("schoolId", schoolId).eq("action", action))
+      : ctx.db.query("auditLogs").withIndex("by_school", (x) => x.eq("schoolId", schoolId));
+    const result = await q.order("desc").paginate(paginationOpts);
+    const names = new Map<string, { name: string; loginId: string | null }>();
+    const page = [];
+    for (const r of result.page) {
+      let actor: { name: string; loginId: string | null } | null = null;
+      if (r.actorUserId) {
+        const key = r.actorUserId as string;
+        if (!names.has(key)) {
+          const m = (await ctx.db.query("schoolMemberships").withIndex("by_user", (x) => x.eq("userId", r.actorUserId!)).collect()).find((x) => x.schoolId === schoolId);
+          names.set(key, { name: m?.displayName ?? "Former member", loginId: m?.loginId ?? null });
+        }
+        actor = names.get(key)!;
+      }
+      page.push({ _id: r._id, at: r._creationTime, action: r.action, summary: r.summary, entity: r.entity, actorRole: r.actorRole ?? null, actor, metadata: r.metadata ?? null });
+    }
+    return { ...result, page };
+  },
+});
+
+/** Distinct action names seen recently (for the viewer's filter), bounded. */
+export const actions = schoolQuery({
+  args: {},
+  handler: async (ctx) => {
+    requirePermission(ctx.actor, "audit:read");
+    const rows = await ctx.db.query("auditLogs").withIndex("by_school", (x) => x.eq("schoolId", ctx.actor.schoolId)).order("desc").take(2000);
+    return [...new Set(rows.map((r) => r.action))].sort();
   },
 });

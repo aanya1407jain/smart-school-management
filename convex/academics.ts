@@ -707,3 +707,28 @@ export const updateStudentProfile = schoolMutation({
     return { changed, renumberedSections: renumbered.length };
   },
 });
+
+/**
+ * A student's enrollment history across academic years (newest first): class,
+ * section, status, dates and the last roll number. Administrators
+ * (students:read:all) and the student / linked guardians (profile:read:own).
+ */
+export const enrollmentHistory = schoolQuery({
+  args: { studentId: v.id("students") },
+  handler: async (ctx, { studentId }) => {
+    const student = await requireStudentAccess(ctx, studentId, { all: "students:read:all", own: "profile:read:own" });
+    const years = await ctx.db.query("academicYears").withIndex("by_school_start", (q) => q.eq("schoolId", ctx.actor.schoolId)).collect();
+    const out = [];
+    for (const y of years) {
+      for (const e of await ctx.db.query("enrollments").withIndex("by_student_year", (q) => q.eq("studentId", student._id).eq("academicYearId", y._id)).collect()) {
+        if (e.schoolId !== ctx.actor.schoolId) continue;
+        const [klass, section] = [await ctx.db.get(e.classId), await ctx.db.get(e.sectionId)];
+        out.push({
+          enrollmentId: e._id, academicYear: y.name, yearStart: y.startDate, className: klass?.name ?? "", section: section?.displayName ?? "",
+          status: e.status, startDate: e.startDate, endDate: e.endDate ?? null, rollNo: e.rollNo ?? null,
+        });
+      }
+    }
+    return out.sort((a, b) => b.yearStart.localeCompare(a.yearStart) || b.startDate.localeCompare(a.startDate) || (a.status === "active" ? -1 : 1));
+  },
+});

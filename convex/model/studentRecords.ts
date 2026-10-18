@@ -143,6 +143,7 @@ export async function publishedResults(ctx: QueryCtx, student: Doc<"students">) 
       grade: r.grade ?? null,
       rank: r.rank ?? null,
       sectionSize,
+      sectionLabel: (await ctx.db.get(r.sectionId))?.displayName ?? null,
       subjects,
     });
   }
@@ -198,7 +199,7 @@ export async function homeworkFor(ctx: QueryCtx, student: Doc<"students">, secti
       homeworkStatus: h.status,
       attachmentFileIds: h.attachmentFileIds,
       submission: sub && sub.schoolId === student.schoolId
-        ? { submissionId: sub._id, status: sub.status, submittedAt: sub.submittedAt, content: sub.content ?? null, feedback: sub.feedback ?? null }
+        ? { submissionId: sub._id, status: sub.status, submittedAt: sub.submittedAt, content: sub.content ?? null, attachmentFileIds: sub.attachmentFileIds, feedback: sub.feedback ?? null }
         : null,
     });
   }
@@ -221,7 +222,7 @@ export async function timetableFor(ctx: QueryCtx, section: Doc<"sections">) {
   };
   const lessons = [];
   for (const e of entries) {
-    lessons.push({ dayOfWeek: e.dayOfWeek, periodId: e.periodId, subject: await nameOf(e.subjectId, "subject"), teacher: await nameOf(e.teacherId, "teacher"), room: e.room ?? null });
+    lessons.push({ entryId: e._id, dayOfWeek: e.dayOfWeek, periodId: e.periodId, subjectId: e.subjectId, teacherId: e.teacherId, subject: await nameOf(e.subjectId, "subject"), teacher: await nameOf(e.teacherId, "teacher"), room: e.room ?? null });
   }
   return { periods, lessons };
 }

@@ -128,7 +128,8 @@ export const listMine = schoolQuery({
     const out = [];
     for (const h of rows.filter((x) => x.schoolId === ctx.actor.schoolId)) {
       const subs = await ctx.db.query("homeworkSubmissions").withIndex("by_homework_student", (q) => q.eq("homeworkId", h._id)).collect();
-      out.push({ ...(await summary(ctx, h)), submitted: subs.length, reviewed: subs.filter((s) => s.status === "reviewed").length });
+      const students = (await ctx.db.query("enrollments").withIndex("by_section_status", (q) => q.eq("sectionId", h.sectionId).eq("status", "active")).take(1001)).length;
+      out.push({ ...(await summary(ctx, h)), submitted: subs.length, reviewed: subs.filter((s) => s.status === "reviewed").length, students });
     }
     return out;
   },
@@ -141,7 +142,11 @@ export const listForSection = schoolQuery({
     const section = await requireSectionRead(ctx, sectionId, { all: "homework:read:all", assigned: "homework:manage:assigned" });
     const rows = await ctx.db.query("homework").withIndex("by_section_due", (q) => q.eq("sectionId", section._id)).order("desc").take(LIST_LIMIT);
     const out = [];
-    for (const h of rows.filter((x) => x.schoolId === ctx.actor.schoolId)) out.push(await summary(ctx, h));
+    const students = (await ctx.db.query("enrollments").withIndex("by_section_status", (q) => q.eq("sectionId", section._id).eq("status", "active")).take(1001)).length;
+    for (const h of rows.filter((x) => x.schoolId === ctx.actor.schoolId)) {
+      const subs = await ctx.db.query("homeworkSubmissions").withIndex("by_homework_student", (q) => q.eq("homeworkId", h._id)).collect();
+      out.push({ ...(await summary(ctx, h)), submitted: subs.length, reviewed: subs.filter((s) => s.status === "reviewed").length, students });
+    }
     return out;
   },
 });

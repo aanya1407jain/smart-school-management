@@ -514,7 +514,7 @@ async function serverAnswer(ctx, path) {
   // Each module renders the account's real records, or the explicit empty state when the school has none.
   for (const [path, pattern, label] of [
     ["/student/timetable", /Weekly timetable|No timetable yet|Not enrolled in a class/, "timetable"],
-    ["/student/homework", /open assignment|No homework set|Not enrolled in a class/, "homework"],
+    ["/student/homework", /Nothing due|No homework assigned yet|Not enrolled in a class|deadline/, "homework"],
     ["/student/results", /No published results yet|Grade/, "results"],
     ["/student/fees", /Installments|No current academic year/, "fees"],
     ["/student/notices", /Announcements for the whole school/, "notices"],

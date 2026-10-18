@@ -19,7 +19,8 @@ import { PasswordCard } from "@/features/profile/profile-page";
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, LoadingState, PageHeader, ProgressRing, StatCard, StatusBadge } from "@/components/ui";
 import { ROLE_LABELS } from "@/lib/permissions";
 import { formatDate, todayISO } from "@/lib/utils/dates";
-import { LiveFeesPanel, LiveHomeworkList, LiveNoticesList, LiveResultsList, LiveTimetableGrid } from "./live-records";
+import { LiveEventsPanel } from "@/features/notices/events-live";
+import { LiveFeesPanel, LiveNoticesList, LiveResultsList, LiveTimetableGrid } from "./live-records";
 
 // ------------------------------------------------------------------ switch
 /** Renders the demo-data page or the live (Convex) page for the current session. */
@@ -319,25 +320,11 @@ export function LiveTimetable() {
   return (<div><PageHeader title="My Timetable" description={`Class ${t.section} · weekly schedule`} /><LiveTimetableGrid timetable={t} /></div>);
 }
 
-export function LiveHomework() {
-  const h = useSchoolQuery(api.studentPortal.myHomework, usePortalArgs());
-  if (h === undefined) return <LoadingState variant="table" label="Loading homework" />;
-  if (h.state === "no_student_record") return <MissingRecord />;
-  if (h.state === "not_enrolled") return <NotEnrolled what="Homework" />;
-  const open = h.homework.filter((x) => !x.submission && x.homeworkStatus === "active").length;
-  return (
-    <div>
-      <PageHeader title="My Homework" description={`Class ${h.section} · ${open} open assignment${open === 1 ? "" : "s"}. Submissions are handed in to your teacher; online submission is not available yet.`} />
-      <LiveHomeworkList homework={h.homework} />
-    </div>
-  );
-}
-
 export function LiveResults() {
   const r = useSchoolQuery(api.studentPortal.myResults, usePortalArgs());
   if (r === undefined) return <LoadingState variant="cards" label="Loading results" />;
   if (r.state === "no_student_record") return <MissingRecord />;
-  return (<div><PageHeader title="My Results" description="Published examination results." /><LiveResultsList results={r.results} /></div>);
+  return (<div><PageHeader title="My Results" description="Published examination results." /><LiveResultsList results={r.results} header={{ school: r.school, student: r.student }} /></div>);
 }
 
 export function LiveFees() {
@@ -353,5 +340,5 @@ export function LiveNotices() {
   const n = useSchoolQuery(api.studentPortal.myNotices, { ...usePortalArgs(), today });
   if (n === undefined) return <LoadingState variant="table" label="Loading notices" />;
   if (n.state === "no_student_record") return <MissingRecord />;
-  return (<div className="mx-auto max-w-4xl"><PageHeader title="Notices" description="Announcements for the whole school, students, and your class." /><LiveNoticesList notices={n.notices} /></div>);
+  return (<div className="mx-auto max-w-4xl"><PageHeader title="Notices" description="Announcements for the whole school, students, and your class." /><LiveEventsPanel /><LiveNoticesList notices={n.notices} /></div>);
 }
