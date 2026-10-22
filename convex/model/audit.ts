@@ -24,7 +24,8 @@ import type { Role } from "../core/permissions";
  *   entity                  → WHAT was changed.
  *   metadata.target*        → for account/membership events, the AFFECTED
  *                             account: targetRole ("student" | "teacher" |
- *                             "admin"), targetKind (adds "guardian") and
+ *                             "admin"), targetKind (same values; "legacy_guardian"
+ *                             only for the removed guardian sign-ins) and
  *                             targetLoginId. Never the actor's role.
  */
 
@@ -41,7 +42,7 @@ export type AuditInput = {
 export function accountTarget(m: Pick<Doc<"schoolMemberships">, "role" | "loginId" | "guardianId">) {
   return {
     targetRole: m.role,
-    targetKind: m.guardianId ? ("guardian" as const) : m.role,
+    targetKind: m.guardianId ? ("legacy_guardian" as const) : m.role,
     ...(m.loginId ? { targetLoginId: m.loginId } : {}),
   };
 }

@@ -135,19 +135,18 @@ export async function requireSectionRead(
   throw forbidden();
 }
 
-// ---------------------------------------------------------------- students & guardians
-/** Students the actor may see in the student portal: self, or children linked to the guardian. */
-export async function linkedStudentIds(ctx: QueryCtx, actor: Actor): Promise<Id<"students">[]> {
-  if (actor.studentId) return [actor.studentId];
-  if (actor.guardianId) {
-    const links = await ctx.db.query("guardianLinks").withIndex("by_guardian", (q) => q.eq("guardianId", actor.guardianId!)).collect();
-    return links.filter((l) => l.schoolId === actor.schoolId).map((l) => l.studentId);
-  }
-  return [];
+// ---------------------------------------------------------------- students (own records)
+/**
+ * Students the actor may see in the student portal: only the student's own
+ * record (a student-role membership). Parent contacts have no accounts.
+ * Kept async/array-shaped so every caller goes through one rule.
+ */
+export async function linkedStudentIds(_ctx: QueryCtx, actor: Actor): Promise<Id<"students">[]> {
+  return actor.studentId ? [actor.studentId] : [];
 }
 
-/** Guardian/student portal check: the student must be the actor or linked to the actor's guardian record. */
-export async function requireGuardianStudentAccess(ctx: Ctx, studentId: Id<"students">): Promise<Doc<"students">> {
+/** Student-portal check: the student must be the signed-in student themself (else NOT_FOUND). */
+export async function requireOwnStudentAccess(ctx: Ctx, studentId: Id<"students">): Promise<Doc<"students">> {
   const student = await getInSchool(ctx, "students", studentId, "Student");
   const linked = await linkedStudentIds(ctx, ctx.actor);
   if (!linked.includes(student._id)) throw notFound("Student");
@@ -168,7 +167,7 @@ export async function enrollmentFor(ctx: QueryCtx, studentId: Id<"students">, ac
  * assigned: "attendance:read:assigned", own: "attendance:read:own" }.
  *   - all      → admin / permission-set holders
  *   - assigned → teacher whose scope includes the student's CURRENT section
- *   - own      → the student, or a guardian linked to the student
+ *   - own      → the student themself
  */
 export async function requireStudentAccess(
   ctx: Ctx,

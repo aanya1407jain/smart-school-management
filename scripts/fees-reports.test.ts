@@ -69,7 +69,6 @@ async function run() {
 
   const SERVER_STUDENTS: Record<string, { studentId: string; name: string }[]> = {
     "student@asteracademy.edu": [{ studentId: "cvx_aarav", name: "Aarav Sharma" }],
-    "guardian@asteracademy.edu": [{ studentId: "cvx_aarav", name: "Aarav Sharma" }, { studentId: "cvx_ananya", name: "Ananya Sharma" }],
   };
   const login = (email: string, roleOrPassword: "admin" | "teacher" | "student" | string, roleArg?: "admin" | "teacher" | "student") => {
     const role = (roleArg ?? roleOrPassword) as "admin" | "teacher" | "student";

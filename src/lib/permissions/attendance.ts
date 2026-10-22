@@ -6,7 +6,7 @@
  *
  * Only the teacher who is the CLASS TEACHER of a section may mark (create) or
  * edit (correct) that section's attendance. A subject assignment, timetable
- * slot or access to the students is NOT enough. Admins and students/guardians
+ * slot or access to the students is NOT enough. Admins and students
  * are view-only. The mock services call these functions before every write,
  * and the UI only shows controls when the service reports `canMark/canEdit`.
  *

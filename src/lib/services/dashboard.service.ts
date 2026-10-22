@@ -232,7 +232,6 @@ export const mockDashboardService = {
 
       return {
         student: { id: s.id, name: fullName(s), firstName: s.firstName, admissionNo: s.admissionNo, classLabel: info.label, grade: info.cls?.grade ?? null, section: info.section?.name ?? null, rollNo: enr?.rollNo ?? null, classTeacher: ct ? teacherName(ct) : null, room: info.section?.room ?? null },
-        isGuardian: !!actor.guardianId,
         attendance: { ...attendanceStats(db, studentId), threshold: db.school.settings.lowAttendanceThreshold },
         day,
         timetable,
@@ -300,7 +299,7 @@ export const mockDashboardService = {
     });
   },
 
-  /** For guardian accounts: the students linked to this login. */
+  /** The students linked to this login (a student account: its own record). */
   async getLinkedStudents() {
     return handle(() => {
       const actor = requireActor();

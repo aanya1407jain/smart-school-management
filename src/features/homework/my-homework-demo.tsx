@@ -21,7 +21,6 @@ export function MyHomeworkDemo() {
   const [submitId, setSubmitId] = useState<string | null>(null);
   const q = useQuery(() => services.homework.getStudentHomework(studentId!, { status, subjectId }), [studentId, status, subjectId], { enabled: !!studentId });
   const target = q.data?.find((h) => h.id === submitId);
-  const isGuardian = !!user?.guardianId;
 
   return (
     <div>
@@ -57,7 +56,7 @@ export function MyHomeworkDemo() {
                     </div>
                     <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
                       <span className={cn("text-sm font-semibold", h.status === "overdue" ? "text-plum" : "text-ink-soft")}>{h.submission ? "Done" : dueLabel(h.dueDate)}</span>
-                      {!isGuardian && h.homeworkStatus === "active" && (h.status === "pending" || h.status === "overdue" || h.status === "submitted" || h.status === "late") && (
+                      {h.homeworkStatus === "active" && (h.status === "pending" || h.status === "overdue" || h.status === "submitted" || h.status === "late") && (
                         <Button size="sm" variant={h.submission ? "outline" : "primary"} onClick={() => setSubmitId(h.id)}><Send className="h-4 w-4" /> {h.submission ? "Resubmit" : "Submit"}</Button>
                       )}
                     </div>

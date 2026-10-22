@@ -55,9 +55,11 @@ async function signInFails(loginId: string, password: string): Promise<string | 
   }
 }
 
-const PW = { admin: "Admin@123", teacher: "Teacher@123", student: "Student@123", guardian: "Guardian@123", welcome: "Welcome@123" };
+const PW = { admin: "Admin@123", teacher: "Teacher@123", student: "Student@123", welcome: "Welcome@123" };
+/** The former demo guardian login (removed account type) — must never get access again. */
+const LEGACY_GUARDIAN = { loginId: "GRD-00001", password: "Guardian@123" };
 /** Demo Login IDs (convex/seedData/asterAcademy.ts). */
-const ID = { admin: "ADMIN-001", rahul: "TCH-00001", meera: "TCH-00002", sunita: "TCH-00003", joshi: "TCH-00009", aarav: "STU-2026-00001", guardian: "GRD-00001" };
+const ID = { admin: "ADMIN-001", rahul: "TCH-00001", meera: "TCH-00002", sunita: "TCH-00003", joshi: "TCH-00009", aarav: "STU-2026-00001" };
 
 async function main() {
   // ---------------------------------------------------------------- authentication
@@ -87,8 +89,16 @@ async function main() {
   const sunita = await signIn(ID.sunita, PW.welcome);
   const joshi = await signIn(ID.joshi, PW.welcome);
   const aarav = await signIn(ID.aarav, PW.student);
-  const guardian = await signIn(ID.guardian, PW.guardian);
   check("All demo personas sign in through Convex Auth", true);
+  // Account roles are admin, teacher and student only. A guardian sign-in left in an older
+  // deployment is refused at sign-in (no active access) — before or after the migration.
+  check("Former guardian login GRD-00001 cannot sign in (account type removed)", (await signInFails(LEGACY_GUARDIAN.loginId, LEGACY_GUARDIAN.password)) !== null);
+  try {
+    await admin.mutation(("migrations:removeGuardianAccounts" as unknown) as typeof api.notices.publish, {} as never);
+    check("The guardian-removal migration is internal (not callable from a client)", false);
+  } catch (e) {
+    check("The guardian-removal migration is internal (not callable from a client)", /Could not find public function|not found/i.test(String(e)), codeOf(e));
+  }
 
   // ---------------------------------------------------------------- identity
   const meAdmin = await admin.query(api.users.me, {});
@@ -100,22 +110,19 @@ async function main() {
   check("Admin has attendance:read:all but no mark/edit", vAdmin.permissions.includes("attendance:read:all") && !vAdmin.permissions.includes("attendance:mark:class_teacher") && !vAdmin.permissions.includes("attendance:edit:class_teacher"));
   const vRahul = await rahul.query(api.users.viewer, {});
   check("Teacher viewer is linked to a teacher record", vRahul.role === "teacher" && !!vRahul.teacher);
-  const vGuardian = await guardian.query(api.users.viewer, {});
-  check("Guardian uses the student portal with 2 linked students", vGuardian.role === "student" && vGuardian.isGuardian && vGuardian.students.length === 2);
   const vAarav = await aarav.query(api.users.viewer, {});
   check("Student viewer sees only themself", vAarav.students.length === 1 && vAarav.students[0].name === "Aarav Sharma");
   await expectCode("A membershipId that is not yours is rejected", () => aarav.query(api.users.viewer, { membershipId: vAdmin.membershipId }), "NO_SCHOOL_ACCESS");
 
   // ---------------------------------------------------------------- session (the frontend's single identity source)
   check("Signed-out users.session reports signedOut", (await anon.query(api.users.session, {})).status === "signedOut");
-  const sessions = { admin: await admin.query(api.users.session, {}), rahul: await rahul.query(api.users.session, {}), aarav: await aarav.query(api.users.session, {}), guardian: await guardian.query(api.users.session, {}) };
+  const sessions = { admin: await admin.query(api.users.session, {}), rahul: await rahul.query(api.users.session, {}), aarav: await aarav.query(api.users.session, {}) };
   const roleOf = (x: (typeof sessions)[keyof typeof sessions]) => (x.status === "signedIn" ? x.viewer.role : x.status);
-  check("users.session derives each role server-side", roleOf(sessions.admin) === "admin" && roleOf(sessions.rahul) === "teacher" && roleOf(sessions.aarav) === "student" && roleOf(sessions.guardian) === "student",
+  check("users.session derives each role server-side", roleOf(sessions.admin) === "admin" && roleOf(sessions.rahul) === "teacher" && roleOf(sessions.aarav) === "student",
     Object.values(sessions).map(roleOf).join(","));
-  check("Session links: teacher record / own student / guardian with 2 children",
+  check("Session links: teacher record / own student only",
     sessions.rahul.status === "signedIn" && !!sessions.rahul.viewer.teacher &&
-    sessions.aarav.status === "signedIn" && sessions.aarav.viewer.student?.name === "Aarav Sharma" && !sessions.aarav.viewer.isGuardian &&
-    sessions.guardian.status === "signedIn" && !!sessions.guardian.viewer.guardian && sessions.guardian.viewer.students.length === 2 && sessions.guardian.viewer.student === null);
+    sessions.aarav.status === "signedIn" && sessions.aarav.viewer.student?.name === "Aarav Sharma" && sessions.aarav.viewer.students.length === 1 && !("guardian" in sessions.aarav.viewer));
   const forgedSession = await aarav.query(api.users.session, { membershipId: vAdmin.membershipId });
   check("Session with someone else's membershipId gets no identity (noSchool)", forgedSession.status === "noSchool");
   try {
@@ -160,7 +167,6 @@ async function main() {
   await expectCode("Sunita (subject teacher of 10-A) cannot mark 10-A", () => sunita.mutation(api.attendance.mark, { sectionId: s10A, date: day, entries: entriesFor(reg) }), "FORBIDDEN");
   await expectCode("Admin cannot mark attendance", () => admin.mutation(api.attendance.mark, { sectionId: s10A, date: day, entries: entriesFor(reg) }), "FORBIDDEN");
   await expectCode("Student cannot mark attendance", () => aarav.mutation(api.attendance.mark, { sectionId: s10A, date: day, entries: entriesFor(reg) }), "FORBIDDEN");
-  await expectCode("Guardian cannot mark attendance", () => guardian.mutation(api.attendance.mark, { sectionId: s10A, date: day, entries: entriesFor(reg) }), "FORBIDDEN");
   await expectCode("Incomplete register is rejected", () => rahul.mutation(api.attendance.mark, { sectionId: s10A, date: day, entries: entriesFor(reg).slice(1) }), "INVALID_ARGUMENT");
   await expectCode("Future date is rejected", () => rahul.mutation(api.attendance.mark, { sectionId: s10A, date: "2099-01-05", entries: entriesFor(reg) }), "INVALID_ARGUMENT");
 
@@ -171,8 +177,7 @@ async function main() {
   check("Register now editable by the class teacher only", after.canEdit && !after.canMark);
   const aaravNotes = await aarav.query(api.notifications.list, { unreadOnly: true });
   check("Absent student receives an attendance notification", aaravNotes.some((n) => n.type === "attendance" && n.message.includes(day)));
-  const guardianNotes = await guardian.query(api.notifications.list, { unreadOnly: true });
-  check("Linked guardian receives the notification too", guardianNotes.some((n) => n.type === "attendance" && n.message.includes(day)));
+
 
   const adminView = await admin.query(api.attendance.getByDate, { sectionId: s10A, date: day, today: TODAY });
   check("Admin views the register read-only", !!adminView.session && !adminView.canEdit && /Administrators/.test(adminView.readOnlyReason ?? ""));
@@ -184,24 +189,14 @@ async function main() {
   check("Correction is written to the audit log", audit.some((a) => a.summary.includes("10-A") && a.summary.includes(day)));
   await expectCode("Teacher cannot read the audit log", () => rahul.query(api.audit.list, {}), "FORBIDDEN");
 
-  // ---------------------------------------------------------------- student / guardian scope
+  // ---------------------------------------------------------------- student scope
   const own = await aarav.query(api.attendance.studentHistory, { studentId: aaravId });
   check("Student reads own attendance", own.records.some((r) => r.date === day && r.status === "present"));
-  const linked = vGuardian.students.map((s) => s.studentId as Id<"students">);
-  for (const id of linked) {
-    const h = await guardian.query(api.attendance.studentHistory, { studentId: id });
-    check(`Guardian reads linked child ${h.name}`, h.records.length > 0);
-  }
   const roster10B = await admin.query(api.academics.sectionRoster, { sectionId: s10B });
   const amairaId = roster10B.students.find((s) => s.name === "Amaira Desai")!.studentId;
   await expectCode("Student cannot read another student", () => aarav.query(api.attendance.studentHistory, { studentId: amairaId }), "NOT_FOUND");
-  await expectCode("Guardian cannot read an unlinked student", () => guardian.query(api.attendance.studentHistory, { studentId: amairaId }), "NOT_FOUND");
-  for (const s of vGuardian.students) {
-    const c = await guardian.query(api.users.studentContext, { studentId: s.studentId });
-    check(`Guardian can switch to linked child ${c.name}`, c.relation === "guardian" && c.studentId === s.studentId);
-  }
-  await expectCode("Guardian cannot switch to an unlinked student", () => guardian.query(api.users.studentContext, { studentId: amairaId }), "NOT_FOUND");
-  await expectCode("Teacher has no student-portal context", () => rahul.query(api.users.studentContext, { studentId: amairaId }), "NOT_FOUND");
+  await expectCode("Student portal refuses another student's id", () => aarav.query(api.studentPortal.myProfile, { studentId: amairaId }), "NOT_FOUND");
+  await expectCode("Teacher has no student-portal identity", () => rahul.query(api.studentPortal.myProfile, {}), "FORBIDDEN");
   const rahulReadsAmaira = await rahul.query(api.attendance.studentHistory, { studentId: amairaId });
   check("Subject teacher can VIEW a student in a section they teach", rahulReadsAmaira.name === "Amaira Desai");
 
@@ -250,7 +245,7 @@ async function main() {
 
   // Manual/bulk onboarding through the import pipeline (one row), then an account.
   const stamp = String(Date.now()).slice(-6);
-  const row = { rowNumber: 2, values: { fullName: "Ishita Menon", className: "10", section: "C", dateOfBirth: "14/05/2011", gender: "F", guardianName: "Kavita Menon", guardianPhone: `98450${stamp.slice(0, 5)}` } };
+  const row = { rowNumber: 2, values: { fullName: "Ishita Menon", className: "10", section: "C", dateOfBirth: "14/05/2011", gender: "F", parentName: "Kavita Menon", parentPhone: `98450${stamp.slice(0, 5)}` } };
   await expectCode("Teacher cannot import students", () => rahul.mutation(api.imports.commitStudentRows, { rows: [row], createAccounts: false, today: TODAY }), "FORBIDDEN");
   const bad = await admin.query(api.imports.previewStudents, { rows: [{ rowNumber: 2, values: { fullName: "No Class" } }, { rowNumber: 3, values: { fullName: "Bad Section", className: "10", section: "Z" } }], createAccounts: false, today: TODAY });
   check("Import preview reports per-row errors (missing class, unknown section)", bad.summary.invalid === 2 && bad.results.every((r) => r.errors.length > 0));
@@ -329,9 +324,9 @@ async function main() {
     check("Demo student: published results and fee ledger come from the deployment", res.state === "ok" && res.results.length > 0 && fees.state === "ok" && fees.obligations.length > 0);
     const adminView = await admin.query(api.academics.getStudentProfile, { studentId: aaravId });
     const teacherView = await rahul.query(api.academics.getStudentProfile, { studentId: aaravId });
-    check("Profile tiers: admin sees guardian contact + fees; assigned teacher sees neither",
-      adminView?.access === "school" && !!adminView.guardians[0]?.phone && adminView.fees !== null &&
-      teacherView?.access === "assigned" && teacherView.guardians.every((g) => g.phone === null) && teacherView.fees === null);
+    check("Profile tiers: admin sees parent-contact phone + fees; assigned teacher sees neither",
+      adminView?.access === "school" && !!adminView.parentContacts[0]?.phone && adminView.fees !== null &&
+      teacherView?.access === "assigned" && teacherView.parentContacts.every((g) => g.phone === null) && teacherView.fees === null);
     check("A malformed (demo) id is simply not found", (await admin.query(api.academics.getStudentProfile, { studentId: "stu_aarav" })) === null);
   }
   check("After changing it: temp password stops working, the new one works, flag cleared",

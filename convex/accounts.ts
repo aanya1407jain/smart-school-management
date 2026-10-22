@@ -2,7 +2,7 @@
  * Account management for administrators (`users:manage`).
  *
  * Accounts are never self-registered. An administrator creates the account
- * for an existing student / teacher / guardian record; the server reserves a
+ * for an existing student or teacher record (or an office/admin login); the server reserves a
  * Login ID (generated, or the admin's choice — normalised and unique), creates
  * the Convex Auth password account with a random TEMPORARY password, and
  * returns that password exactly once so it can be handed to the person.
@@ -33,7 +33,6 @@ import { paginateSorted, sortKeyOf } from "./model/sortedPagination";
 const vPersonRef = v.union(
   v.object({ kind: v.literal("student"), studentId: v.id("students") }),
   v.object({ kind: v.literal("teacher"), teacherId: v.id("teachers") }),
-  v.object({ kind: v.literal("guardian"), guardianId: v.id("guardians") }),
   /**
    * Office staff with an ADMIN-portal login that is not linked to a teacher
    * record (e.g. a second administrator, or the accountant). `accountantOnly`
@@ -72,14 +71,10 @@ export const reserveForPerson = internalMutation({
       const t = await getInSchool(scoped, "teachers", person.teacherId, "Teacher");
       displayName = `${t.firstName} ${t.lastName}`;
       reserved = await reserveAccount(ctx, { ...base, role: "teacher", kind: "teacher", displayName, email: t.email, teacherId: t._id });
-    } else if (person.kind === "staff") {
+    } else {
       displayName = assertNonEmpty(person.displayName, "displayName", 120);
       const email = person.email?.trim() ? assertNonEmpty(person.email, "email", 200) : undefined;
       reserved = await reserveAccount(ctx, { ...base, role: "admin", kind: "admin", displayName, email, permissionSets: person.accountantOnly ? ["accountant"] : [] });
-    } else {
-      const g = await getInSchool(scoped, "guardians", person.guardianId, "Guardian");
-      displayName = g.name;
-      reserved = await reserveAccount(ctx, { ...base, role: "student", kind: "guardian", displayName, email: g.email, guardianId: g._id });
     }
     return { ...reserved, displayName };
   },
@@ -93,6 +88,7 @@ export const targetForCredentials = internalMutation({
     requirePermission(actor, "users:manage");
     const target = await getInSchool({ ...ctx, actor }, "schoolMemberships", targetMembershipId, "Account");
     if (target._id === actor.membershipId) throw forbidden("Use “Change password” on your profile for your own account.");
+    if (target.guardianId) throw invalid("This sign-in type no longer exists; accounts are for administrators, teachers and students only.");
     if (target.status === "suspended") throw invalid("Enable this account before issuing new credentials.");
     if (!target.loginId) throw invalid("This account has no Login ID.");
     return { loginId: target.loginId, userId: target.userId ?? null, displayName: target.displayName };
@@ -126,6 +122,7 @@ export const applyStatus = internalMutation({
     requirePermission(actor, "users:manage");
     const target = await getInSchool({ ...ctx, actor }, "schoolMemberships", targetMembershipId, "Account");
     if (target._id === actor.membershipId) throw forbidden("You cannot disable your own account.");
+    if (target.guardianId) throw invalid("This sign-in type no longer exists; accounts are for administrators, teachers and students only.");
     if (target.status === "invited") throw invalid("This account has no credentials yet. Issue a temporary password first.");
     if (target.status !== status) {
       await ctx.db.patch(target._id, { status });
@@ -153,7 +150,8 @@ export const revokeSessions = internalAction({
 type IssuedCredentials = { membershipId: Id<"schoolMemberships">; loginId: string; displayName: string; temporaryPassword: string };
 
 /**
- * Create the sign-in account for a student, teacher or guardian record.
+ * Create the sign-in account for a student or teacher record, or an office
+ * (admin-portal) login. Admin, teacher and student are the only account roles.
  * Returns the Login ID and a one-time temporary password.
  */
 export const create = schoolAction({
@@ -258,8 +256,15 @@ export const MAX_SCHOOL_STUDENT_LIST = 5000;
  * Teachers keep the index order.
  */
 export const listPeople = schoolQuery({
-  args: { kind: v.union(v.literal("student"), v.literal("teacher")), sectionId: v.optional(v.id("sections")), paginationOpts: paginationOptsValidator },
-  handler: async (ctx, { kind, sectionId, paginationOpts }) => {
+  args: {
+    kind: v.union(v.literal("student"), v.literal("teacher")), sectionId: v.optional(v.id("sections")),
+    /** Students only: case-insensitive match on name or admission number (filters the list, never the totals). */
+    search: v.optional(v.string()),
+    paginationOpts: paginationOptsValidator,
+  },
+  handler: async (ctx, { kind, sectionId, search, paginationOpts }) => {
+    const needle = search?.trim().toLowerCase() ?? "";
+    const matches = (s: Doc<"students">) => !needle || fullName(s).toLowerCase().includes(needle) || s.admissionNo.toLowerCase().includes(needle);
     const { actor } = ctx;
     // Students: account managers, or anyone who may read every student record (the
     // admin students list); sign-in account details are returned only to users:manage.
@@ -273,10 +278,12 @@ export const listPeople = schoolQuery({
         const enrollments = await ctx.db.query("enrollments").withIndex("by_section_status", (q) => q.eq("sectionId", section._id).eq("status", "active")).take(MAX_SECTION_ROSTER + 1);
         if (enrollments.length > MAX_SECTION_ROSTER) throw new AppError("CONFLICT", `${section.displayName} has more than ${MAX_SECTION_ROSTER} active students.`);
         const rows: { s: Doc<"students">; e: Doc<"enrollments"> }[] = [];
+        const seen = new Set<Id<"students">>(); // a stray duplicate enrollment never lists a student twice
         for (const e of enrollments) {
-          if (e.schoolId !== actor.schoolId) continue;
+          if (e.schoolId !== actor.schoolId || seen.has(e.studentId)) continue;
+          seen.add(e.studentId);
           const s = await ctx.db.get(e.studentId);
-          if (s && s.schoolId === actor.schoolId && s.status === "active") rows.push({ s, e });
+          if (s && s.schoolId === actor.schoolId && s.status === "active" && matches(s)) rows.push({ s, e });
         }
         const result = paginateSorted(rows, ({ s, e }) => sortKeyOf({ firstName: s.firstName, lastName: s.lastName, studentId: s._id, enrollmentId: e._id }), paginationOpts);
         const page = [];
@@ -293,7 +300,7 @@ export const listPeople = schoolQuery({
         .withIndex("by_school_status_name", (q) => q.eq("schoolId", actor.schoolId).eq("status", "active"))
         .take(MAX_SCHOOL_STUDENT_LIST + 1);
       if (students.length > MAX_SCHOOL_STUDENT_LIST) throw new AppError("CONFLICT", `More than ${MAX_SCHOOL_STUDENT_LIST} active students — filter the list by section.`);
-      const result = paginateSorted(students, (s) => sortKeyOf({ firstName: s.firstName, lastName: s.lastName, studentId: s._id }), paginationOpts);
+      const result = paginateSorted(students.filter(matches), (s) => sortKeyOf({ firstName: s.firstName, lastName: s.lastName, studentId: s._id }), paginationOpts);
       const yearId = await getCurrentAcademicYearId(ctx, actor.schoolId);
       const page = [];
       for (const s of result.page) {

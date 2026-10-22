@@ -149,7 +149,8 @@ export type StudentPlan = {
   rowNumber: number; firstName: string; lastName: string; gender?: "male" | "female" | "other"; dateOfBirth?: string;
   admissionNo?: string; admissionDate: string; classId: Id<"classes">; sectionId: Id<"sections">;
   email?: string; phone?: string; address?: string; loginId?: string;
-  guardian?: { name: string; phone: string; email?: string; relation: string; existingGuardianId?: Id<"guardians"> };
+  /** Parent contact (contact data only; stored in the `guardians` / `guardianLinks` tables). */
+  parentContact?: { name: string; phone: string; email?: string; relation: string; existingContactId?: Id<"guardians"> };
 };
 
 async function sectionIndex(ctx: Ctx) {
@@ -233,21 +234,21 @@ export async function analyzeStudents(ctx: Ctx, rows: ImportRowInput[], opts: { 
     }
     await loginIdChecks(ctx, r, loginId, row.rowNumber, trackLogin);
 
-    // Guardian: optional, but name + phone go together.
-    const gName = r.text("guardianName");
-    const gPhone = r.phone("guardianPhone");
-    const gEmail = r.email("guardianEmail");
-    const gRelation = r.text("guardianRelation");
-    let guardian: StudentPlan["guardian"];
-    if (gName || r.raw("guardianPhone") || gEmail || gRelation) {
-      if (!gName) r.errors.push({ field: "guardianName", message: "Guardian name is required when guardian details are given" });
-      if (!r.raw("guardianPhone")) r.errors.push({ field: "guardianPhone", message: "Guardian phone is required when guardian details are given" });
-      if (gName && gPhone) {
-        const existing = await ctx.db.query("guardians").withIndex("by_school_phone", (q) => q.eq("schoolId", ctx.actor.schoolId).eq("phone", gPhone)).first();
-        if (existing && lower(existing.name) !== lower(gName)) {
-          r.warnings.push({ field: "guardianPhone", message: `Phone ${gPhone} belongs to existing guardian ${existing.name}; the student will be linked to them` });
+    // Parent contact: optional, but name + phone go together.
+    const pName = r.text("parentName");
+    const pPhone = r.phone("parentPhone");
+    const pEmail = r.email("parentEmail");
+    const pRelation = r.text("parentRelation");
+    let parentContact: StudentPlan["parentContact"];
+    if (pName || r.raw("parentPhone") || pEmail || pRelation) {
+      if (!pName) r.errors.push({ field: "parentName", message: "Parent name is required when parent contact details are given" });
+      if (!r.raw("parentPhone")) r.errors.push({ field: "parentPhone", message: "Parent phone is required when parent contact details are given" });
+      if (pName && pPhone) {
+        const existing = await ctx.db.query("guardians").withIndex("by_school_phone", (q) => q.eq("schoolId", ctx.actor.schoolId).eq("phone", pPhone)).first();
+        if (existing && lower(existing.name) !== lower(pName)) {
+          r.warnings.push({ field: "parentPhone", message: `Phone ${pPhone} belongs to existing parent contact ${existing.name}; the student will be linked to them` });
         }
-        guardian = { name: gName, phone: gPhone, email: gEmail, relation: gRelation ?? "Guardian", existingGuardianId: existing?._id };
+        parentContact = { name: pName, phone: pPhone, email: pEmail, relation: pRelation ?? "Parent", existingContactId: existing?._id };
       }
     }
 
@@ -277,7 +278,7 @@ export async function analyzeStudents(ctx: Ctx, rows: ImportRowInput[], opts: { 
     if (result.status !== "invalid" && names && cls && section) {
       plans.push({
         rowNumber: row.rowNumber, ...names, gender, dateOfBirth, admissionNo, admissionDate, classId: cls._id, sectionId: section._id,
-        email, phone, address, loginId, guardian,
+        email, phone, address, loginId, parentContact,
       });
     }
   }
@@ -292,7 +293,7 @@ export async function commitStudents(ctx: MutationCtx & { actor: Actor }, rows: 
   }
   const school = (await ctx.db.get(ctx.actor.schoolId))!;
   const created: { rowNumber: number; studentId: Id<"students">; name: string; admissionNo: string; membershipId?: Id<"schoolMemberships">; loginId?: string }[] = [];
-  const guardianIdsByPhone = new Map<string, Id<"guardians">>();
+  const contactIdsByPhone = new Map<string, Id<"guardians">>();
   for (const p of plans) {
     let admissionNo = p.admissionNo;
     if (admissionNo) {
@@ -309,13 +310,13 @@ export async function commitStudents(ctx: MutationCtx & { actor: Actor }, rows: 
     await ctx.db.insert("enrollments", {
       schoolId: school._id, studentId, academicYearId: yearId, classId: p.classId, sectionId: p.sectionId, status: "active", startDate: p.admissionDate,
     });
-    if (p.guardian) {
-      let guardianId = p.guardian.existingGuardianId ?? guardianIdsByPhone.get(p.guardian.phone);
-      if (!guardianId) {
-        guardianId = await ctx.db.insert("guardians", { schoolId: school._id, name: p.guardian.name, phone: p.guardian.phone, ...(p.guardian.email ? { email: p.guardian.email } : {}) });
+    if (p.parentContact) {
+      let contactId = p.parentContact.existingContactId ?? contactIdsByPhone.get(p.parentContact.phone);
+      if (!contactId) {
+        contactId = await ctx.db.insert("guardians", { schoolId: school._id, name: p.parentContact.name, phone: p.parentContact.phone, ...(p.parentContact.email ? { email: p.parentContact.email } : {}) });
       }
-      guardianIdsByPhone.set(p.guardian.phone, guardianId);
-      await ctx.db.insert("guardianLinks", { schoolId: school._id, guardianId, studentId, relationship: p.guardian.relation, isPrimary: true });
+      contactIdsByPhone.set(p.parentContact.phone, contactId);
+      await ctx.db.insert("guardianLinks", { schoolId: school._id, guardianId: contactId, studentId, relationship: p.parentContact.relation, isPrimary: true });
     }
     const name = `${p.firstName} ${p.lastName}`;
     let account: { membershipId: Id<"schoolMemberships">; loginId: string } | undefined;

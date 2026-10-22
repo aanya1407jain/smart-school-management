@@ -1,11 +1,13 @@
 # Remaining work — Smart School Management System
 
-_As of 18 Oct 2026, after the MVP-completion pass (uncommitted). Companion to `docs/IMPLEMENTATION_STATUS.md` and `docs/VERIFICATION_REPORT.md`._
+_Updated 22 Oct 2026 (student totals fix and Guardian removal, re-audited the same day; uncommitted); originally written 18 Oct 2026 after the MVP-completion pass. Companion to `docs/IMPLEMENTATION_STATUS.md` and `docs/VERIFICATION_REPORT.md`._
 
 ## 1. Needs an owner decision or approval (blocked on people, not code)
 
 | # | Item | Why it is blocked | What is needed |
 |---|---|---|---|
+| R0 | Review, commit and push the 22 Oct change set (student totals + Guardian removal) | Requires explicit approval | Review `git diff`; note `tests/convex/guardian-child-switching.test.ts` now tests the removal (rename with `git mv` if preferred) |
+| R0b | Run `migrations:removeGuardianAccounts` on each real deployment | Deletes data (irreversible) on a shared database. It has only ever run on the isolated sandbox; each real deployment needs its own review and explicit owner approval | Back up / export first, then dry run (`npx convex run migrations:removeGuardianAccounts`), check the report, then `{"apply":true}`; tell any former guardian users their sign-in is gone. Until it runs, those memberships already grant no access. After every deployment has run it: drop `schoolMemberships.guardianId` + `by_guardian` from the schema |
 | R1 | Commit, push and open a PR for this pass | Requires explicit approval | Approve commit/push; review the diff |
 | R2 | Deploy Convex functions to the shared **dev** and **production** deployments | Remote writes need explicit approval; parity with `main` is unverified (audit P0-3) | Follow the checklist in §4; approve each deployment separately |
 | R3 | Run E2E / integration against a **cloud** staging deployment | Only a local sandbox backend was used | Create a separate staging deployment (never the dev or prod one), approve its use |
@@ -24,10 +26,22 @@ _As of 18 Oct 2026, after the MVP-completion pass (uncommitted). Companion to `d
 | G6 | `profile_photo` files for students keep the broader read rule (teachers of the student can read) | Only `student_document` was restricted, as decided |
 | G7 | Student-document upload in the browser was not exercised end-to-end (upload button rendered; server rules tested in convex-test) | convex-test does not record blob content types, so registration of a real PDF is only checkable on a real backend |
 
+## 2b. Known follow-ups from the 22 Oct change
+
+| # | Item | Notes |
+|---|---|---|
+| G8 | Storage names `guardians` / `guardianLinks` remain for parent-contact data | Renaming tables needs a data migration; the product shows "Parent contact" everywhere |
+| G9 | Mock demo-data internals still use `Guardian`/`guardianName` identifiers | Internal to the in-browser demo dataset; no UI text or account uses them |
+| G10 | The demo school's Students page now lists the school's Convex records (as Accounts & Import and Attendance already did), not the richer mock list (status tabs, CSV export, fee standing) | Intended: admissions are stored in Convex, so the list and totals must read the same records |
+| G11 | The Students page totals are bounded at 5,000 students per school (CONFLICT above that, never a silent wrong number) | Large schools need paginated counting |
+| G12 | A student sign-in whose student-record link is missing keeps a session (portal shows "no student record", reads nothing) | Deliberate, so the office can see and repair it (`studentPortal:diagnoseStudentAccounts`); it grants no data access |
+| G13 | Records with an open enrollment but a non-active student status are excluded from totals and lists, but the enrollment is not closed automatically | Clean-up is an office action (`academics.endEnrollment`); no code path creates this state today |
+
 ## 3. Out of scope by decision
 
 - Payroll / HR beyond daily staff attendance and leave.
 - A separate accountant portal or primary role (accountant = restricted admin).
+- Parent or guardian accounts of any kind (decision 22 Oct 2026: account roles are Admin, Teacher and Student only).
 - Removing the demo experience: demo personas keep the mock services; live accounts never see demo data.
 
 ## 4. Deployment parity checklist (do not run without approval)

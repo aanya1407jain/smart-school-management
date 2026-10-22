@@ -94,46 +94,13 @@ function LiveNotificationBell() {
         <DropdownSeparator />
         <DropdownItem
           onSelect={() => {
-            const role = user.role as string;
-            const path = role === "student" || role === "guardian" ? "/student/notifications" : `/${user.role}/notifications`;
+            const path = `/${user.role}/notifications`;
             router.push(path);
           }}
           className="mx-1.5 mb-1.5 justify-center font-medium text-lagoon"
         >
           View all notifications
         </DropdownItem>
-      </DropdownContent>
-    </DropdownMenu>
-  );
-}
-
-/** Live-portal guardians with several linked children: switch between the SERVER's list. */
-function LiveStudentSwitcher() {
-  const { viewer, activeStudentId, setActiveStudent } = useSession();
-  const { toast } = useToast();
-  const students = viewer?.students ?? [];
-  if (students.length < 2) return null;
-  const current = students.find((s) => s.studentId === activeStudentId) ?? students[0];
-  return (
-    <DropdownMenu>
-      <DropdownTrigger asChild>
-        <button className="flex items-center gap-2 rounded-xl border border-line bg-white/80 py-1.5 pl-1.5 pr-2.5 text-left shadow-soft hover:bg-white" aria-label="Switch student">
-          <Avatar name={current.name} size="xs" />
-          <span className="hidden text-[13px] leading-tight sm:block">
-            <span className="block font-semibold text-ink">{current.name}</span>
-            <span className="block text-[11px] text-ink-muted">Adm. {current.admissionNo}</span>
-          </span>
-          <ChevronDown className="h-3.5 w-3.5 text-ink-muted" />
-        </button>
-      </DropdownTrigger>
-      <DropdownContent align="start">
-        <DropdownLabel>Linked students</DropdownLabel>
-        {students.map((s) => (
-          <DropdownItem key={s.studentId} onSelect={() => { setActiveStudent(s.studentId).catch((e: Error) => toast({ tone: "error", title: "Couldn't switch student", description: e.message })); }} className={s.studentId === current.studentId ? "bg-teal-soft text-lagoon" : undefined}>
-            <Avatar name={s.name} size="xs" />
-            <span className="flex-1">{s.name}<span className="block text-[11px] text-ink-muted">Adm. {s.admissionNo}</span></span>
-          </DropdownItem>
-        ))}
       </DropdownContent>
     </DropdownMenu>
   );
@@ -194,44 +161,13 @@ function NotificationBell() {
   );
 }
 
-function StudentSwitcher() {
-  const { user, activeStudentId, setActiveStudent } = useSession();
-  const { toast } = useToast();
-  const linked = useQuery(() => services.dashboard.getLinkedStudents(), [user?.id], { enabled: !!user && (user.studentIds?.length ?? 0) > 1 });
-  if (!user || (user.studentIds?.length ?? 0) < 2 || !linked.data) return null;
-  const current = linked.data.find((s) => s.id === activeStudentId) ?? linked.data[0];
-  return (
-    <DropdownMenu>
-      <DropdownTrigger asChild>
-        <button className="flex items-center gap-2 rounded-xl border border-line bg-white/80 py-1.5 pl-1.5 pr-2.5 text-left shadow-soft hover:bg-white" aria-label="Switch student">
-          <Avatar name={current.name} size="xs" />
-          <span className="hidden text-[13px] leading-tight sm:block">
-            <span className="block font-semibold text-ink">{current.firstName}</span>
-            <span className="block text-[11px] text-ink-muted">Class {current.classLabel}</span>
-          </span>
-          <ChevronDown className="h-3.5 w-3.5 text-ink-muted" />
-        </button>
-      </DropdownTrigger>
-      <DropdownContent align="start">
-        <DropdownLabel>Linked students</DropdownLabel>
-        {linked.data.map((s) => (
-          <DropdownItem key={s.id} onSelect={() => { setActiveStudent(s.id).catch((e: Error) => toast({ tone: "error", title: "Couldn't switch student", description: e.message })); }} className={s.id === current.id ? "bg-teal-soft text-lagoon" : undefined}>
-            <Avatar name={s.name} size="xs" />
-            <span className="flex-1">{s.name}<span className="block text-[11px] text-ink-muted">Class {s.classLabel}</span></span>
-          </DropdownItem>
-        ))}
-      </DropdownContent>
-    </DropdownMenu>
-  );
-}
-
 function ProfileMenu() {
   const { user, viewer, dataSource, logout } = useSession();
   const router = useRouter();
   if (!user) return null;
   const base = `/${user.role}`;
   const secondary = dataSource === "live" ? `Login ID ${viewer?.loginId ?? "—"}` : user.email;
-  const roleLabel = user.guardianId ? "Guardian" : user.title ?? ROLE_LABELS[user.role];
+  const roleLabel = user.title ?? ROLE_LABELS[user.role];
   const settingsHref = hasPermission(user, "settings:manage") ? `${base}/settings` : `${base}/profile`;
   return (
     <DropdownMenu>
@@ -310,7 +246,6 @@ export function Topbar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
           </ol>
         </nav>
         <GlobalSearch />
-        {live ? <LiveStudentSwitcher /> : <StudentSwitcher />}
         {live ? <LiveNotificationBell /> : <NotificationBell />}
         <ProfileMenu />
       </div>

@@ -33,10 +33,10 @@ export type SeedDataset = {
     key: string; firstName: string; lastName: string; gender: "male" | "female"; dateOfBirth: string;
     section: string; rollNo: number; email: string; login?: SeedLogin;
   }[];
-  guardians: {
+  /** Parent contacts of students (contact data only — they never get an account). */
+  parentContacts: {
     key: string; name: string; phone: string; email: string; occupation?: string;
     links: { student: string; relationship: string; isPrimary: boolean }[];
-    login?: SeedLogin;
   }[];
   feeStructures: {
     name: string; classLevels: number[];

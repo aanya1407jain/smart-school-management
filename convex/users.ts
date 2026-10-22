@@ -8,9 +8,9 @@
  *  - users.me             → who am I + which schools/roles can I act as (no school needed)
  *  - users.viewer         → the resolved actor for the chosen membership: school,
  *                           role, effective permissions and linked people.
- *  - users.studentContext → server check that the caller may view ONE student in
- *                           the student portal (self, or a linked child). Used
- *                           by the guardian child switcher.
+ *
+ * Account roles are admin, teacher and student only (no parent/guardian
+ * sign-ins); a student account sees its own record.
  *
  * Role, school and links are always derived here from the Convex Auth session
  * and `schoolMemberships`. The client can only pick one of its OWN memberships
@@ -21,7 +21,7 @@ import { query, type QueryCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { schoolQuery } from "./core/functions";
 import { activeMembershipsOf, getCurrentUser, requireActor, type Actor } from "./core/actor";
-import { linkedStudentIds, requireGuardianStudentAccess } from "./core/authorization";
+import { linkedStudentIds } from "./core/authorization";
 import { AppError } from "./core/errors";
 import { fullName, teacherDisplayName } from "./model/academics";
 import { temporaryPasswordExpiresAt } from "./model/accounts";
@@ -35,7 +35,6 @@ async function membershipsOf(ctx: QueryCtx, userId: Id<"users">) {
     schoolSlug: school.slug,
     role: m.role,
     displayName: m.displayName,
-    isGuardian: !!m.guardianId,
   }));
 }
 
@@ -44,7 +43,6 @@ async function buildViewer(ctx: QueryCtx, actor: Actor) {
   const school = (await ctx.db.get(actor.schoolId))!;
   const user = await ctx.db.get(actor.userId);
   const teacher = actor.teacherId ? await ctx.db.get(actor.teacherId) : null;
-  const guardian = actor.guardianId ? await ctx.db.get(actor.guardianId) : null;
   const studentIds = await linkedStudentIds(ctx, actor);
   const students = [];
   for (const id of studentIds) {
@@ -68,14 +66,11 @@ async function buildViewer(ctx: QueryCtx, actor: Actor) {
     temporaryPasswordExpiresAt: user ? temporaryPasswordExpiresAt(user) : null,
     permissions: [...actor.permissions].sort(),
     permissionSets: [...actor.permissionSets],
-    isGuardian: !!actor.guardianId,
     school: { _id: school._id, name: school.name, shortName: school.shortName, slug: school.slug, timezone: school.timezone, locale: school.locale, currency: school.currency },
     teacher: teacher && teacher.schoolId === actor.schoolId ? { teacherId: teacher._id, name: teacherDisplayName(teacher) } : null,
     /** Set when this membership IS a student. */
     student: actor.studentId ? (students.find((s) => s.studentId === actor.studentId) ?? null) : null,
-    /** Set when this membership is a guardian using the student portal. */
-    guardian: guardian && guardian.schoolId === actor.schoolId ? { guardianId: guardian._id, name: guardian.name } : null,
-    /** Students this member can view in the student portal (self, or linked children). */
+    /** Students this member can view in the student portal (the student's own record only). */
     students,
   };
 }
@@ -118,23 +113,5 @@ export const session = query({
       }
       throw e;
     }
-  },
-});
-
-/**
- * Student-portal context for one student. Only the student themself or a
- * guardian linked to them passes; anything else (another family's child,
- * another school's id) is NOT_FOUND, exactly like the data functions.
- */
-export const studentContext = schoolQuery({
-  args: { studentId: v.id("students") },
-  handler: async (ctx, { studentId }) => {
-    const student = await requireGuardianStudentAccess(ctx, studentId);
-    return {
-      studentId: student._id,
-      name: fullName(student),
-      admissionNo: student.admissionNo,
-      relation: ctx.actor.studentId === student._id ? ("self" as const) : ("guardian" as const),
-    };
   },
 });

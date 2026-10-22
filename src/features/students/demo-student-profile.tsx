@@ -34,7 +34,7 @@ export function DemoStudentProfileBody({ p, backHref }: { p: Profile; backHref?:
     { value: "exams", label: "Examinations", count: p.results.length },
     { value: "homework", label: "Homework", count: p.homework.length },
     { value: "documents", label: "Documents", count: s.documents.length },
-    { value: "guardian", label: "Guardian" },
+    { value: "parent", label: "Parent contact" },
   ];
   const pendingHw = p.homework.filter((h) => h.status === "pending" || h.status === "overdue").length;
 
@@ -88,7 +88,7 @@ export function DemoStudentProfileBody({ p, backHref }: { p: Profile; backHref?:
               </dl>
             </Card>
             <Card>
-              <CardHeader title="Primary guardian" />
+              <CardHeader title="Parent contact" />
               <div className="p-5">
                 {p.guardians[0] ? (
                   <div className="flex items-start gap-3">
@@ -100,7 +100,7 @@ export function DemoStudentProfileBody({ p, backHref }: { p: Profile; backHref?:
                       <p className="text-ink-soft">{p.guardians[0].email}</p>
                     </div>
                   </div>
-                ) : <EmptyState title="No guardian linked" />}
+                ) : <EmptyState title="No parent contact recorded" />}
               </div>
               {p.account && <p className="border-t border-line/60 px-5 py-3 text-[12.5px] text-ink-muted">Portal login: <span className="font-mono text-ink-soft">{p.account.email}</span></p>}
             </Card>
@@ -221,7 +221,7 @@ export function DemoStudentProfileBody({ p, backHref }: { p: Profile; backHref?:
           </Card>
         </TabsContent>
 
-        <TabsContent value="guardian">
+        <TabsContent value="parent">
           <div className="grid gap-4 md:grid-cols-2">
             {p.guardians.map((g) => (
               <Card key={g.id} className="p-5">
@@ -239,7 +239,7 @@ export function DemoStudentProfileBody({ p, backHref }: { p: Profile; backHref?:
                 </div>
                 {g.otherChildren.length > 0 && (
                   <div className="mt-4 rounded-xl bg-alabaster p-3 text-sm">
-                    <p className="text-[12px] font-semibold uppercase tracking-wide text-ink-muted">Also guardian of</p>
+                    <p className="text-[12px] font-semibold uppercase tracking-wide text-ink-muted">Also parent contact for</p>
                     {g.otherChildren.map((c) => (
                       <p key={c.id} className="mt-1">
                         {isAdmin ? <Link href={`/admin/students/${c.id}`} className="font-medium text-lagoon hover:underline">{c.name}</Link> : <span className="font-medium text-ink">{c.name}</span>}

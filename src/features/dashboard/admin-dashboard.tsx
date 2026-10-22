@@ -35,6 +35,9 @@ export function AdminDashboard() {
 
   // Demo data
   const q = useQuery(() => services.dashboard.getAdminDashboard(), [live], { enabled: !live });
+  // The student total always follows the Students page's rule and records (academics.studentCounts):
+  // admissions are written to Convex for every admin, demo personas included.
+  const counts = useSchoolQuery(api.academics.studentCounts, live ? "skip" : {});
 
   const adaptedLive = useMemo(() => {
     if (!liveData?.overview) return undefined;
@@ -120,7 +123,7 @@ export function AdminDashboard() {
             )}
 
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatCard label="Total students" value={formatNumber(d.stats.students)} icon={<GraduationCap className="h-5 w-5" />} hint={`Across ${d.stats.sections} sections`} href="/admin/students" />
+              <StatCard label="Students enrolled" value={<span data-testid="dash-students">{formatNumber(live ? d.stats.students : counts?.enrolled ?? d.stats.students)}</span>} icon={<GraduationCap className="h-5 w-5" />} hint={live ? `Across ${d.stats.sections} sections` : counts ? `${counts.academicYear.name} · same count as the Students page` : `Across ${d.stats.sections} sections`} href="/admin/students" />
               <StatCard label="Teaching staff" value={formatNumber(d.stats.teachers)} icon={<Users className="h-5 w-5" />} tone="sapphire" hint={d.stats.teachersOnLeave ? `${d.stats.teachersOnLeave} on leave today` : "All available"} href="/admin/teachers" />
               <StatCard
                 label={att.isToday ? "Today's attendance" : `Attendance · ${formatShortDate(att.date)}`}

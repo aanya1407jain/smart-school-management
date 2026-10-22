@@ -93,7 +93,7 @@ describe("live admin / teacher sessions", () => {
   });
 
   test("client-side identity is built only from the viewer; no role can be claimed", () => {
-    const base = { membershipId: "m1", loginId: "TCH-00009", email: null, displayName: "T", permissionSets: [] as string[], students: [], guardian: null };
+    const base = { membershipId: "m1", loginId: "TCH-00009", email: null, displayName: "T", permissionSets: [] as string[], students: [] };
     expect(liveWorkspaceUser({ ...base, role: "teacher", teacher: { teacherId: "t1", name: "T" } } as never)).toMatchObject({ role: "teacher", teacherId: "t1" });
     expect(liveWorkspaceUser({ ...base, role: "admin", teacher: null } as never)).toMatchObject({ role: "admin" });
     expect(() => liveStaffUser({ ...base, role: "student", teacher: null } as never)).toThrow();

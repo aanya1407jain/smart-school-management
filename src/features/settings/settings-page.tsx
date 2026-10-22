@@ -261,7 +261,7 @@ function NotificationSettings({ initial }: { initial: SchoolSettings }) {
   };
 
   const items: { key: keyof SchoolSettings["notifications"]; label: string; desc: string }[] = [
-    { key: "attendanceAlerts", label: "Attendance alerts", desc: "Notify students & guardians when marked absent or late." },
+    { key: "attendanceAlerts", label: "Attendance alerts", desc: "Notify students when marked absent or late." },
     { key: "feeReminders", label: "Fee notifications", desc: "Payment receipts, new fee assignments and concessions." },
     { key: "homeworkAlerts", label: "Homework alerts", desc: "New homework, submissions and reviews." },
     { key: "examAlerts", label: "Examination alerts", desc: "Date sheets, marks entry and published results." },

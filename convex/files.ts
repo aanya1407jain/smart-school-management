@@ -91,7 +91,7 @@ async function requireFileRead(ctx: Ctx, file: Doc<"files">) {
       return; // any member of the school
     case "student":
       // Student documents (certificates, ID proofs…): administrators (students:write) and the
-      // student / linked guardians only — not subject or class teachers, not the accountant set.
+      // the student themself only — not subject or class teachers, not the accountant set.
       if (file.kind === "student_document") {
         await requireStudentAccess(ctx, file.ownerId as Id<"students">, { all: "students:write", own: "profile:read:own" });
         return;

@@ -1,7 +1,6 @@
 "use client";
 /**
- * The LIVE student portal — for student and guardian accounts created by the
- * school (session `dataSource === "live"`). Every value on these screens comes
+ * The LIVE student portal — for student accounts created by the school (session `dataSource === "live"`). Every value on these screens comes
  * from Convex for the student the SERVER links to the signed-in membership
  * (convex/studentPortal.ts, attendance.studentHistory, notifications.*).
  * Nothing here reads the in-browser demo data, and nothing is invented: when a
@@ -111,13 +110,12 @@ export function LiveStudentDashboard() {
   );
   if (p === undefined) return <LoadingState variant="page" label="Loading your dashboard" />;
   if (p.state === "no_student_record") return <MissingRecord />;
-  const self = p.relation === "self";
   return (
     <div data-testid="live-student-dashboard">
       <PageHeader
         eyebrow={p.academicYear ? `Academic year ${p.academicYear.name}` : undefined}
-        title={self ? `Welcome, ${p.student.firstName}` : p.student.name}
-        description={self ? "Your school record and attendance, straight from the school office." : `You're viewing ${p.student.firstName}'s record as ${user?.displayName ?? "a guardian"}.`}
+        title={`Welcome, ${p.student.firstName}`}
+        description="Your school record and attendance, straight from the school office."
       />
       <EnrollmentNotice p={p} />
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -182,7 +180,7 @@ export function LiveStudentProfile() {
             <dl className="grid gap-3 text-sm">
               <Field label="Signed in as" value={viewer?.displayName} />
               <Field label="Login ID" value={<span className="font-mono">{viewer?.loginId ?? "—"}</span>} testId="profile-login-id" />
-              <Field label="Access" value={user?.guardianId ? "Guardian (student portal)" : ROLE_LABELS.student} />
+              <Field label="Access" value={ROLE_LABELS.student} />
               <Field label="School" value={viewer?.school.name} />
             </dl>
           </CardBody>
@@ -199,7 +197,7 @@ function StudentRecord({ p }: { p: OkProfile }) {
   const g = s.gender ? s.gender.charAt(0).toUpperCase() + s.gender.slice(1) : null;
   return (
     <>
-      <h2 className="pt-2 text-lg font-semibold text-sapphire">{p.relation === "self" ? "My school record" : "Student record"}</h2>
+      <h2 className="pt-2 text-lg font-semibold text-sapphire">My school record</h2>
       <EnrollmentNotice p={p} />
       <div className="grid gap-5 lg:grid-cols-2">
         <Card>
@@ -236,11 +234,11 @@ function StudentRecord({ p }: { p: OkProfile }) {
         </Card>
       </div>
       <Card>
-        <CardHeader title="Guardians" icon={<UsersRound className="h-4 w-4" />} />
+        <CardHeader title="Parent contact" icon={<UsersRound className="h-4 w-4" />} />
         <CardBody>
-          {p.guardians.length === 0 ? <p className="text-sm text-ink-muted">No guardian is recorded. The school office can add one.</p> : (
+          {p.parentContacts.length === 0 ? <p className="text-sm text-ink-muted">No parent contact is recorded. The school office can add one.</p> : (
             <ul className="divide-y divide-line/60 text-sm">
-              {p.guardians.map((x, i) => (
+              {p.parentContacts.map((x, i) => (
                 <li key={i} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
                   <span className="font-medium text-ink">{x.name} <span className="font-normal text-ink-muted">· {x.relationship}</span>{x.isPrimary && <Badge className="ml-2" tone="teal">Primary</Badge>}</span>
                   <span className="text-ink-muted">{x.phone}{x.email ? ` · ${x.email}` : ""}</span>
@@ -267,7 +265,7 @@ export function LiveMyAttendance() {
   const below = h.percentage != null && h.percentage < h.lowAttendanceThreshold;
   return (
     <div data-testid="live-attendance">
-      <PageHeader title={p.relation === "self" ? "My Attendance" : `${p.student.firstName}'s Attendance`} description={`${p.academicYear.name} · ${formatDate(h.range.from)} – ${formatDate(h.range.to)}`} />
+      <PageHeader title="My Attendance" description={`${p.academicYear.name} · ${formatDate(h.range.from)} – ${formatDate(h.range.to)}`} />
       <EnrollmentNotice p={p} />
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="flex flex-col items-center justify-center gap-2 p-6">
@@ -302,7 +300,7 @@ export function LiveMyAttendance() {
 
 // ------------------------------------------------------------------ notifications
 // ------------------------------------------------------------------ timetable / homework / results / fees / notices
-/** The portal query args: the server picks the linked student; guardians may choose among their linked children. */
+/** The portal query args: the signed-in student's own record (the server re-checks it). */
 function usePortalArgs() {
   const studentId = useActiveStudentId();
   return studentId ? { studentId: studentId as Id<"students"> } : {};

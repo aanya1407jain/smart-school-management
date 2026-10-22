@@ -31,11 +31,10 @@ export function StudentDashboard() {
                   <div>
                     <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-plum">{formatLongDate(todayISO())}</p>
                     <h1 className="text-[26px] font-semibold text-sapphire">
-                      {d.isGuardian ? `${greeting()}, ${user?.displayName.split(" ")[0]}` : `${greeting()}, ${d.student.firstName}`}
+                      {`${greeting()}, ${d.student.firstName}`}
                     </h1>
                     <p className="text-sm text-ink-muted">
-                      {d.isGuardian && <>Viewing <strong className="text-ink">{d.student.name}</strong> · </>}
-                      Class {d.student.grade} · Section {d.student.section} · Roll {d.student.rollNo}
+                                            Class {d.student.grade} · Section {d.student.section} · Roll {d.student.rollNo}
                     </p>
                   </div>
                 </div>

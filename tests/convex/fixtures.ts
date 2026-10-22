@@ -24,8 +24,14 @@ export type SchoolFixture = {
   studentB: Id<"students">;
   classTeacher: Id<"teachers">; // owns sectionA, teaches subject in sectionB
   subjectTeacher: Id<"teachers">; // teaches in sectionA only, owns sectionB
-  users: { admin: Id<"users">; classTeacher: Id<"users">; subjectTeacher: Id<"users">; student: Id<"users">; guardian: Id<"users"> };
-  memberships: Record<"admin" | "classTeacher" | "subjectTeacher" | "student" | "guardian", Id<"schoolMemberships">>;
+  /**
+   * `legacyGuardian`: a user holding ONLY a leftover guardian sign-in (the removed account type,
+   * as it may still exist in a not-yet-migrated deployment). It must never get access.
+   */
+  users: { admin: Id<"users">; classTeacher: Id<"users">; subjectTeacher: Id<"users">; student: Id<"users">; legacyGuardian: Id<"users"> };
+  memberships: Record<"admin" | "classTeacher" | "subjectTeacher" | "student" | "legacyGuardian", Id<"schoolMemberships">>;
+  /** Parent contact record of studentA (contact data only). */
+  parentContactId: Id<"guardians">;
 };
 
 export async function createSchool(t: T, slug: string): Promise<SchoolFixture> {
@@ -53,13 +59,13 @@ export async function createSchool(t: T, slug: string): Promise<SchoolFixture> {
     };
     const studentA = await student("Asha", sectionA);
     const studentB = await student("Bala", sectionB);
-    const guardianId = await ctx.db.insert("guardians", { schoolId, name: "Guardian", phone: `+91-${slug}` });
+    const guardianId = await ctx.db.insert("guardians", { schoolId, name: "Parent Contact", phone: `+91-${slug}` });
     await ctx.db.insert("guardianLinks", { schoolId, guardianId, studentId: studentA, relationship: "Mother", isPrimary: true });
 
     const user = (email: string) => ctx.db.insert("users", { email });
     const users = {
       admin: await user(`admin@${slug}.test`), classTeacher: await user(`ct@${slug}.test`), subjectTeacher: await user(`st@${slug}.test`),
-      student: await user(`student@${slug}.test`), guardian: await user(`guardian@${slug}.test`),
+      student: await user(`student@${slug}.test`), legacyGuardian: await user(`legacy-guardian@${slug}.test`),
     };
     const member = (userId: Id<"users">, role: "admin" | "teacher" | "student", extra: Record<string, unknown> = {}) =>
       ctx.db.insert("schoolMemberships", { schoolId, userId, email: `${role}-${userId}@x.test`, displayName: role, role, status: "active", permissionSets: [], ...extra });
@@ -68,10 +74,11 @@ export async function createSchool(t: T, slug: string): Promise<SchoolFixture> {
       classTeacher: await member(users.classTeacher, "teacher", { teacherId: classTeacher }),
       subjectTeacher: await member(users.subjectTeacher, "teacher", { teacherId: subjectTeacher }),
       student: await member(users.student, "student", { studentId: studentA }),
-      guardian: await member(users.guardian, "student", { guardianId }),
+      // Written directly (as an old deployment would hold it) — the API can no longer create one.
+      legacyGuardian: await member(users.legacyGuardian, "student", { guardianId }),
     };
     await ctx.db.insert("classSubjects", { schoolId, academicYearId: yearId, classId, subjectId });
-    return { schoolId, yearId, classId, subjectId, sectionA, sectionB, studentA, studentB, classTeacher, subjectTeacher, users, memberships };
+    return { schoolId, yearId, classId, subjectId, sectionA, sectionB, studentA, studentB, classTeacher, subjectTeacher, users, memberships, parentContactId: guardianId };
   });
 }
 

@@ -64,7 +64,7 @@ export function ReceiptModal({ receiptId, onClose }: { receiptId: string | null;
   const { dataSource } = useSession();
   const live = dataSource === "live";
 
-  // Live: the receipt record from Convex (fee managers, or the student / linked guardian).
+  // Live: the receipt record from Convex (fee managers, or the student themself).
   const liveReceipt = useSchoolQuery(api.fees.receipt, live && receiptId ? { receiptId: receiptId as Id<"receipts"> } : "skip");
 
   // Demo data

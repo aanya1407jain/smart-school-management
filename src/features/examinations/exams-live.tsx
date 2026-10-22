@@ -199,7 +199,7 @@ export function LiveExamDetail({ examId }: { examId: string }) {
         <ConfirmDialog open onOpenChange={(o) => !o && setConfirm(null)} title={next.label} description={`${next.help} An exam cannot move back to an earlier stage.`} confirmLabel={next.label} loading={busy} onConfirm={() => run(() => setStatus({ examId: exam.examId, status: next.to }), "Exam status updated")} />
       )}
       {confirm === "publish" && (
-        <ConfirmDialog open onOpenChange={(o) => !o && setConfirm(null)} title="Publish results" description="Results are calculated from the entered marks, students and guardians are notified once, and marks are locked. This cannot be undone." confirmLabel="Publish results" loading={busy} onConfirm={() => run(() => publish({ examId: exam.examId }), "Results published")} />
+        <ConfirmDialog open onOpenChange={(o) => !o && setConfirm(null)} title="Publish results" description="Results are calculated from the entered marks, students are notified once, and marks are locked. This cannot be undone." confirmLabel="Publish results" loading={busy} onConfirm={() => run(() => publish({ examId: exam.examId }), "Results published")} />
       )}
     </div>
   );

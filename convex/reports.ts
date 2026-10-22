@@ -25,6 +25,7 @@ import { schoolYearFees } from "./model/feeData";
 import type { QueryCtx } from "./_generated/server";
 import { audienceLabel } from "./notices";
 import { activeRoster, fullName } from "./model/academics";
+import { enrolledStudents } from "./model/studentCounts";
 import type { Actor } from "./core/actor";
 
 const MAX_STUDENTS = 5000;
@@ -229,8 +230,8 @@ export const adminDashboard = schoolQuery({
 
     let overview = null;
     if (schoolWide) {
-      const enrollments = (await ctx.db.query("enrollments").withIndex("by_school_year", (q) => q.eq("schoolId", school._id).eq("academicYearId", year._id)).take(MAX_STUDENTS * 2 + 1)).filter((e) => e.status === "active");
-      const students = new Set(enrollments.map((e) => e.studentId)).size;
+      // Same rule as the Students page (model/studentCounts.ts): distinct students enrolled this year.
+      const students = (await enrolledStudents(ctx, school._id, year._id)).size;
       const sections = await ctx.db.query("sections").withIndex("by_school_year", (q) => q.eq("schoolId", school._id).eq("academicYearId", year._id)).collect();
       const teachers = await ctx.db.query("teachers").withIndex("by_school_status", (q) => q.eq("schoolId", school._id).eq("status", "active")).collect();
       const approved = await ctx.db.query("leaveRequests").withIndex("by_school_status_from", (q) => q.eq("schoolId", school._id).eq("status", "approved").lte("fromDate", today)).collect();
@@ -304,7 +305,7 @@ export const adminDashboard = schoolQuery({
 });
 
 // ================================================================ student statistics
-/** Students enrolled this year: by class and gender, by status, section fill, distinct guardians. */
+/** Students enrolled this year: by class and gender, by status, section fill, distinct parent contacts. */
 export const studentStatistics = schoolQuery({
   args: {},
   handler: async (ctx) => {
@@ -321,7 +322,7 @@ export const studentStatistics = schoolQuery({
     const status: Record<string, number> = { active: 0, inactive: 0, transferred: 0, alumni: 0 };
     const byClassMap = new Map<Id<"classes">, { male: number; female: number; other: number; total: number }>();
     const bySectionCount = new Map<Id<"sections">, number>();
-    const guardians = new Set<string>();
+    const parentContacts = new Set<string>();
     for (const [studentId, e] of latest) {
       const st = await ctx.db.get(studentId);
       if (!st || st.schoolId !== ctx.actor.schoolId) continue;
@@ -334,7 +335,7 @@ export const studentStatistics = schoolQuery({
       row.total++;
       byClassMap.set(e.classId, row);
       bySectionCount.set(e.sectionId, (bySectionCount.get(e.sectionId) ?? 0) + 1);
-      for (const l of await ctx.db.query("guardianLinks").withIndex("by_student", (q) => q.eq("studentId", studentId)).collect()) if (l.schoolId === ctx.actor.schoolId) guardians.add(l.guardianId);
+      for (const l of await ctx.db.query("guardianLinks").withIndex("by_student", (q) => q.eq("studentId", studentId)).collect()) if (l.schoolId === ctx.actor.schoolId) parentContacts.add(l.guardianId);
     }
     const classes = await ctx.db.query("classes").withIndex("by_school_level", (q) => q.eq("schoolId", ctx.actor.schoolId)).collect();
     const sections = await ctx.db.query("sections").withIndex("by_school_year", (q) => q.eq("schoolId", ctx.actor.schoolId).eq("academicYearId", yearId)).collect();
@@ -344,7 +345,7 @@ export const studentStatistics = schoolQuery({
       status,
       byClass: classes.filter((c) => byClassMap.has(c._id)).sort((a, b) => a.level - b.level).map((c) => ({ classId: c._id, name: c.name, ...byClassMap.get(c._id)! })),
       bySection: sections.sort((a, b) => (level.get(a.classId) ?? 0) - (level.get(b.classId) ?? 0) || a.name.localeCompare(b.name)).map((s) => ({ sectionId: s._id, label: s.displayName, students: bySectionCount.get(s._id) ?? 0, capacity: s.capacity ?? null })),
-      guardians: guardians.size,
+      parentContacts: parentContacts.size,
     };
   },
 });

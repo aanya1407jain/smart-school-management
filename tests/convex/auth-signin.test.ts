@@ -52,7 +52,7 @@ const membershipOf = (t: T, userId: Id<"users">) =>
   t.run(async (ctx) => (await ctx.db.query("schoolMemberships").withIndex("by_user", (q) => q.eq("userId", userId)).collect()));
 
 describe("demo logins (seed:demo, same Login ID path as real accounts)", () => {
-  test("admin, teacher, student and guardian sign in with their Login IDs; role comes from the membership", async () => {
+  test("admin, teacher and student sign in with their Login IDs; role comes from the membership", async () => {
     process.env.ALLOW_DEMO_SEED = "true";
     const t = makeTest();
     try {
@@ -64,7 +64,6 @@ describe("demo logins (seed:demo, same Login ID path as real accounts)", () => {
       ["ADMIN-001", "Admin@123", "admin"],
       ["TCH-00001", "Teacher@123", "teacher"],
       ["STU-2026-00001", "Student@123", "student"],
-      ["GRD-00001", "Guardian@123", "student"], // guardians use a student-portal membership linked by guardianId
     ];
     for (const [loginId, password, role] of cases) {
       const r = await signIn(t, { loginId, password });

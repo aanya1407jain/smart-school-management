@@ -36,11 +36,11 @@ describe("authentication & school resolution", () => {
 
   test("a user in two schools must choose, and only sees the chosen school", async () => {
     const { t, A, B } = await twoSchools();
-    // Give A's guardian user a second membership in school B.
+    // Give A's admin user a second (student-portal) membership in school B.
     const bMembership = await t.run((ctx) =>
-      ctx.db.insert("schoolMemberships", { schoolId: B.schoolId, userId: A.users.guardian, email: "g@x.test", displayName: "G", role: "student", status: "active", permissionSets: [], studentId: B.studentA }),
+      ctx.db.insert("schoolMemberships", { schoolId: B.schoolId, userId: A.users.admin, email: "g@x.test", displayName: "G", role: "student", status: "active", permissionSets: [], studentId: B.studentA }),
     );
-    const g = await as(t, A.users.guardian);
+    const g = await as(t, A.users.admin);
     expect(await errorCode(g.query(api.users.viewer, {}))).toBe("SCHOOL_SELECTION_REQUIRED");
     const inB = await g.query(api.users.viewer, { membershipId: bMembership });
     expect(inB.school._id).toBe(B.schoolId);
@@ -112,7 +112,8 @@ describe("cross-school ids are NOT_FOUND", () => {
     const storage2 = await t.run((ctx) => ctx.storage.store(new Blob(["%PDF-1.4"])));
     const fileId = await t.run((ctx) => ctx.db.insert("files", { schoolId: A.schoolId, storageId: storage2, kind: "student_document", ownerType: "student", ownerId: A.studentA, fileName: "tc.pdf", contentType: "application/pdf", size: 8, uploadedByUserId: A.users.admin }));
     expect((await admin.query(api.files.getUrl, { fileId })).fileName).toBe("tc.pdf");
-    expect(await errorCode((await as(t, A.users.guardian)).query(api.files.getUrl, { fileId }))).toBe("NO_ERROR");
+    expect(await errorCode((await as(t, A.users.student)).query(api.files.getUrl, { fileId }))).toBe("NO_ERROR"); // the student themself
+    expect(await errorCode((await as(t, A.users.legacyGuardian)).query(api.files.getUrl, { fileId }))).toBe("NO_SCHOOL_ACCESS");
     // Student documents are visible to administrators and the student's family only
     // (MVP decision "Admins only, audited"): a teacher of the student's section is refused.
     expect(await errorCode((await as(t, A.users.subjectTeacher)).query(api.files.getUrl, { fileId }))).toBe("NOT_FOUND");
@@ -129,11 +130,11 @@ describe("cross-school ids are NOT_FOUND", () => {
 });
 
 describe("attendance ownership (in-process)", () => {
-  test("only the class teacher marks; subject teacher, admin, student, guardian cannot", async () => {
+  test("only the class teacher marks; subject teacher, admin, student cannot", async () => {
     const { t, A } = await twoSchools();
     const date = pastMonday();
     const entries = [{ studentId: A.studentA, status: "present" as const }];
-    for (const u of [A.users.subjectTeacher, A.users.admin, A.users.student, A.users.guardian]) {
+    for (const u of [A.users.subjectTeacher, A.users.admin, A.users.student]) {
       expect(await errorCode((await as(t, u)).mutation(api.attendance.mark, { sectionId: A.sectionA, date, entries }))).toBe("FORBIDDEN");
     }
     await (await as(t, A.users.classTeacher)).mutation(api.attendance.mark, { sectionId: A.sectionA, date, entries });
@@ -163,11 +164,10 @@ describe("attendance ownership (in-process)", () => {
     expect(await errorCode((await as(t, A.users.admin)).mutation(api.attendance.mark, { sectionId: A.sectionB, date: pastMonday(), entries: [{ studentId: A.studentB, status: "present" }] }))).toBe("FORBIDDEN");
   });
 
-  test("guardian sees linked student only; student sees self only", async () => {
+  test("student sees self only; a legacy guardian sign-in sees nothing", async () => {
     const { t, A } = await twoSchools();
-    const g = await as(t, A.users.guardian);
-    await g.query(api.attendance.studentHistory, { studentId: A.studentA });
-    expect(await errorCode(g.query(api.attendance.studentHistory, { studentId: A.studentB }))).toBe("NOT_FOUND");
+    const g = await as(t, A.users.legacyGuardian);
+    expect(await errorCode(g.query(api.attendance.studentHistory, { studentId: A.studentA }))).toBe("NO_SCHOOL_ACCESS");
     const s = await as(t, A.users.student);
     expect(await errorCode(s.query(api.attendance.studentHistory, { studentId: A.studentB }))).toBe("NOT_FOUND");
   });

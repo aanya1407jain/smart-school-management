@@ -7,9 +7,9 @@
  *
  * Pure TypeScript: no Convex or React imports, so it is safe on both sides.
  *
- * Roles are portal roles (which dashboard a member uses). A guardian is NOT a
- * role: a guardian is a `student`-role membership linked to a guardian record
- * and scoped to the students linked through `guardianLinks`.
+ * Roles are portal roles (which dashboard a member uses): admin, teacher and
+ * student are the ONLY account roles. A student account sees its own records.
+ * There are no parent/guardian accounts (parent contacts are data only).
  * Optional permission sets (e.g. "accountant") are layered on a membership.
  */
 

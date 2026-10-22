@@ -8,7 +8,8 @@
  *                        the canonical Login ID, secret = Scrypt hash. Never
  *                        read by app code, never sent to the browser.
  *   schoolMemberships  — what the identity may do: role + link to the
- *                        teacher / student / guardian record. The ONLY grant.
+ *                        teacher or student record. The ONLY grant. Roles:
+ *                        admin, teacher, student (no parent/guardian accounts).
  *
  * Lifecycle (same path for admin UI, imports, deployment setup and demo seed):
  *   1. reserveAccount (mutation): membership { status: "invited", loginId }
@@ -113,7 +114,6 @@ export type ReserveAccountInput = {
   email?: string;
   teacherId?: Id<"teachers">;
   studentId?: Id<"students">;
-  guardianId?: Id<"guardians">;
   permissionSets?: PermissionSetName[];
   createdByUserId?: Id<"users">;
 };
@@ -122,11 +122,10 @@ export type ReserveAccountInput = {
 export async function existingAccountFor(
   ctx: QueryCtx,
   schoolId: Id<"schools">,
-  link: { role: Role; teacherId?: Id<"teachers">; studentId?: Id<"students">; guardianId?: Id<"guardians"> },
+  link: { role: Role; teacherId?: Id<"teachers">; studentId?: Id<"students"> },
 ): Promise<Doc<"schoolMemberships"> | null> {
   let rows: Doc<"schoolMemberships">[] = [];
   if (link.studentId) rows = await ctx.db.query("schoolMemberships").withIndex("by_student", (q) => q.eq("studentId", link.studentId)).collect();
-  else if (link.guardianId) rows = await ctx.db.query("schoolMemberships").withIndex("by_guardian", (q) => q.eq("guardianId", link.guardianId)).collect();
   else if (link.teacherId) rows = await ctx.db.query("schoolMemberships").withIndex("by_teacher", (q) => q.eq("teacherId", link.teacherId)).collect();
   return rows.find((m) => m.schoolId === schoolId && m.role === link.role) ?? null;
 }
@@ -137,7 +136,7 @@ export async function reserveAccount(ctx: MutationCtx, input: ReserveAccountInpu
   if (input.role !== "admin" && input.permissionSets?.length) {
     throw new AppError("INVALID_ARGUMENT", "Permission sets can only be added to administrative accounts.");
   }
-  if (input.teacherId || input.studentId || input.guardianId) {
+  if (input.teacherId || input.studentId) {
     const existing = await existingAccountFor(ctx, input.schoolId, input);
     if (existing) {
       throw new AppError("CONFLICT", existing.status === "invited"
@@ -163,7 +162,6 @@ export async function reserveAccount(ctx: MutationCtx, input: ReserveAccountInpu
     ...(input.email ? { email: input.email } : {}),
     ...(input.teacherId ? { teacherId: input.teacherId } : {}),
     ...(input.studentId ? { studentId: input.studentId } : {}),
-    ...(input.guardianId ? { guardianId: input.guardianId } : {}),
     ...(input.createdByUserId ? { createdByUserId: input.createdByUserId } : {}),
   });
   return { membershipId, loginId };
@@ -176,7 +174,7 @@ export async function reserveAccount(ctx: MutationCtx, input: ReserveAccountInpu
  */
 export async function activatePendingAccount(ctx: MutationCtx, args: { loginId: string; mustChangePassword: boolean }): Promise<Id<"users">> {
   const pending = (await ctx.db.query("schoolMemberships").withIndex("by_login_id", (q) => q.eq("loginId", args.loginId)).collect())
-    .filter((m) => m.status === "invited" && !m.userId);
+    .filter((m) => m.status === "invited" && !m.userId && !m.guardianId); // legacy guardian sign-ins are never activated
   if (pending.length === 0) throw new AppError("FORBIDDEN", "Accounts are created by your school.");
   if (await ctx.db.query("users").withIndex("by_login_id", (q) => q.eq("loginId", args.loginId)).first()) {
     throw conflict("This Login ID already belongs to an account.");

@@ -41,7 +41,7 @@ describe("forced password change", () => {
     expect(s.status === "signedIn" && s.viewer.mustChangePassword && s.viewer.temporaryPasswordExpiresAt === u!.temporaryPasswordIssuedAt! + TEMPORARY_PASSWORD_TTL_MS).toBe(true);
     expect(await errorCode(student.query(api.users.viewer, {}))).toBe("PASSWORD_CHANGE_REQUIRED");
     expect(await errorCode(student.query(api.attendance.studentHistory, { studentId: A.studentB }))).toBe("PASSWORD_CHANGE_REQUIRED");
-    expect(await errorCode(student.query(api.users.studentContext, { studentId: A.studentB }))).toBe("PASSWORD_CHANGE_REQUIRED");
+    expect(await errorCode(student.query(api.studentPortal.myProfile, { studentId: A.studentB }))).toBe("PASSWORD_CHANGE_REQUIRED");
 
     // A wrong current password changes nothing; the flag stays.
     expect(await errorCode(student.action(api.account.changePassword, { currentPassword: "Wrong-pass-1", newPassword: "MyChoice2026" }))).toBe("INVALID_ARGUMENT");

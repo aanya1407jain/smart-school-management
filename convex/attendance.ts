@@ -6,7 +6,7 @@
  *   may MARK (create) or EDIT (correct) that section's attendance.
  *   - Subject teachers of the section: view only.
  *   - Admin / Principal: view, monitoring and reports only.
- *   - Students: own records only. Guardians: linked students only.
+ *   - Students: own records only.
  *   - There is no delete.
  *
  * Enforcement lives in `requireClassTeacher` (convex/core/authorization.ts),
@@ -145,7 +145,7 @@ export const listBySection = schoolQuery({
 
 /**
  * One student's attendance history. Admin: any; teacher: students in scope;
- * student/guardian: own/linked.
+ * student: own.
  *
  * Range: defaults to the current academic year. With only `from` or only `to`
  * the other end is MAX_RANGE_DAYS away. Ranges longer than MAX_RANGE_DAYS are

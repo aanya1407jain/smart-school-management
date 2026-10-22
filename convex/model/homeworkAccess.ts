@@ -2,7 +2,7 @@
  * Who may READ a homework item (and its attachments):
  *   - `homework:read:all` (admin)
  *   - the teacher who set it, or any teacher linked to the section that year
- *   - a student (or linked guardian) whose enrollment in that year is in the section
+ *   - a student whose enrollment in that year is in the section
  */
 import type { QueryCtx } from "../_generated/server";
 import type { Doc } from "../_generated/dataModel";

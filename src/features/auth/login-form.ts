@@ -3,7 +3,7 @@
  * the session provider (and unit-tested in tests/convex/login-form.test.ts).
  *
  * People sign in with the LOGIN ID their school issued (ADMIN-001, TCH-00001,
- * STU-2026-00001, GRD-00001) — never with an email address. The form accepts
+ * STU-2026-00001) — never with an email address. The form accepts
  * any value that canonicalises to a valid Login ID (case and surrounding spaces
  * are ignored); the server applies the same rule (convex/model/loginIds.ts).
  *

@@ -78,7 +78,7 @@ export function AccountPage() {
         <div className="solid-card space-y-1 p-5 text-sm">
           <p className="font-semibold text-ink">{viewer.displayName}</p>
           <p className="text-ink-muted">Login ID <span className="font-mono font-semibold text-ink">{viewer.loginId ?? "—"}</span></p>
-          <p className="text-ink-muted">Access <span className="font-medium text-ink">{viewer.isGuardian ? "Guardian (student portal)" : viewer.role === "admin" ? "Administrator" : viewer.role === "teacher" ? "Teacher" : "Student"}</span></p>
+          <p className="text-ink-muted">Access <span className="font-medium text-ink">{viewer.role === "admin" ? "Administrator" : viewer.role === "teacher" ? "Teacher" : "Student"}</span></p>
         </div>
 
         <PasswordCard />

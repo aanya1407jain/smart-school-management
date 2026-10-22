@@ -237,7 +237,7 @@ export function createSeedDatabase(today: string = todayISO()): Database {
   const usedNames = new Set<string>();
   let stuNo = 0;
 
-  // Guardian with two children at the school (used by the guardian demo login).
+  // Parent contact shared by two siblings (contact data only — no login).
   const sharmaGuardian: Guardian = {
     id: "g_sharma", name: "Priya Sharma", phone: "+91 98450 22113", email: "priya.sharma@example.com",
     occupation: "Chartered Accountant", address: "42, 5th Cross, Jayanagar, Bengaluru",
@@ -568,7 +568,6 @@ export function createSeedDatabase(today: string = todayISO()): Database {
     const isDemo = s.id === "stu_aarav";
     users.push({ id: `u_${s.id}`, email: isDemo ? "student@asteracademy.edu" : s.email, role: "student", displayName: `${s.firstName} ${s.lastName}`, phone: s.phone, studentIds: [s.id] });
   }
-  users.push({ id: "u_guardian_sharma", email: "guardian@asteracademy.edu", role: "student", displayName: "Priya Sharma", phone: sharmaGuardian.phone, studentIds: ["stu_aarav", "stu_ananya"], guardianId: "g_sharma" });
   // Demo personas are bound to their Convex demo accounts by Login ID
   // (convex/seedData/asterAcademy.ts is the single source of the demo IDs).
   const demoLoginIds = demoLoginIdsByEmail();
@@ -596,9 +595,6 @@ export function createSeedDatabase(today: string = todayISO()): Database {
     n("u_stu_aarav", "notice", "10A: Extra Mathematics class on Saturday", "Room 115, 9:30 AM.", ts(1, 13, 0), false, "/student/notices"),
     n("u_stu_aarav", "fees", "Payment received — ₹6,000", "Receipt generated for your Quarter 3 installment.", `${addDays(today, -8)}T12:00:00.000+05:30`, true, "/student/fees"),
     n("u_stu_aarav", "examination", "Unit Test 1 results published", "Your overall grade is A2.", "2026-08-05T10:00:00.000+05:30", true, "/student/results"),
-    n("u_guardian_sharma", "fees", "Quarter 3 fee due for Ananya", "₹4,500 due on 15 October.", ts(3, 10, 15), false, "/student/fees"),
-    n("u_guardian_sharma", "homework", "New homework for Aarav", "Mathematics — Quadratic Equations, due in 3 days.", ts(2, 14, 5), false, "/student/homework"),
-    n("u_guardian_sharma", "notice", "Parent–Teacher Meeting — Term 1", "Held in respective classrooms, 9:00 AM–1:00 PM.", ts(1, 9, 30), false, "/student/notices"),
   ];
 
   return {
@@ -741,7 +737,6 @@ function demoLoginIdsByEmail(): Map<string, string> {
     [ds.admin.email, ds.admin.login.loginId],
     ...ds.teachers.map((t) => [t.email, t.login?.loginId] as [string, string | undefined]),
     ...ds.students.map((s) => [s.email, s.login?.loginId] as [string, string | undefined]),
-    ...ds.guardians.map((g) => [g.email, g.login?.loginId] as [string, string | undefined]),
   ];
   return new Map(pairs.filter((p): p is [string, string] => !!p[1]).map(([e, id]) => [e.toLowerCase(), id]));
 }

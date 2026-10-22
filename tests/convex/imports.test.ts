@@ -22,19 +22,19 @@ async function setup() {
 const counts = (t: T) => t.run(async (ctx) => ({
   students: (await ctx.db.query("students").collect()).length,
   enrollments: (await ctx.db.query("enrollments").collect()).length,
-  guardians: (await ctx.db.query("guardians").collect()).length,
+  contacts: (await ctx.db.query("guardians").collect()).length, // parent contacts
   links: (await ctx.db.query("guardianLinks").collect()).length,
   memberships: (await ctx.db.query("schoolMemberships").collect()).length,
   teachers: (await ctx.db.query("teachers").collect()).length,
 }));
 
 describe("student import", () => {
-  test("valid rows create students, enrollments and de-duplicated guardians", async () => {
+  test("valid rows create students, enrollments and de-duplicated parent contacts", async () => {
     const { t, A } = await setup();
     const admin = await as(t, A.users.admin);
     const rows = [
-      row(2, { fullName: "Ishita Menon", className: "Grade 8", section: "A", dateOfBirth: "14/05/2013", gender: "F", guardianName: "Kavita Menon", guardianPhone: "+91 98450 77777", guardianRelation: "Mother" }),
-      row(3, { firstName: "Ravi", lastName: "Menon", className: "8", section: "a", rollNo: "7", guardianName: "Kavita Menon", guardianPhone: "+91 98450 77777" }),
+      row(2, { fullName: "Ishita Menon", className: "Grade 8", section: "A", dateOfBirth: "14/05/2013", gender: "F", parentName: "Kavita Menon", parentPhone: "+91 98450 77777", parentRelation: "Mother" }),
+      row(3, { firstName: "Ravi", lastName: "Menon", className: "8", section: "a", rollNo: "7", parentName: "Kavita Menon", parentPhone: "+91 98450 77777" }),
       row(4, { fullName: "Zoya Khan", className: "grade 8", section: "8-B", admissionNo: "MANUAL-77" }),
     ];
     const preview = await admin.query(api.imports.previewStudents, { rows, createAccounts: false, today: TODAY });
@@ -45,7 +45,7 @@ describe("student import", () => {
     const after = await counts(t);
     expect(after.students - before.students).toBe(3);
     expect(after.enrollments - before.enrollments).toBe(3);
-    expect(after.guardians - before.guardians).toBe(1); // siblings share one guardian (same phone)
+    expect(after.contacts - before.contacts).toBe(1); // siblings share one parent contact (same phone)
     expect(after.links - before.links).toBe(2);
     const stored = await t.run(async (ctx) => {
       const s = (await ctx.db.get(res.created[0].studentId))!;
@@ -72,7 +72,7 @@ describe("student import", () => {
         row(4, { fullName: "No Class", className: "Grade 12", section: "A" }),
         row(5, { fullName: "No Section", className: "Grade 8", section: "Z" }),
         row(6, { fullName: "Future Born", className: "Grade 8", section: "A", dateOfBirth: "2030-01-01" }),
-        row(7, { fullName: "Half Guardian", className: "Grade 8", section: "A", guardianName: "Someone" }),
+        row(7, { fullName: "Half Contact", className: "Grade 8", section: "A", parentName: "Someone" }),
       ],
       createAccounts: false, today: TODAY,
     });
@@ -83,7 +83,7 @@ describe("student import", () => {
     expect(errs(4)).toContain("className");
     expect(errs(5)).toContain("section");
     expect(errs(6)).toContain("dateOfBirth");
-    expect(errs(7)).toContain("guardianPhone");
+    expect(errs(7)).toContain("parentPhone");
   });
 
   test("duplicate admission numbers (in file and existing) are rejected; uploaded roll numbers never conflict", async () => {
@@ -111,7 +111,7 @@ describe("student import", () => {
     const before = await counts(t);
     const code = await errorCode(admin.mutation(api.imports.commitStudentRows, {
       rows: [
-        row(2, { fullName: "Valid Kid", className: "Grade 8", section: "A", guardianName: "G", guardianPhone: "9876543210" }),
+        row(2, { fullName: "Valid Kid", className: "Grade 8", section: "A", parentName: "G", parentPhone: "9876543210" }),
         row(3, { fullName: "Broken Kid", className: "Nope", section: "A" }),
       ],
       createAccounts: true, today: TODAY,
@@ -152,7 +152,7 @@ describe("student import", () => {
   test("unauthorized imports are rejected; account creation needs users:manage", async () => {
     const { t, A } = await setup();
     const rows = [row(2, { fullName: "Sneaky Kid", className: "Grade 8", section: "A" })];
-    for (const u of [A.users.classTeacher, A.users.student, A.users.guardian]) {
+    for (const u of [A.users.classTeacher, A.users.student]) {
       const c = await as(t, u);
       expect(await errorCode(c.query(api.imports.previewStudents, { rows, createAccounts: false, today: TODAY }))).toBe("FORBIDDEN");
       expect(await errorCode(c.mutation(api.imports.commitStudentRows, { rows, createAccounts: false, today: TODAY }))).toBe("FORBIDDEN");
@@ -228,7 +228,7 @@ describe("spreadsheet parsing (browser side, shared specs)", () => {
     const [headings] = templateRows(STUDENT_IMPORT);
     const mapping = autoMapColumns(headings, STUDENT_IMPORT);
     expect(mapping.className).not.toBeNull();
-    expect(mapping.guardianPhone).not.toBeNull();
+    expect(mapping.parentPhone).not.toBeNull();
     expect(autoMapColumns(["Student Name", "Std", "Div", "Adm No."], STUDENT_IMPORT)).toMatchObject({ fullName: 0, className: 1, section: 2, admissionNo: 3 });
     // Template examples are never formula-like, so the downloaded template re-imports unchanged.
     expect(templateRows(STUDENT_IMPORT)[1].every((v) => !/^[=+\-@]/.test(v))).toBe(true);
@@ -252,10 +252,10 @@ describe("column heading matching", () => {
       section: ["sectionName", "section_name", "Section"],
       dateOfBirth: ["dateOfBirth", "date_of_birth", "Date of Birth", "DOB"],
       admissionDate: ["admissionDate", "admission_date", "Admission Date"],
-      guardianName: ["guardianName", "guardian_name", "Guardian Name"],
-      guardianPhone: ["guardianPhone", "guardian_phone", "Guardian Phone"],
-      guardianEmail: ["guardianEmail", "guardian_email", "Guardian Email"],
-      guardianRelation: ["guardianRelationship", "guardian_relationship", "Guardian Relation"],
+      parentName: ["guardianName", "guardian_name", "Guardian Name"],
+      parentPhone: ["guardianPhone", "guardian_phone", "Guardian Phone"],
+      parentEmail: ["guardianEmail", "guardian_email", "Guardian Email", "Parent Email"],
+      parentRelation: ["guardianRelationship", "guardian_relationship", "Guardian Relation"],
       academicYear: ["academicYear", "Academic Year"],
       gender: ["gender", "Sex"], email: ["email"], phone: ["phone"], address: ["address"], loginId: ["loginId", "Login ID"],
     };

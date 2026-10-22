@@ -3,7 +3,7 @@
  *
  * Permissions: `fees:manage` (admin, and the optional "accountant" permission
  * set) writes everything and reads every ledger; `reports:finance` may read
- * collection summaries; students / linked guardians read their own ledger and
+ * collection summaries; students read their own ledger and
  * receipts (`fees:read:own`). Every id is loaded inside the caller's school.
  *
  * Money is integer minor units (paise). Records are separate and append-only
@@ -443,7 +443,7 @@ export const studentLedger = schoolQuery({
   },
 });
 
-/** One receipt with its payment, allocations, who recorded it and the student's balance now (fee managers, or the student / linked guardian). */
+/** One receipt with its payment, allocations, who recorded it and the student's balance now (fee managers, or the student themself). */
 export const receipt = schoolQuery({
   args: { receiptId: v.id("receipts") },
   handler: async (ctx, { receiptId }) => {

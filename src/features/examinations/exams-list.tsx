@@ -72,7 +72,7 @@ function CreateExamModal({ open, onOpenChange, onCreated }: { open: boolean; onO
   useEffect(() => { if (opts.data && !form.classIds.length) setForm((f) => ({ ...f, classIds: opts.data!.classes.filter((c) => c.grade >= 10).map((c) => c.id) })); }, [opts.data]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <Modal open={open} onOpenChange={onOpenChange} title="Create examination" description="A date sheet is generated automatically — one paper per subject, one per day (Sundays skipped). You can adjust it afterwards." size="lg"
-      footer={<><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button loading={m.isPending} onClick={async () => { const r = await m.mutate(form); if (r) { toast({ title: "Examination created", description: "Date sheet published to teachers, students and guardians." }); onOpenChange(false); onCreated(r.id); } }}>Create & publish schedule</Button></>}>
+      footer={<><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button loading={m.isPending} onClick={async () => { const r = await m.mutate(form); if (r) { toast({ title: "Examination created", description: "Date sheet published to teachers and students." }); onOpenChange(false); onCreated(r.id); } }}>Create & publish schedule</Button></>}>
       <div className="grid gap-4 sm:grid-cols-2">
         <FormField label="Exam name" required error={m.fieldErrors.name} className="sm:col-span-2"><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></FormField>
         <FormField label="Term"><Select value={form.term} onChange={(e) => setForm({ ...form, term: e.target.value as typeof form.term })}><option>Term 1</option><option>Term 2</option></Select></FormField>

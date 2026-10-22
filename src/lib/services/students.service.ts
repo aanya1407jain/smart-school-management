@@ -69,8 +69,8 @@ function validate(input: StudentInput) {
   if (!input.lastName.trim()) errors.lastName = "Last name is required";
   if (!input.dateOfBirth) errors.dateOfBirth = "Date of birth is required";
   if (!input.sectionId) errors.sectionId = "Select a class and section";
-  if (!input.guardian.name.trim()) errors["guardian.name"] = "Guardian name is required";
-  if (!/^[+\d\s-]{8,}$/.test(input.guardian.phone)) errors["guardian.phone"] = "Enter a valid phone number";
+  if (!input.guardian.name.trim()) errors["parentContact.name"] = "Parent name is required";
+  if (!/^[+\d\s-]{8,}$/.test(input.guardian.phone)) errors["parentContact.phone"] = "Enter a valid phone number";
   if (Object.keys(errors).length) throw invalid("Please fix the highlighted fields.", errors);
 }
 
@@ -193,7 +193,7 @@ export const mockStudentService = {
         results,
         teachers,
         homework,
-        account: accountsForStudent(db, studentId).filter((u) => !u.guardianId).map((u) => ({ email: u.email }))[0] ?? null,
+        account: accountsForStudent(db, studentId).map((u) => ({ email: u.email }))[0] ?? null,
       };
     });
   },
@@ -298,7 +298,7 @@ export const mockStudentService = {
       return {
         firstName: s.firstName, lastName: s.lastName, gender: s.gender, dateOfBirth: s.dateOfBirth, bloodGroup: s.bloodGroup, email: s.email,
         phone: s.phone, address: s.address, admissionDate: s.admissionDate, sectionId: currentEnrollment(db, studentId)?.sectionId ?? "", status: s.status,
-        guardian: { name: g?.name ?? "", relation: (g?.relation ?? "Guardian") as GuardianLink["relation"], phone: g?.phone ?? "", email: g?.email ?? "", occupation: g?.occupation ?? "" },
+        guardian: { name: g?.name ?? "", relation: (g?.relation ?? "Other") as GuardianLink["relation"], phone: g?.phone ?? "", email: g?.email ?? "", occupation: g?.occupation ?? "" },
       };
     });
   },

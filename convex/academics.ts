@@ -25,7 +25,8 @@ import { writeAudit } from "./model/audit";
 import { compareRosterEntries, renumberSections } from "./model/rollNumbers";
 import { notifyUsers } from "./model/notifications";
 import { nextAdmissionNumber } from "./model/counters";
-import { attendanceRecords, currentYear, feeLedger, guardiansOf, homeworkFor, placement, publishedResults, studentFields } from "./model/studentRecords";
+import { activeStudentRecordIds, enrolledInSection, enrolledStudents } from "./model/studentCounts";
+import { attendanceRecords, currentYear, feeLedger, parentContactsOf, homeworkFor, placement, publishedResults, studentFields } from "./model/studentRecords";
 
 const byLabel = (a: { displayName: string }, b: { displayName: string }) => a.displayName.localeCompare(b.displayName, undefined, { numeric: true });
 
@@ -37,11 +38,11 @@ const byLabel = (a: { displayName: string }, b: { displayName: string }) => a.di
  * Access is decided on the server by the same three tiers as every other
  * student-data function (requireStudentAccess): school-wide staff
  * (students:read:all), a teacher whose scope includes the student's CURRENT
- * section (students:read:assigned), or the student themself / a linked
- * guardian (profile:read:own). Anyone else — including another school — gets
+ * section (students:read:assigned), or the student themself
+ * (profile:read:own). Anyone else — including another school — gets
  * NOT_FOUND. The response lists explicit fields only (never spread documents):
- * guardian contact details only for school-wide staff and the family, fee
- * details only for fee staff and the family. Returns null for a malformed id.
+ * parent-contact phone/email only for school-wide staff and the student, fee
+ * details only for fee staff and the student. Returns null for a malformed id.
  */
 export const getStudentProfile = schoolQuery({
   // A route parameter: validated here with normalizeId (an unknown or malformed id is "not found").
@@ -62,7 +63,7 @@ export const getStudentProfile = schoolQuery({
       academicYear: year ? { academicYearId: year._id, name: year.name } : null,
       enrollmentState,
       enrollment,
-      guardians: await guardiansOf(ctx, student, schoolWide || own),
+      parentContacts: await parentContactsOf(ctx, student, schoolWide || own),
       attendance: year ? await attendanceRecords(ctx, student._id, year) : [],
       results: await publishedResults(ctx, student),
       homework: activeSection && activeSection.schoolId === ctx.actor.schoolId ? await homeworkFor(ctx, student, activeSection) : [],
@@ -92,7 +93,7 @@ export const listSubjects = schoolQuery({
 
 /**
  * Sections visible to the caller in a year (default: current year):
- * admins → all; teachers → sections they teach or own; student portal → linked students' sections.
+ * admins → all; teachers → sections they teach or own; student → their own section.
  */
 export const listSections = schoolQuery({
   args: { academicYearId: v.optional(v.id("academicYears")) },
@@ -517,13 +518,13 @@ export const endEnrollment = schoolMutation({
 
 /**
  * Admit ONE student from the admin form: student record + current-year
- * enrollment + guardian link, in one transaction. It follows the same rules
+ * enrollment + parent contact, in one transaction. It follows the same rules
  * as the spreadsheet import (convex/model/importers.ts):
  *  - the class and section must be real records of this school, the section
  *    must belong to that class and to the CURRENT academic year — anything
  *    else is rejected (never a silent fallback to another section);
  *  - the admission number comes from the school's atomic counter;
- *  - a guardian is matched by phone number (siblings share one guardian);
+ *  - a parent contact is matched by phone number (siblings share one contact);
  *  - roll numbers are system-assigned: the whole section is renumbered
  *    alphabetically in this same transaction (model/rollNumbers.ts).
  * No sign-in account is created here — that stays in Accounts & Import
@@ -542,7 +543,8 @@ export const createStudentWithEnrollment = schoolMutation({
     bloodGroup: v.optional(v.string()),
     classId: v.id("classes"),
     sectionId: v.id("sections"),
-    guardian: v.object({
+    /** Parent contact (contact data only — no account is created). */
+    parentContact: v.object({
       name: v.string(),
       relation: v.string(),
       phone: v.string(),
@@ -558,9 +560,9 @@ export const createStudentWithEnrollment = schoolMutation({
     const firstName = assertNonEmpty(a.firstName, "firstName", 50);
     const lastName = assertNonEmpty(a.lastName, "lastName", 50);
     const address = assertNonEmpty(a.address, "address", 200);
-    const guardianName = assertNonEmpty(a.guardian.name, "guardian.name", 80);
-    const guardianRelation = assertNonEmpty(a.guardian.relation, "guardian.relation", 30);
-    const guardianPhone = normalizePhone(a.guardian.phone, "guardian.phone");
+    const contactName = assertNonEmpty(a.parentContact.name, "parentContact.name", 80);
+    const contactRelation = assertNonEmpty(a.parentContact.relation, "parentContact.relation", 30);
+    const contactPhone = normalizePhone(a.parentContact.phone, "parentContact.phone");
     const phone = a.phone?.trim() ? normalizePhone(a.phone, "phone") : undefined;
     const email = a.email?.trim() ? a.email.trim() : undefined;
 
@@ -581,14 +583,15 @@ export const createStudentWithEnrollment = schoolMutation({
       ...(a.bloodGroup?.trim() ? { bloodGroup: a.bloodGroup.trim() } : {}),
     });
 
-    // Guardian: reuse an existing guardian with the same phone (siblings), as the import does.
-    const existingGuardian = await ctx.db.query("guardians").withIndex("by_school_phone", (q) => q.eq("schoolId", school._id).eq("phone", guardianPhone)).first();
-    const guardianId = existingGuardian?._id ?? await ctx.db.insert("guardians", {
-      schoolId: school._id, name: guardianName, phone: guardianPhone, address,
-      ...(a.guardian.email?.trim() ? { email: a.guardian.email.trim() } : {}),
-      ...(a.guardian.occupation?.trim() ? { occupation: a.guardian.occupation.trim() } : {}),
+    // Parent contact: reuse an existing contact with the same phone (siblings), as the import does.
+    // Stored in the `guardians` / `guardianLinks` tables (contact data only).
+    const existingContact = await ctx.db.query("guardians").withIndex("by_school_phone", (q) => q.eq("schoolId", school._id).eq("phone", contactPhone)).first();
+    const contactId = existingContact?._id ?? await ctx.db.insert("guardians", {
+      schoolId: school._id, name: contactName, phone: contactPhone, address,
+      ...(a.parentContact.email?.trim() ? { email: a.parentContact.email.trim() } : {}),
+      ...(a.parentContact.occupation?.trim() ? { occupation: a.parentContact.occupation.trim() } : {}),
     });
-    await ctx.db.insert("guardianLinks", { schoolId: school._id, guardianId, studentId, relationship: guardianRelation, isPrimary: true });
+    await ctx.db.insert("guardianLinks", { schoolId: school._id, guardianId: contactId, studentId, relationship: contactRelation, isPrimary: true });
 
     const startDate = a.admissionDate < year.startDate ? year.startDate : a.admissionDate;
     const enrollmentId = await ctx.db.insert("enrollments", {
@@ -598,8 +601,8 @@ export const createStudentWithEnrollment = schoolMutation({
 
     const classTeacher = section.classTeacherId ? await ctx.db.get(section.classTeacherId) : null;
     const warnings: string[] = [];
-    if (existingGuardian && existingGuardian.name.trim().toLowerCase() !== guardianName.toLowerCase()) {
-      warnings.push(`Phone ${guardianPhone} already belongs to guardian ${existingGuardian.name}; the student was linked to them.`);
+    if (existingContact && existingContact.name.trim().toLowerCase() !== contactName.toLowerCase()) {
+      warnings.push(`Phone ${contactPhone} already belongs to parent contact ${existingContact.name}; the student was linked to them.`);
     }
     if (!classTeacher || classTeacher.schoolId !== school._id) {
       warnings.push(`Section ${section.displayName} has no class teacher yet — assign one in Academics so attendance can be marked.`);
@@ -607,7 +610,7 @@ export const createStudentWithEnrollment = schoolMutation({
     await writeAudit(ctx, {
       schoolId: school._id, actor: ctx.actor, action: "student.admitted", entity: { table: "students", id: studentId },
       summary: `Admitted ${fullName({ firstName, lastName })} (${admissionNo}) to ${section.displayName} (${year.name})`,
-      metadata: { enrollmentId, sectionId: section._id, guardianReused: !!existingGuardian },
+      metadata: { enrollmentId, sectionId: section._id, parentContactReused: !!existingContact },
     });
     const rollNo = (await ctx.db.get(enrollmentId))?.rollNo ?? null;
     return {
@@ -636,7 +639,7 @@ function normalizePhone(raw: string, field: string): string {
  * Edit a student's own profile fields (admin `students:write`).
  *
  * Only personal/contact fields change here. Admission number, status,
- * enrollment/class/section, guardians, accounts, roles and credentials are NOT
+ * enrollment/class/section, parent contacts, accounts, roles and credentials are NOT
  * editable through this function (enrollment changes use enrollStudent /
  * endEnrollment; accounts use Accounts & Import).
  *
@@ -711,7 +714,7 @@ export const updateStudentProfile = schoolMutation({
 /**
  * A student's enrollment history across academic years (newest first): class,
  * section, status, dates and the last roll number. Administrators
- * (students:read:all) and the student / linked guardians (profile:read:own).
+ * (students:read:all) and the student themself (profile:read:own).
  */
 export const enrollmentHistory = schoolQuery({
   args: { studentId: v.id("students") },
@@ -730,5 +733,32 @@ export const enrollmentHistory = schoolQuery({
       }
     }
     return out.sort((a, b) => b.yearStart.localeCompare(a.yearStart) || b.startDate.localeCompare(a.startDate) || (a.status === "active" ? -1 : 1));
+  },
+});
+
+/**
+ * Student totals for the Students page (students:read:all), using THE shared
+ * counting rule (model/studentCounts.ts) — the same number as the admin
+ * dashboard. Independent of the list's pagination and search, so loading more
+ * rows or searching never changes the overall total. Optional `sectionId` adds
+ * that section's enrolled count. Reactive: admitting, enrolling, transferring
+ * or withdrawing a student updates it immediately.
+ */
+export const studentCounts = schoolQuery({
+  args: { sectionId: v.optional(v.id("sections")) },
+  handler: async (ctx, { sectionId }) => {
+    requirePermission(ctx.actor, "students:read:all");
+    const yearId = await getCurrentAcademicYearId(ctx, ctx.actor.schoolId);
+    const year = (await ctx.db.get(yearId))!;
+    const active = await activeStudentRecordIds(ctx, ctx.actor.schoolId);
+    const enrolled = await enrolledStudents(ctx, ctx.actor.schoolId, yearId, active);
+    let notEnrolled = 0;
+    for (const id of active) if (!enrolled.has(id)) notEnrolled++;
+    let section: { sectionId: Id<"sections">; label: string; enrolled: number } | null = null;
+    if (sectionId) {
+      const s = await getInSchool(ctx, "sections", sectionId, "Section");
+      section = { sectionId: s._id, label: s.displayName, enrolled: enrolledInSection(enrolled, s._id) };
+    }
+    return { academicYear: { academicYearId: year._id, name: year.name }, enrolled: enrolled.size, activeRecords: active.size, notEnrolled, section };
   },
 });

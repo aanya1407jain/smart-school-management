@@ -25,7 +25,7 @@ export function ProfilePage() {
       <QueryView query={q}>
         {(p) => (
           <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
-            <AccountCard displayName={p.displayName} loginId={viewer?.loginId ?? "—"} email={p.email} phone={p.phone} roleLabel={user.guardianId ? "Guardian" : p.title ?? ROLE_LABELS[p.role]} canRename={p.role === "admin"} />
+            <AccountCard displayName={p.displayName} loginId={viewer?.loginId ?? "—"} email={p.email} phone={p.phone} roleLabel={p.title ?? ROLE_LABELS[p.role]} canRename={p.role === "admin"} />
             <PasswordCard />
           </div>
         )}
@@ -33,7 +33,7 @@ export function ProfilePage() {
       {user.role === "teacher" && user.teacherId && <TeacherProfileView teacherId={user.teacherId} self />}
       {user.role === "student" && studentId && (
         <div>
-          <h2 className="mb-3 text-lg font-semibold text-sapphire">{user.guardianId ? "Student record" : "My school record"}</h2>
+          <h2 className="mb-3 text-lg font-semibold text-sapphire">My school record</h2>
           <StudentProfileView studentId={studentId} />
         </div>
       )}

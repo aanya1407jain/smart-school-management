@@ -113,7 +113,7 @@ describe("staff profile", () => {
     await admin.mutation(api.profile.updateMine, { displayName: "Principal Rao" });
     expect((await admin.query(api.profile.mine, {})).displayName).toBe("Principal Rao");
     expect(await errorCode(admin.mutation(api.profile.updateMine, { phone: "123456" }))).toBe("FORBIDDEN");
-    for (const u of [A.users.student, A.users.guardian]) expect(await errorCode((await as(t, u)).query(api.profile.mine, {}))).toBe("FORBIDDEN");
+    expect(await errorCode((await as(t, A.users.student)).query(api.profile.mine, {}))).toBe("FORBIDDEN");
     expect(await audits(t, "profile.updated")).toHaveLength(2);
   });
 });
@@ -131,7 +131,7 @@ describe("student documents and enrollment history", () => {
     const list = (u: Id<"users">) => as(t, u).then((c) => c.query(api.files.listForOwner, { ownerType: "student", ownerId: A.studentA }));
     expect((await list(A.users.admin)).map((f) => f.fileName)).toEqual(["tc.pdf"]);
     expect((await list(A.users.student)).map((f) => f.fileName)).toEqual(["tc.pdf"]);
-    expect((await list(A.users.guardian)).map((f) => f.fileName)).toEqual(["tc.pdf"]);
+    expect(await errorCode(list(A.users.legacyGuardian))).toBe("NO_SCHOOL_ACCESS");
     // Subject teacher of 8-A (assigned scope) must NOT see student documents.
     expect(await errorCode(list(A.users.subjectTeacher))).toBe("NOT_FOUND");
     expect(await errorCode((await as(t, A.users.subjectTeacher)).query(api.files.getUrl, { fileId }))).toBe("NOT_FOUND");
@@ -140,7 +140,7 @@ describe("student documents and enrollment history", () => {
     const acc = await addAdmin(t, A.schoolId, "acc", ["accountant"]);
     expect(await errorCode((await as(t, acc.userId)).query(api.files.getUrl, { fileId }))).toBe("NOT_FOUND");
     // Only admins delete; it is audited.
-    expect(await errorCode((await as(t, A.users.guardian)).mutation(api.files.remove, { fileId }))).toBe("FORBIDDEN");
+    expect(await errorCode((await as(t, A.users.student)).mutation(api.files.remove, { fileId }))).toBe("FORBIDDEN");
     await admin.mutation(api.files.remove, { fileId });
     expect(await list(A.users.admin)).toEqual([]);
     expect(await audits(t, "file.deleted")).toHaveLength(1);
@@ -156,10 +156,10 @@ describe("student documents and enrollment history", () => {
     await admin.mutation(api.academics.endEnrollment, { enrollmentId: enr.enrollmentId, status: "withdrawn", endDate: "2026-09-30" });
     const h = await admin.query(api.academics.enrollmentHistory, { studentId: A.studentA });
     expect(h.map((e) => [e.section, e.status])).toEqual([["8-B", "withdrawn"], ["8-A", "transferred"]]);
-    expect((await (await as(t, A.users.guardian)).query(api.academics.enrollmentHistory, { studentId: A.studentA })).length).toBe(2);
+    expect((await (await as(t, A.users.student)).query(api.academics.enrollmentHistory, { studentId: A.studentA })).length).toBe(2);
     expect(await errorCode((await as(t, A.users.classTeacher)).query(api.academics.enrollmentHistory, { studentId: A.studentA }))).toBe("NOT_FOUND");
     expect(await errorCode((await as(t, B.users.admin)).query(api.academics.enrollmentHistory, { studentId: A.studentA }))).toBe("NOT_FOUND");
-    expect(await errorCode((await as(t, A.users.guardian)).query(api.academics.enrollmentHistory, { studentId: A.studentB }))).toBe("NOT_FOUND");
+    expect(await errorCode((await as(t, A.users.student)).query(api.academics.enrollmentHistory, { studentId: A.studentB }))).toBe("NOT_FOUND");
     expect(await audits(t, "enrollment.transferred")).toHaveLength(1);
     expect(await audits(t, "enrollment.ended")).toHaveLength(1);
   });

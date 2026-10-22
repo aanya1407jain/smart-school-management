@@ -130,7 +130,7 @@ export interface GuardianLink {
   id: ID;
   guardianId: ID;
   studentId: ID;
-  relation: "Mother" | "Father" | "Guardian" | "Grandparent";
+  relation: "Mother" | "Father" | "Grandparent" | "Other";
   isPrimary: boolean;
 }
 
@@ -401,8 +401,6 @@ export interface UserAccount {
   teacherId?: ID;
   /** For student-portal accounts: the student(s) this login can see. */
   studentIds?: ID[];
-  /** Set when the account belongs to a guardian rather than the student. */
-  guardianId?: ID;
   /**
    * Extra permission sets layered on the base role (e.g. a future
    * "accountant" set for administrative staff).

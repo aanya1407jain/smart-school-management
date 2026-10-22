@@ -47,10 +47,10 @@ describe("A-01 direct backend calls", () => {
     void A;
   });
 
-  test("role matrix: students and guardians cannot reach staff functions", async () => {
+  test("role matrix: students cannot reach staff functions", async () => {
     const t = makeTest();
     const A = await createSchool(t, "alpha");
-    for (const user of [A.users.student, A.users.guardian]) {
+    for (const user of [A.users.student]) {
       const c = await as(t, user);
       expect(await errorCode(c.query(api.fees.listStructures, {}))).toBe("FORBIDDEN");
       expect(await errorCode(c.query(api.exams.list, {}))).toBe("FORBIDDEN");

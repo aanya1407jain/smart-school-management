@@ -12,7 +12,7 @@ validators; return shapes are the handler return values (use
 - **Calling.** Use `useSchoolQuery`, `useSchoolMutation`, `useSchoolPaginatedQuery`
   and `useSchoolAction` from `src/lib/convex/membership.tsx`. They add the active
   `membershipId`, which the server verifies belongs to the caller.
-- **Identity.** The role, school, teacher, student and guardian links all come from
+- **Identity.** The role, school, teacher and student links all come from
   the Convex Auth session and `schoolMemberships`. Never send a role or a schoolId;
   the server ignores the client for both.
 - **Errors.** Failures are `ConvexError<{ code, message, fields? }>`. Read them with
@@ -54,7 +54,7 @@ validators; return shapes are the handler return values (use
 | `revokeConcession({ concessionId, reason })` | `fees:manage` | |
 | `recordPayment({ studentId, academicYearId?, amountMinor, method, paidOn, reference?, note?, clientRequestId })` | `fees:manage` | See below |
 | `reversePayment({ paymentId, reason })` | `fees:manage` | Append-only: writes a reversal row; the original stops counting |
-| `studentLedger({ studentId, academicYearId? })` | `fees:manage`, or the student / linked guardian | Obligations with concession, paid, outstanding and `status` (paid / overdue / partial / due / upcoming); payments with receipt id, number and reference; concessions; totals incl. `netMinor`, `overdueMinor`, `dueSoonMinor`; `standing`, `nextDue`, `classLabel`, assigned `structures` and (fee managers) `availableStructures` |
+| `studentLedger({ studentId, academicYearId? })` | `fees:manage`, or the student themself | Obligations with concession, paid, outstanding and `status` (paid / overdue / partial / due / upcoming); payments with receipt id, number and reference; concessions; totals incl. `netMinor`, `overdueMinor`, `dueSoonMinor`; `standing`, `nextDue`, `classLabel`, assigned `structures` and (fee managers) `availableStructures` |
 | `receipt({ receiptId })` | Same as `studentLedger` | Payment, allocations, `reversed`, who recorded it, class, school address and the balance now |
 | `collectionSummary({ from, to })` | `fees:manage`, `reports:finance` | At most 366 days; effective payments only; totals by method |
 | `overview({ academicYearId? })` | `fees:manage`, `reports:finance` | Year totals (gross, concession, net, paid, outstanding, overdue, due in 30 days), collection rate, standing counts of enrolled students, monthly collections, 6 recent payments |
@@ -102,14 +102,14 @@ validators; return shapes are the handler return values (use
   - A student must be in the section, and a student cannot appear twice.
 - **`publish`:**
   - Requires a mark row for every active student of every section × paper.
-  - Writes `results` snapshots, locks the exam and notifies students and guardians once.
+  - Writes `results` snapshots, locks the exam and notifies students once.
 - **Calculation rules (documented decisions):**
   - An absent paper counts 0 and is failed.
   - `percentage` = total ÷ maximum × 100, rounded to 2 decimal places.
   - Grade follows the school's grading scheme.
   - A paper is passed when marks ≥ its passMarks.
   - Rank is per section by percentage, using standard competition ranking (ties share a rank: 1, 1, 3).
-- Students and guardians read published results with `studentPortal.myResults`.
+- Students read their published results with `studentPortal.myResults`.
 
 ## Timetable — `convex/timetable.ts`
 
@@ -139,7 +139,7 @@ validators; return shapes are the handler return values (use
 
 | Function | Who | Notes |
 |---|---|---|
-| `create({ sectionId, subjectId, title, description, dueDate })` | Teacher with a persisted subject assignment for that section | Due date not in the past and inside the year; notifies the section's students and guardians once |
+| `create({ sectionId, subjectId, title, description, dueDate })` | Teacher with a persisted subject assignment for that section | Due date not in the past and inside the year; notifies the section's students once |
 | `update({ homeworkId, title?, description?, dueDate? })` | The teacher who set it | While open |
 | `close({ homeworkId })` | The teacher who set it | Idempotent |
 | `listMine()` | Teacher | With submitted and reviewed counts |
@@ -151,7 +151,7 @@ validators; return shapes are the handler return values (use
 
 - **`submit` rules:**
   - Only for homework of the student's own active section, while it is open.
-  - Guardians cannot submit.
+  - Only the student account can submit (there are no parent/guardian accounts).
   - The submission is stored as `late` after the due date.
   - The student can resubmit until it is reviewed.
 - Students use `studentPortal.myHomework` for the list.
@@ -203,7 +203,7 @@ validators; return shapes are the handler return values (use
 | `feeSummary({ academicYearId? })` | `reports:finance`, `fees:manage` | Per class: gross, concession, paid, outstanding and overdue (from the same ledger as `studentLedger`) |
 | `examPerformance({ examId })` | `reports:read` | Published exams only; averages and pass rates per subject and per section |
 | `adminDashboard()` | `reports:read` and/or `reports:finance` / `fees:manage` | `{ school, academicYear, today, overview, fees }`. `overview` (students, sections, teachers, on leave today, attendance of today or the latest marked date with delta, 15-day trend, latest published exam by class, upcoming exams, 4 recent notices, unmarked registers today, pending leave) needs `reports:read`; `fees` (outstanding, overdue, overdue students, collected, net, rate, by class) needs finance access. A section the caller may not see is `null`, never zero. |
-| `studentStatistics()` | `reports:read` | Current year: enrolled total, status counts, by class × gender, section strength vs capacity, distinct guardians |
+| `studentStatistics()` | `reports:read` | Current year: enrolled total, status counts, by class × gender, section strength vs capacity, distinct parent contacts (`parentContacts`) |
 | `attendanceReport({ from?, to? })` | `reports:read`, `attendance:read:all` | Default: the current year up to today; at most 366 days; per month and per section from register totals (late counts per setting, excused excluded). No per-student bands. |
 
 ## Files — `convex/files.ts` and `src/lib/convex/use-file-upload.ts`
@@ -225,7 +225,7 @@ In React: `const { upload } = useFileUpload(); await upload(file, { kind, ownerT
 |---|---|---|
 | `updateStudentProfile({ studentId, firstName?, lastName?, gender?, dateOfBirth?, email?, phone?, address?, bloodGroup? })` | `students:write` | See below |
 
-- Status, admission number, enrollment, guardians, accounts and roles cannot be edited here; the validator rejects them.
+- Status, admission number, enrollment, parent contacts, accounts and roles cannot be edited here; the validator rejects them.
 - A name change renumbers every section where the student is actively enrolled, in the same transaction, using the documented alphabetical rule.
 
 ## Academics administration — `convex/academics.ts` (additions)
