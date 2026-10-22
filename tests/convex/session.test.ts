@@ -1,10 +1,12 @@
 /**
- * Session identity (users.session / users.viewer) and the guardian student
- * context (users.studentContext). Everything about WHO the caller is comes from
- * the Convex Auth identity + schoolMemberships — never from client arguments.
+ * Session identity (users.session / users.viewer). Everything about WHO the
+ * caller is comes from the Convex Auth identity + schoolMemberships — never
+ * from client arguments. Account roles are admin, teacher and student only; a
+ * leftover guardian sign-in (removed account type) never resolves to access.
  */
 import { describe, expect, test } from "vitest";
 import { api } from "../../convex/_generated/api";
+import * as usersModule from "../../convex/users";
 import { as, createSchool, errorCode, makeTest } from "./fixtures";
 
 async function setup() {
@@ -20,7 +22,7 @@ describe("users.session", () => {
     expect(await t.query(api.users.session, {})).toEqual({ status: "signedOut" });
   });
 
-  test("admin / teacher / student / guardian get server-derived role and links", async () => {
+  test("admin / teacher / student get server-derived role and links; a legacy guardian sign-in gets none", async () => {
     const { t, A } = await setup();
     const admin = await (await as(t, A.users.admin)).query(api.users.session, {});
     if (admin.status !== "signedIn") throw new Error(admin.status);
@@ -39,18 +41,18 @@ describe("users.session", () => {
     const student = await (await as(t, A.users.student)).query(api.users.session, {});
     if (student.status !== "signedIn") throw new Error(student.status);
     expect(student.viewer.role).toBe("student");
-    expect(student.viewer.isGuardian).toBe(false);
     expect(student.viewer.student?.studentId).toBe(A.studentA);
-    expect(student.viewer.guardian).toBeNull();
     expect(student.viewer.students.map((s) => s.studentId)).toEqual([A.studentA]);
+    expect("guardian" in student.viewer).toBe(false);
+    expect("isGuardian" in student.viewer).toBe(false);
 
-    const guardian = await (await as(t, A.users.guardian)).query(api.users.session, {});
-    if (guardian.status !== "signedIn") throw new Error(guardian.status);
-    expect(guardian.viewer.role).toBe("student");
-    expect(guardian.viewer.isGuardian).toBe(true);
-    expect(guardian.viewer.guardian).not.toBeNull();
-    expect(guardian.viewer.student).toBeNull();
-    expect(guardian.viewer.students.map((s) => s.studentId)).toEqual([A.studentA]);
+    // A user whose only membership is a removed guardian sign-in: no school access at all.
+    const legacy = await (await as(t, A.users.legacyGuardian)).query(api.users.session, {});
+    expect(legacy.status).toBe("noSchool");
+    if (legacy.status === "noSchool") {
+      expect(legacy.code).toBe("NO_SCHOOL_ACCESS");
+      expect(legacy.memberships).toEqual([]);
+    }
   });
 
   test("a role cannot be forged: unknown args are rejected, the role always comes from the membership", async () => {
@@ -80,9 +82,9 @@ describe("users.session", () => {
     expect(suspended.status).toBe("noSchool");
 
     const second = await t.run((ctx) =>
-      ctx.db.insert("schoolMemberships", { schoolId: B.schoolId, userId: A.users.guardian, email: "g@x.test", displayName: "G", role: "student", status: "active", permissionSets: [], studentId: B.studentA }),
+      ctx.db.insert("schoolMemberships", { schoolId: B.schoolId, userId: A.users.student, email: "g@x.test", displayName: "G", role: "student", status: "active", permissionSets: [], studentId: B.studentA }),
     );
-    const g = await as(t, A.users.guardian);
+    const g = await as(t, A.users.student);
     const choose = await g.query(api.users.session, {});
     expect(choose.status).toBe("noSchool");
     if (choose.status === "noSchool") {
@@ -102,28 +104,21 @@ describe("users.session", () => {
   });
 });
 
-describe("users.studentContext (guardian child switching)", () => {
-  test("guardian: linked child OK; unlinked child and other school's child are NOT_FOUND", async () => {
-    const { t, A, B } = await setup();
-    const g = await as(t, A.users.guardian);
-    const ctx = await g.query(api.users.studentContext, { studentId: A.studentA });
-    expect(ctx).toMatchObject({ studentId: A.studentA, relation: "guardian" });
-    expect(await errorCode(g.query(api.users.studentContext, { studentId: A.studentB }))).toBe("NOT_FOUND");
-    expect(await errorCode(g.query(api.users.studentContext, { studentId: B.studentA }))).toBe("NOT_FOUND");
+describe("legacy guardian sign-ins (removed account type)", () => {
+  test("a guardian membership next to a real one is ignored: only the real membership is offered", async () => {
+    const { t, A } = await setup();
+    // Same user also holds a leftover guardian membership (e.g. a teacher who used to be a guardian).
+    await t.run((ctx) => ctx.db.insert("schoolMemberships", { schoolId: A.schoolId, userId: A.users.classTeacher, displayName: "Old", role: "student", status: "active", permissionSets: [], guardianId: A.parentContactId }));
+    const s = await (await as(t, A.users.classTeacher)).query(api.users.session, {});
+    if (s.status !== "signedIn") throw new Error(s.status);
+    expect(s.viewer.role).toBe("teacher");
+    expect(s.memberships.map((m) => m.membershipId)).toEqual([A.memberships.classTeacher]);
+    // Choosing the guardian membership explicitly is refused like any membership that is not yours.
+    const chosen = await (await as(t, A.users.legacyGuardian)).query(api.users.session, { membershipId: A.memberships.legacyGuardian });
+    expect(chosen.status).toBe("noSchool");
   });
 
-  test("student: only self; teacher and admin have no student-portal context", async () => {
-    const { t, A } = await setup();
-    const s = await as(t, A.users.student);
-    expect((await s.query(api.users.studentContext, { studentId: A.studentA })).relation).toBe("self");
-    expect(await errorCode(s.query(api.users.studentContext, { studentId: A.studentB }))).toBe("NOT_FOUND");
-    for (const u of [A.users.classTeacher, A.users.admin]) {
-      expect(await errorCode((await as(t, u)).query(api.users.studentContext, { studentId: A.studentA }))).toBe("NOT_FOUND");
-    }
-  });
-
-  test("signed out → UNAUTHENTICATED", async () => {
-    const { t, A } = await setup();
-    expect(await errorCode(t.query(api.users.studentContext, { studentId: A.studentA }))).toBe("UNAUTHENTICATED");
+  test("users.studentContext (guardian child switching) no longer exists", () => {
+    expect((usersModule as Record<string, unknown>).studentContext).toBeUndefined();
   });
 });

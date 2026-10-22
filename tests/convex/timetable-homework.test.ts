@@ -84,19 +84,19 @@ describe("homework lifecycle", () => {
     expect(await errorCode(teacher.mutation(api.homework.create, { ...hw, sectionId: B.sectionA }))).toBe("NOT_FOUND");
     const { homeworkId } = await teacher.mutation(api.homework.create, hw);
     const notes = await t.run(async (ctx) => (await ctx.db.query("notifications").collect()).filter((n) => n.type === "homework"));
-    // Asha's own account + her guardian.
-    expect(notes.map((n) => n.userId).sort()).toEqual([A.users.student, A.users.guardian].sort());
+    // Asha's own account only (no parent/guardian accounts exist).
+    expect(notes.map((n) => n.userId)).toEqual([A.users.student]);
     expect(await errorCode(classTeacher.mutation(api.homework.update, { homeworkId, title: "Hijack" }))).toBe("FORBIDDEN");
     expect((await teacher.query(api.homework.listMine, {})).map((h) => h.homeworkId)).toEqual([homeworkId]);
   });
 
-  test("students submit only their own work for their section; guardians cannot submit; review notifies once", async () => {
+  test("students submit only their own work for their section; a legacy guardian sign-in cannot submit; review notifies once", async () => {
     const { t, A } = await setup();
     const teacher = await as(t, A.users.subjectTeacher);
     const { homeworkId } = await teacher.mutation(api.homework.create, { sectionId: A.sectionA, subjectId: A.subjectId, title: "Essay", description: "Write", dueDate: addDays(TODAY, 3) });
     const student = await as(t, A.users.student);
-    const guardian = await as(t, A.users.guardian);
-    expect(await errorCode(guardian.mutation(api.homework.submit, { homeworkId, content: "x" }))).toBe("FORBIDDEN");
+    const legacyGuardian = await as(t, A.users.legacyGuardian);
+    expect(await errorCode(legacyGuardian.mutation(api.homework.submit, { homeworkId, content: "x" }))).toBe("NO_SCHOOL_ACCESS");
     // A student of another section cannot see or submit it.
     const otherUser = await t.run(async (ctx) => {
       const u = await ctx.db.insert("users", { email: "b@x.test" });
@@ -116,7 +116,7 @@ describe("homework lifecycle", () => {
     await teacher.mutation(api.homework.review, { submissionId: s1.submissionId, feedback: "Good" });
     await teacher.mutation(api.homework.review, { submissionId: s1.submissionId, feedback: "Good!" });
     const reviews = await t.run(async (ctx) => (await ctx.db.query("notifications").collect()).filter((n) => n.title === "Homework reviewed"));
-    expect(reviews).toHaveLength(2); // student + guardian, once each despite two reviews
+    expect(reviews).toHaveLength(1); // the student, once despite two reviews
     expect(await errorCode(student.mutation(api.homework.submit, { homeworkId, content: "late edit" }))).toBe("CONFLICT");
     const own = await student.query(api.homework.get, { homeworkId });
     expect(own.submission?.feedback).toBe("Good!");

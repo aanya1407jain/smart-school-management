@@ -110,7 +110,7 @@ function HomeworkFormModal({ open, onOpenChange, existing }: { open: boolean; on
         toast({ title: "Homework updated" });
       } else {
         const r = await services.homework.create(form);
-        toast({ title: "Homework assigned", description: `Visible to Class ${r.sectionLabel} only · ${r.notified} students & guardians notified.` });
+        toast({ title: "Homework assigned", description: `Visible to Class ${r.sectionLabel} only · ${r.notified} students notified.` });
         setForm({ title: "", description: "", subjectId: "", sectionId: "", dueDate: addDays(todayISO(), 3), attachmentName: null });
       }
       onOpenChange(false);

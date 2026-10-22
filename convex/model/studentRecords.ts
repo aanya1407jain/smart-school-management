@@ -4,7 +4,7 @@
  * (academics.getStudentProfile).
  *
  * These helpers do NOT authorize: every caller must first resolve the student
- * through an access check (requireStudentAccess / requireGuardianStudentAccess
+ * through an access check (requireStudentAccess / requireOwnStudentAccess
  * / the portal resolver) and decide which sections it may include. Every
  * helper returns explicit, minimal fields — never a spread database document.
  * Amounts are returned in minor units (paise); the UI formats them.
@@ -82,8 +82,12 @@ export function studentFields(s: Doc<"students">) {
   };
 }
 
-/** Guardians of a student. Contact details only when `withContact` (school staff with full access, or the family itself). */
-export async function guardiansOf(ctx: QueryCtx, student: Doc<"students">, withContact: boolean) {
+/**
+ * Parent contacts of a student (contact data only — never an account). Phone /
+ * email only when `withContact` (school staff with full access, or the
+ * student themself).
+ */
+export async function parentContactsOf(ctx: QueryCtx, student: Doc<"students">, withContact: boolean) {
   const links = (await ctx.db.query("guardianLinks").withIndex("by_student", (q) => q.eq("studentId", student._id)).collect())
     .filter((l) => l.schoolId === student.schoolId);
   const out = [];
@@ -91,7 +95,7 @@ export async function guardiansOf(ctx: QueryCtx, student: Doc<"students">, withC
     const g = await ctx.db.get(l.guardianId);
     if (!g || g.schoolId !== student.schoolId) continue;
     out.push({
-      guardianId: g._id,
+      contactId: g._id,
       name: g.name,
       relationship: l.relationship,
       isPrimary: l.isPrimary,

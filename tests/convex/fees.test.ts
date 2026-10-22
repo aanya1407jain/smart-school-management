@@ -147,16 +147,16 @@ describe("payments, concessions and receipts", () => {
 });
 
 describe("authorization and isolation", () => {
-  test("teachers and students cannot write fees; students/guardians read only their own ledger", async () => {
+  test("teachers and students cannot write fees; students read only their own ledger; a legacy guardian sign-in reads none", async () => {
     const { t, A, B, admin, structureId } = await setup();
     await admin.mutation(api.fees.assignStructure, { structureId, target: { kind: "class", classId: A.classId } });
     const teacher = await as(t, A.users.classTeacher);
     const student = await as(t, A.users.student);
-    const guardian = await as(t, A.users.guardian);
+    const legacyGuardian = await as(t, A.users.legacyGuardian);
     expect(await errorCode(teacher.mutation(api.fees.recordPayment, { studentId: A.studentA, amountMinor: 1, method: "cash", paidOn: "2026-06-01", clientRequestId: "t-12345678" }))).toBe("FORBIDDEN");
     expect(await errorCode(student.mutation(api.fees.addConcession, { studentId: A.studentA, kind: "fixed", value: 100, reason: "x" }))).toBe("FORBIDDEN");
     expect((await student.query(api.fees.studentLedger, { studentId: A.studentA })).totals.grossMinor).toBe(30000);
-    expect((await guardian.query(api.fees.studentLedger, { studentId: A.studentA })).totals.grossMinor).toBe(30000);
+    expect(await errorCode(legacyGuardian.query(api.fees.studentLedger, { studentId: A.studentA }))).toBe("NO_SCHOOL_ACCESS");
     expect(await errorCode(student.query(api.fees.studentLedger, { studentId: A.studentB }))).toBe("NOT_FOUND");
     expect(await errorCode(teacher.query(api.fees.studentLedger, { studentId: A.studentA }))).toBe("NOT_FOUND");
     expect(await errorCode(admin.query(api.fees.studentLedger, { studentId: B.studentA }))).toBe("NOT_FOUND");
@@ -214,12 +214,11 @@ describe("AP-01 scenarios from PR #11 (final API)", () => {
     expect(structures[0].assignedCount).toBe(2);
   });
 
-  test("payments issue sequential receipts, update the ledger, notify student and guardian, and reverse once", async () => {
+  test("payments issue sequential receipts, update the ledger, notify the student (only), and reverse once", async () => {
     const t = makeTest();
     const f = await createSchool(t, "school-b");
     const admin = await as(t, f.users.admin);
     const student = await as(t, f.users.student);
-    const guardian = await as(t, f.users.guardian);
     const { structureId } = await admin.mutation(api.fees.createStructure, {
       name: "Standard Fee", classIds: [f.classId], activate: true, components: [{ label: "Tuition", amountMinor: 400000 }],
       installments: [{ label: "Installment 1", dueDate: "2026-05-01", amountMinor: 200000 }, { label: "Installment 2", dueDate: "2026-09-01", amountMinor: 200000 }],
@@ -248,7 +247,8 @@ describe("AP-01 scenarios from PR #11 (final API)", () => {
     expect(studentFees).toHaveLength(2);
     expect(studentFees.some((n) => n.message.includes(p1.receiptNo))).toBe(true);
     expect(studentFees.some((n) => n.message.includes(p2.receiptNo))).toBe(true);
-    expect((await guardian.query(api.notifications.list, {})).some((n) => n.type === "fees")).toBe(true);
+    // No parent/guardian accounts: a leftover guardian sign-in gets no fee notifications.
+    expect(await t.run(async (ctx) => (await ctx.db.query("notifications").collect()).some((n) => n.userId === f.users.legacyGuardian))).toBe(false);
 
     await admin.mutation(api.fees.reversePayment, { paymentId: p2.paymentId, reason: "Cheque bounce / duplicate" });
     const after = await student.query(api.fees.studentLedger, { studentId: f.studentA });

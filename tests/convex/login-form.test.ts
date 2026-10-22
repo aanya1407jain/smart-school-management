@@ -12,7 +12,7 @@ const messages = (loginId: string) => {
 };
 
 describe("login form", () => {
-  test.each(["ADMIN-001", "TCH-00001", "STU-2026-00001", "GRD-00001", " stu-2026-00001 ", "tch-00124"])("accepts Login ID %j", (id) => {
+  test.each(["ADMIN-001", "TCH-00001", "STU-2026-00001", " stu-2026-00001 ", "tch-00124"])("accepts Login ID %j", (id) => {
     expect(parse(id).success).toBe(true);
   });
 

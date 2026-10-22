@@ -244,7 +244,7 @@ export function noticeVisibleTo(db: Database, notice: Notice, user: UserAccount)
     const myClasses = new Set(db.sections.filter((s) => mySections.has(s.id)).map((s) => s.classId));
     return (a.classIds ?? []).some((id) => myClasses.has(id));
   }
-  // Student / guardian: match any linked student's class or section.
+  // Student: match the linked student's class or section.
   return (user.studentIds ?? []).some((sid) => {
     const enr = currentEnrollment(db, sid);
     if (!enr) return false;
@@ -270,7 +270,7 @@ export function noticeRecipients(db: Database, notice: Notice): UserAccount[] {
   return db.users.filter((u) => u.role !== "admin" && noticeVisibleTo(db, notice, u));
 }
 
-/** Student-portal accounts (student + guardians) that can see a given student. */
+/** Student accounts that can see a given student (the student themself). */
 export function accountsForStudent(db: Database, studentId: ID): UserAccount[] {
   return db.users.filter((u) => u.role === "student" && u.studentIds?.includes(studentId));
 }

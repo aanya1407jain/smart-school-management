@@ -17,7 +17,7 @@ import { accountTarget, writeAudit } from "./model/audit";
 
 /**
  * Members of the caller's school (admin), newest first, PAGINATED — a school
- * has one membership per staff member, student and guardian (thousands).
+ * has one membership per staff member and student (thousands).
  * Use with `usePaginatedQuery(api.memberships.list, { role }, { initialNumItems: 50 })`.
  */
 export const list = schoolQuery({
@@ -32,7 +32,9 @@ export const list = schoolQuery({
       ...result,
       page: result.page.map((m) => ({
         _id: m._id, loginId: m.loginId ?? null, email: m.email ?? null, displayName: m.displayName, role: m.role, status: m.status,
-        permissionSets: m.permissionSets, teacherId: m.teacherId ?? null, studentId: m.studentId ?? null, guardianId: m.guardianId ?? null,
+        permissionSets: m.permissionSets, teacherId: m.teacherId ?? null, studentId: m.studentId ?? null,
+        /** A removed guardian sign-in awaiting migrations:removeGuardianAccounts; never grants access. */
+        legacy: !!m.guardianId,
         activatedAt: m.activatedAt ?? null,
       })),
     };
@@ -51,6 +53,7 @@ export const updateAccess = schoolMutation({
     const target = await getInSchool(ctx, "schoolMemberships", targetMembershipId, "Member");
     if (target._id === ctx.actor.membershipId) throw forbidden("You cannot change your own access.");
     if (status === "invited") throw invalid("Status can only be set to active or suspended.");
+    if (target.guardianId) throw invalid("This sign-in type no longer exists; accounts are for administrators, teachers and students only.");
     if (status && target.status === "invited") throw invalid("This account has no credentials yet. Issue a temporary password first.");
     if (status === "active" && !target.userId) throw invalid("This account has no credentials yet. Issue a temporary password first.");
     if (permissionSets && target.role !== "admin") throw invalid("Permission sets can only be added to administrative memberships.");

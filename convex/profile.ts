@@ -1,6 +1,6 @@
 /**
  * The signed-in STAFF member's own profile (admin and teacher portals).
- * Students and guardians use the student-portal profile (studentPortal.ts).
+ * Students use the student-portal profile (studentPortal.ts).
  *
  *  - mine:       account (Login ID, role, accountant-only flag) and, for a
  *                teacher, their own teacher record and current-year duties.

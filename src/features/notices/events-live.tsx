@@ -25,7 +25,7 @@ const KIND_TONE: Record<Kind, "teal" | "lavender" | "sapphire" | "neutral"> = { 
 
 function audienceText(a: Audience) {
   if (a.kind === "all") return "Whole school";
-  if (a.kind === "roles") return a.roles.map((r) => (r === "teacher" ? "Teachers" : r === "student" ? "Students & guardians" : "Administrators")).join(", ");
+  if (a.kind === "roles") return a.roles.map((r) => (r === "teacher" ? "Teachers" : r === "student" ? "Students" : "Administrators")).join(", ");
   if (a.kind === "classes") return `${a.classIds.length} class${a.classIds.length === 1 ? "" : "es"}`;
   return `${a.sectionIds.length} section${a.sectionIds.length === 1 ? "" : "s"}`;
 }
@@ -120,7 +120,7 @@ function EventModal({ event, onClose }: { event?: EventRow; onClose: () => void 
         </FormField>
         <FormField label="Audience">
           <Select value={kind === "holiday" ? "all" : scope} onChange={(e) => setScope(e.target.value)} disabled={kind === "holiday"}>
-            <option value="all">Whole school</option><option value="role:teacher">Teachers only</option><option value="role:student">Students & guardians</option><option value="classes">Specific classes</option>
+            <option value="all">Whole school</option><option value="role:teacher">Teachers only</option><option value="role:student">Students</option><option value="classes">Specific classes</option>
           </Select>
         </FormField>
         <FormField label="Starts" required><Input type="date" value={startDate} onChange={(e) => { setStart(e.target.value); if (endDate < e.target.value) setEnd(e.target.value); }} /></FormField>

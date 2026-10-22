@@ -48,12 +48,11 @@ async function main() {
   /** What users.session would return for these demo accounts (role + linked students are server-derived). */
   const SERVER_STUDENTS: Record<string, { studentId: string; name: string }[]> = {
     "student@asteracademy.edu": [{ studentId: "cvx_aarav", name: "Aarav Sharma" }],
-    "guardian@asteracademy.edu": [{ studentId: "cvx_aarav", name: "Aarav Sharma" }, { studentId: "cvx_ananya", name: "Ananya Sharma" }],
   };
   /** Demo Login IDs (convex/seedData/asterAcademy.ts) — the key the bridge binds by. */
   const LOGIN_IDS: Record<string, string> = {
     "admin@asteracademy.edu": "ADMIN-001", "teacher@asteracademy.edu": "TCH-00001", "meera.iyer@asteracademy.edu": "TCH-00002",
-    "sunita.rao@asteracademy.edu": "TCH-00003", "student@asteracademy.edu": "STU-2026-00001", "guardian@asteracademy.edu": "GRD-00001",
+    "sunita.rao@asteracademy.edu": "TCH-00003", "student@asteracademy.edu": "STU-2026-00001",
   };
   const idOf = (email: string) => LOGIN_IDS[email] ?? email.split("@")[0].toUpperCase();
   const login = (email: string, role: "admin" | "teacher" | "student") => {
@@ -119,7 +118,7 @@ async function main() {
   check("9. Admin cannot EDIT 10-A", r9.rejected && r9.code === "FORBIDDEN", r9.code);
   services.auth.clearIdentity();
 
-  // ---------------- Student & guardian
+  // ---------------- Student
   login("student@asteracademy.edu", "student");
   const mine = await services.attendance.getStudentAttendance("stu_aarav");
   check("10. Student can view own attendance", mine.stats.total > 0);
@@ -128,14 +127,11 @@ async function main() {
   check("11. Student cannot modify (or open the register)", r11.rejected && r11b.rejected, `${r11.code}/${r11b.code}`);
   services.auth.clearIdentity();
 
-  login("guardian@asteracademy.edu", "student");
-  const g1 = await services.attendance.getStudentAttendance("stu_aarav");
-  const g2 = await services.attendance.getStudentAttendance("stu_ananya");
-  check("12. Guardian can view both linked students", g1.stats.total > 0 && g2.stats.total > 0);
-  const g3 = await rejects(() => services.attendance.getStudentAttendance("stu_045"));
-  check("12b. Guardian cannot view an unlinked student", g3.rejected);
-  const r13 = await rejects(() => services.attendance.saveRegister("sec_8b", DAY, allPresent("sec_8b")));
-  check("13. Guardian cannot modify attendance", r13.rejected && r13.code === "FORBIDDEN", r13.code);
+  // Account roles are admin, teacher and student only: the former demo guardian login binds nothing.
+  const gb = services.auth.bindIdentity({ loginId: "GRD-00001", email: "guardian@asteracademy.edu", role: "student", displayName: "Priya Sharma", permissionSets: [], school: DEMO, students: [{ studentId: "cvx_aarav", name: "Aarav Sharma" }, { studentId: "cvx_ananya", name: "Ananya Sharma" }] });
+  const g3 = await rejects(() => services.attendance.getStudentAttendance("stu_aarav"));
+  check("12. The former demo guardian login binds no demo persona and reads nothing", !gb.ok && g3.rejected && g3.code === "UNAUTHENTICATED", g3.code);
+  check("13. No demo account is a guardian/parent account", !readDb().users.some((u) => "guardianId" in u));
   services.auth.clearIdentity();
 
   // ---------------- Ownership follows the class-teacher assignment
@@ -157,12 +153,12 @@ async function main() {
   check("17. Unknown server identity binds nothing (no actor)", !b1.ok && r17.rejected && r17.code === "UNAUTHENTICATED", r17.code);
   const b2 = services.auth.bindIdentity({ loginId: idOf("teacher@asteracademy.edu"), email: "teacher@asteracademy.edu", role: "admin", displayName: "x", permissionSets: [], school: DEMO, students: [] });
   check("18. Role disagreeing with the account's record is not bound", !b2.ok && services.auth.getSessionSnapshot().user === null);
-  // Server lists only Aarav for this guardian → Ananya must stay out of reach even though demo data links her.
-  const b3 = services.auth.bindIdentity({ loginId: idOf("guardian@asteracademy.edu"), email: "guardian@asteracademy.edu", role: "student", displayName: "Priya Sharma", permissionSets: [], school: DEMO, students: [{ studentId: "cvx_aarav", name: "Aarav Sharma" }] });
+  // A student account's students come only from the server list: another student stays out of reach.
+  const b3 = services.auth.bindIdentity({ loginId: idOf("student@asteracademy.edu"), email: "student@asteracademy.edu", role: "student", displayName: "Aarav Sharma", permissionSets: [], school: DEMO, students: [{ studentId: "cvx_aarav", name: "Aarav Sharma" }] });
   const r19 = await rejects(() => services.attendance.getStudentAttendance("stu_ananya"));
   let switchRejected = false;
   try { services.auth.setActiveStudent("stu_ananya"); } catch { switchRejected = true; }
-  check("19. Guardian children come only from the server list (unlisted child rejected)", b3.ok && r19.rejected && switchRejected, r19.code);
+  check("19. A student's records come only from the server list (another student rejected)", b3.ok && r19.rejected && switchRejected, r19.code);
   // A server-listed name with no demo-data link is ignored, never added.
   const b4 = services.auth.bindIdentity({ loginId: idOf("student@asteracademy.edu"), email: "student@asteracademy.edu", role: "student", displayName: "Aarav Sharma", permissionSets: [], school: DEMO, students: [{ studentId: "cvx_aarav", name: "Aarav Sharma" }, { studentId: "cvx_x", name: db.students.find((x) => x.id === "stu_045")!.firstName + " " + db.students.find((x) => x.id === "stu_045")!.lastName }] });
   check("20. A student can never be bound to another student's records", b4.ok && JSON.stringify(b4.ok && b4.user.studentIds) === JSON.stringify(["stu_aarav"]));
@@ -179,13 +175,9 @@ async function main() {
     const enr = d.enrollments.find((e) => e.studentId === sid && e.academicYearId === d.school.currentAcademicYearId && e.status === "active");
     return d.attendance.filter((a) => a.sectionId === enr?.sectionId && a.entries[sid]).map((a) => ({ date: a.date, status: a.entries[sid] })).sort((a, b) => b.date.localeCompare(a.date));
   };
-  login("guardian@asteracademy.edu", "student");
-  const gAarav = await services.attendance.getStudentAttendance("stu_aarav");
-  const gAnanya = await services.attendance.getStudentAttendance("stu_ananya");
-  check("22. Guardian sees each linked child's OWN demo attendance (not a shared fixed list)",
-    JSON.stringify(gAarav.records) === JSON.stringify(ownRecords("stu_aarav")) && JSON.stringify(gAnanya.records) === JSON.stringify(ownRecords("stu_ananya"))
-      && JSON.stringify(gAarav.records) !== JSON.stringify(gAnanya.records) && gAarav.records.length > 7,
-    `aarav ${gAarav.records.length} days, ananya ${gAnanya.records.length} days`);
+  check("22. Each student's OWN demo attendance differs (not a shared fixed list)",
+    JSON.stringify(ownRecords("stu_aarav")) !== JSON.stringify(ownRecords("stu_ananya")) && ownRecords("stu_aarav").length > 7,
+    `aarav ${ownRecords("stu_aarav").length} days, ananya ${ownRecords("stu_ananya").length} days`);
   login("student@asteracademy.edu", "student");
   const own = await services.attendance.getStudentAttendance("stu_aarav");
   const r23 = await rejects(() => services.attendance.getStudentAttendance("stu_ananya"));

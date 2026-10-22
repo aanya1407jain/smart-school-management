@@ -3,7 +3,7 @@
  * LIVE student-record panels on the admin student profile:
  *  - StudentDocuments: certificates / ID proofs (files kind student_document).
  *    Upload and delete: administrators (students:write, audited). Read: the
- *    administrators and the student / linked guardians only (server rule).
+ *    administrators and the student themself only (server rule).
  *  - EnrollmentHistory: every enrollment across years (academics.enrollmentHistory).
  *  - EnrollmentActions: withdraw / mark completed (academics.endEnrollment) or
  *    transfer to another section (academics.enrollStudent). History is kept and
@@ -22,7 +22,7 @@ import { formatDate, todayISO } from "@/lib/utils/dates";
 export function StudentDocuments({ studentId, canManage }: { studentId: string; canManage: boolean }) {
   return (
     <Card data-testid="student-documents">
-      <CardHeader title="Documents" description="Birth certificate, transfer certificate, ID proofs. Visible to administrators and the student's family only." action={canManage ? <UploadButton ownerType="student" ownerId={studentId} kind="student_document" label="Upload document" /> : undefined} />
+      <CardHeader title="Documents" description="Birth certificate, transfer certificate, ID proofs. Visible to administrators and the student only." action={canManage ? <UploadButton ownerType="student" ownerId={studentId} kind="student_document" label="Upload document" /> : undefined} />
       <div className="p-5 pt-2"><AttachmentList ownerType="student" ownerId={studentId} canRemove={canManage} emptyText="No documents uploaded yet." /></div>
     </Card>
   );

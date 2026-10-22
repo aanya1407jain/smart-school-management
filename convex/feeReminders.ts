@@ -8,7 +8,7 @@
  *     (dedupeKey `fees.due:<studentFeeId>`), and
  *   - an "overdue" reminder once its due date has passed, for up to
  *     OVERDUE_LOOKBACK_DAYS (dedupeKey `fees.overdue:<studentFeeId>`).
- * Recipients are the student's own active login and linked guardians' logins
+ * Recipients are the student's own active login
  * (userIdsForStudent). notifyUsers skips any user who already has a
  * notification with the same key, so each recipient gets each reminder for an
  * installment at most once — re-runs, retries and overlapping days are safe.

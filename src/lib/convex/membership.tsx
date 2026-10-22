@@ -3,8 +3,8 @@
  * Which school membership the UI is acting as.
  *
  * The backend derives the school and role from the session; the client only
- * CHOOSES among the signed-in user's own memberships (e.g. a teacher who is
- * also a guardian). Every schoolQuery/schoolMutation accepts that choice as an
+ * CHOOSES among the signed-in user's own memberships (e.g. a principal who
+ * works at two schools). Every schoolQuery/schoolMutation accepts that choice as an
  * optional `membershipId`, which `useSchoolQuery` / `useSchoolMutation` add
  * automatically. The backend verifies it belongs to the caller.
  */

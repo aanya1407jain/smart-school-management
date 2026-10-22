@@ -11,7 +11,7 @@ import type { CurrentUser } from "@/lib/services/auth.service";
  * permission sets and the linked students (Convex student ids). Nothing is
  * read from, or written to, the demo data.
  */
-export function liveStudentPortalUser(viewer: Pick<Viewer, "membershipId" | "loginId" | "email" | "role" | "displayName" | "permissionSets" | "students" | "guardian">): CurrentUser {
+export function liveStudentPortalUser(viewer: Pick<Viewer, "membershipId" | "loginId" | "email" | "role" | "displayName" | "permissionSets" | "students">): CurrentUser {
   return {
     id: viewer.membershipId,
     loginId: viewer.loginId ?? undefined,
@@ -20,7 +20,6 @@ export function liveStudentPortalUser(viewer: Pick<Viewer, "membershipId" | "log
     displayName: viewer.displayName,
     phone: "",
     studentIds: viewer.students.map((s) => s.studentId),
-    ...(viewer.guardian ? { guardianId: viewer.guardian.guardianId } : {}),
     permissionSets: [...viewer.permissionSets],
   };
 }
@@ -52,6 +51,6 @@ export function liveStaffUser(viewer: Pick<Viewer, "membershipId" | "loginId" | 
  * The live (Convex-only) workspace user for any membership the demo data does
  * not know. Every role has a live workspace now; the role is the SERVER's.
  */
-export function liveWorkspaceUser(viewer: Pick<Viewer, "membershipId" | "loginId" | "email" | "role" | "displayName" | "permissionSets" | "students" | "guardian" | "teacher">): CurrentUser {
+export function liveWorkspaceUser(viewer: Pick<Viewer, "membershipId" | "loginId" | "email" | "role" | "displayName" | "permissionSets" | "students" | "teacher">): CurrentUser {
   return viewer.role === "student" ? liveStudentPortalUser(viewer) : liveStaffUser(viewer);
 }

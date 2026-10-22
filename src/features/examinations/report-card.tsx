@@ -2,7 +2,7 @@
 /**
  * Printable per-student report card for ONE published examination. Data comes
  * from published `results` snapshots only (studentPortal.myResults for the
- * student/guardian; exams.sectionResults for staff), so unpublished marks can
+ * student; exams.sectionResults for staff), so unpublished marks can
  * never appear here.
  */
 import { Printer } from "lucide-react";

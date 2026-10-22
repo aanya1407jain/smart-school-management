@@ -27,12 +27,12 @@ import { cn } from "@/lib/utils/cn";
 /* ------------------------------------------------------------------ */
 
 /**
- * Student profile for admin / teacher / family views.
+ * Student profile for admin / teacher / student views.
  *  - Demo personas viewing a record of the in-browser demo dataset (ids like
  *    "stu_aarav") get the demo view — demo data never reaches real accounts.
  *  - Everything else is a REAL record: academics.getStudentProfile decides on
  *    the server whether the caller may see it (school staff, the assigned
- *    teacher, or the student / a linked guardian).
+ *    teacher, or the student themself).
  */
 export function StudentProfileView({ studentId, backHref }: { studentId: string; backHref?: string }) {
   const { dataSource } = useSession();
@@ -81,7 +81,7 @@ function NotFound({ backHref }: { backHref?: string }) {
 
 type AttendanceRecord = { date: string; status: string };
 
-type GuardianVM = {
+type ParentContactVM = {
   id: string;
   name: string;
   relation: string;
@@ -117,8 +117,8 @@ function normalizeProfile(raw: ServerProfile) {
     documents: [] as { id?: string; name?: string; kind?: string; sizeKb?: number; uploadedAt?: string }[],
   };
   const classLabel = enrollment ? enrollment.sectionDisplayName ?? [enrollment.className, enrollment.sectionName].filter(Boolean).join(" - ") : "";
-  const guardians: GuardianVM[] = raw.guardians.map((g) => ({
-    id: g.guardianId as string,
+  const parentContacts: ParentContactVM[] = raw.parentContacts.map((g) => ({
+    id: g.contactId as string,
     name: g.name,
     relation: g.relationship,
     occupation: g.occupation ?? undefined,
@@ -138,7 +138,7 @@ function normalizeProfile(raw: ServerProfile) {
     classTeacher: enrollment?.classTeacher ?? undefined,
     room: enrollment?.room ?? undefined,
     teachers: [] as { subjectId: string; subject: string; teacher: string }[],
-    guardians,
+    parentContacts,
     account: undefined as { email?: string } | undefined,
     attendance: summarizeAttendance(records),
     homework: raw.homework,
@@ -197,7 +197,7 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
   const isAdmin = can("students:write");
   const pct = p.attendance.stats.percentage;
   const latest = p.results[0];
-  const primaryGuardian = p.guardians[0];
+  const primaryContact = p.parentContacts[0];
   const pendingHw = p.homework.filter((h) => { const st = homeworkState(h); return st === "pending" || st === "overdue"; }).length;
 
   const tabs = [
@@ -208,7 +208,7 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
     { value: "exams", label: "Examinations", count: p.results.length },
     { value: "homework", label: "Homework", count: p.homework.length },
     ...(p.access !== "assigned" ? [{ value: "documents", label: "Documents" }] : []),
-    { value: "guardian", label: "Guardian" },
+    { value: "parent", label: "Parent contact" },
   ];
 
   return (
@@ -272,21 +272,21 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
               </dl>
             </Card>
             <Card>
-              <CardHeader title="Primary guardian" />
+              <CardHeader title="Parent contact" />
               <div className="p-5">
-                {primaryGuardian ? (
+                {primaryContact ? (
                   <div className="flex items-start gap-3">
-                    <Avatar name={primaryGuardian.name} />
+                    <Avatar name={primaryContact.name} />
                     <div className="text-sm">
-                      <p className="font-semibold text-ink">{primaryGuardian.name}</p>
+                      <p className="font-semibold text-ink">{primaryContact.name}</p>
                       <p className="text-ink-muted">
-                        {primaryGuardian.relation}{primaryGuardian.occupation ? ` · ${primaryGuardian.occupation}` : ""}
+                        {primaryContact.relation}{primaryContact.occupation ? ` · ${primaryContact.occupation}` : ""}
                       </p>
-                      {primaryGuardian.phone && <p className="mt-2 text-ink-soft">{primaryGuardian.phone}</p>}
-                      {primaryGuardian.email && <p className="text-ink-soft">{primaryGuardian.email}</p>}
+                      {primaryContact.phone && <p className="mt-2 text-ink-soft">{primaryContact.phone}</p>}
+                      {primaryContact.email && <p className="text-ink-soft">{primaryContact.email}</p>}
                     </div>
                   </div>
-                ) : <EmptyState title="No guardian linked" />}
+                ) : <EmptyState title="No parent contact recorded" />}
               </div>
               {p.account?.email && (
                 <p className="border-t border-line/60 px-5 py-3 text-[12.5px] text-ink-muted">
@@ -405,12 +405,12 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
           </TabsContent>
         )}
 
-        <TabsContent value="guardian">
-          {p.guardians.length === 0 ? (
-            <Card><EmptyState title="No guardian linked" /></Card>
+        <TabsContent value="parent">
+          {p.parentContacts.length === 0 ? (
+            <Card><EmptyState title="No parent contact recorded" /></Card>
           ) : (
             <div className="grid gap-4 md:grid-cols-2">
-              {p.guardians.map((g) => (
+              {p.parentContacts.map((g) => (
                 <Card key={g.id} className="p-5">
                   <div className="flex items-start gap-3">
                     <Avatar name={g.name} size="lg" />
@@ -429,7 +429,7 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
                   </div>
                   {g.otherChildren.length > 0 && (
                     <div className="mt-4 rounded-xl bg-alabaster p-3 text-sm">
-                      <p className="text-[12px] font-semibold uppercase tracking-wide text-ink-muted">Also guardian of</p>
+                      <p className="text-[12px] font-semibold uppercase tracking-wide text-ink-muted">Also parent contact for</p>
                       {g.otherChildren.map((c) => (
                         <p key={c.id} className="mt-1">
                           {isAdmin

@@ -31,9 +31,10 @@ const schema = z.object({
   classId: z.string().min(1, "Select a class"),
   sectionId: z.string().min(1, "Select a section"),
   status: z.enum(["active", "inactive", "transferred", "alumni"]),
-  guardian: z.object({
-    name: z.string().trim().min(2, "Guardian name is required"),
-    relation: z.enum(["Mother", "Father", "Guardian", "Grandparent"]),
+  // Parent contact: contact details only (no account is created for this person).
+  parentContact: z.object({
+    name: z.string().trim().min(2, "Parent name is required"),
+    relation: z.enum(["Mother", "Father", "Grandparent", "Other"]),
     phone,
     email: z.union([z.literal(""), z.string().trim().email("Enter a valid email")]),
     occupation: z.string(),
@@ -45,7 +46,7 @@ type Values = z.infer<typeof schema>;
 const EMPTY: Values = {
   firstName: "", lastName: "", gender: "female", dateOfBirth: "", bloodGroup: "O+", email: "", phone: "", address: "",
   admissionDate: todayISO(), classId: "", sectionId: "", status: "active",
-  guardian: { name: "", relation: "Mother", phone: "", email: "", occupation: "" }, assignFees: true,
+  parentContact: { name: "", relation: "Mother", phone: "", email: "", occupation: "" }, assignFees: true,
 };
 
 export function StudentForm({ studentId }: { studentId?: string }) {
@@ -72,7 +73,10 @@ export function StudentForm({ studentId }: { studentId?: string }) {
   useEffect(() => {
     if (editable.data && opts.data) {
       const sec = opts.data.sections.find((s) => s.id === editable.data!.sectionId);
-      reset({ ...editable.data, email: editable.data.email, classId: sec?.classId ?? "", assignFees: false });
+      const { guardian: contact, ...rest } = editable.data;
+      // The demo dataset may still hold a relation outside the current list; map it to "Other".
+      const relation = (["Mother", "Father", "Grandparent"] as const).find((r) => r === contact.relation) ?? "Other";
+      reset({ ...rest, email: editable.data.email, classId: sec?.classId ?? "", assignFees: false, parentContact: { ...contact, relation } });
     }
   }, [editable.data, opts.data, reset]);
 
@@ -88,7 +92,8 @@ export function StudentForm({ studentId }: { studentId?: string }) {
     setServerError(null);
     try {
       if (studentId) {
-        await services.students.update(studentId, { ...v, guardian: { ...v.guardian } });
+        const { parentContact, ...rest } = v;
+        await services.students.update(studentId, { ...rest, guardian: { ...parentContact } });
         toast({ title: "Student updated", description: `${v.firstName} ${v.lastName}'s details were saved.` });
         router.push(`/admin/students/${studentId}`);
       } else {
@@ -111,12 +116,12 @@ export function StudentForm({ studentId }: { studentId?: string }) {
           bloodGroup: v.bloodGroup,
           classId: cls._id,
           sectionId: section._id,
-          guardian: {
-            name: v.guardian.name,
-            relation: v.guardian.relation,
-            phone: v.guardian.phone,
-            email: v.guardian.email || undefined,
-            occupation: v.guardian.occupation || undefined,
+          parentContact: {
+            name: v.parentContact.name,
+            relation: v.parentContact.relation,
+            phone: v.parentContact.phone,
+            email: v.parentContact.email || undefined,
+            occupation: v.parentContact.occupation || undefined,
           },
         });
         toast({ title: "Student enrolled", description: `${v.firstName} ${v.lastName} is enrolled in ${res.section}.` });
@@ -139,7 +144,7 @@ export function StudentForm({ studentId }: { studentId?: string }) {
     <div className="mx-auto max-w-5xl">
       <PageHeader
         title={studentId ? "Edit student" : "Add student"}
-        description={studentId ? "Update personal, enrollment and guardian details." : "Create the student record, enroll them in a section of the current academic year and link a guardian. Sign-in accounts are created separately in Accounts & Import."}
+        description={studentId ? "Update personal, enrollment and parent contact details." : "Create the student record, enroll them in a section of the current academic year and add a parent contact. Sign-in accounts are created separately in Accounts & Import."}
       />
       <form onSubmit={handleSubmit(onSubmit)} noValidate>
         <Card className="space-y-7 p-5 sm:p-7">
@@ -174,12 +179,12 @@ export function StudentForm({ studentId }: { studentId?: string }) {
             {editing && <FormField label="Status"><Select {...register("status")}><option value="active">Active</option><option value="inactive">Inactive</option><option value="transferred">Transferred</option><option value="alumni">Alumni</option></Select></FormField>}
           </FormSection>
 
-          <FormSection title="Guardian" description="Guardians are linked to students — one guardian can be linked to siblings.">
-            <FormField label="Guardian name" required error={errors.guardian?.name?.message}><Input {...register("guardian.name")} placeholder="e.g. Kavita Menon" /></FormField>
-            <FormField label="Relation" required><Select {...register("guardian.relation")}><option>Mother</option><option>Father</option><option>Guardian</option><option>Grandparent</option></Select></FormField>
-            <FormField label="Guardian phone" required error={errors.guardian?.phone?.message}><Input type="tel" {...register("guardian.phone")} placeholder="+91 98xxx xxxxx" /></FormField>
-            <FormField label="Guardian email" error={errors.guardian?.email?.message}><Input type="email" {...register("guardian.email")} placeholder="Optional" /></FormField>
-            <FormField label="Occupation"><Input {...register("guardian.occupation")} placeholder="Optional" /></FormField>
+          <FormSection title="Parent contact" description="Contact details only — no sign-in is created for this person. Siblings can share the same contact (matched by phone).">
+            <FormField label="Parent name" required error={errors.parentContact?.name?.message}><Input {...register("parentContact.name")} placeholder="e.g. Kavita Menon" /></FormField>
+            <FormField label="Relation" required><Select {...register("parentContact.relation")}><option>Mother</option><option>Father</option><option>Grandparent</option><option>Other</option></Select></FormField>
+            <FormField label="Parent phone" required error={errors.parentContact?.phone?.message}><Input type="tel" {...register("parentContact.phone")} placeholder="+91 98xxx xxxxx" /></FormField>
+            <FormField label="Parent email" error={errors.parentContact?.email?.message}><Input type="email" {...register("parentContact.email")} placeholder="Optional" /></FormField>
+            <FormField label="Occupation"><Input {...register("parentContact.occupation")} placeholder="Optional" /></FormField>
           </FormSection>
 
 
@@ -233,4 +238,4 @@ export function StudentForm({ studentId }: { studentId?: string }) {
       </Modal>
     </div>
   );
-}
+}

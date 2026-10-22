@@ -132,7 +132,7 @@ export function ExamDetail({ examId, area }: { examId: string; area: "admin" | "
               open={!!confirm}
               onOpenChange={(o) => !o && setConfirm(null)}
               title={confirm === "publish" ? "Publish results?" : confirm === "start" ? "Mark exam as in progress?" : confirm === "reopen" ? "Reopen marks entry?" : "Open marks entry?"}
-              description={confirm === "publish" ? "Grades are calculated from the entered marks. Students and guardians will be notified and can view their results immediately." : confirm === "reopen" ? "Results will be hidden from students until you publish again." : "Teachers will be able to enter marks for their subjects and sections."}
+              description={confirm === "publish" ? "Grades are calculated from the entered marks. Students will be notified and can view their results immediately." : confirm === "reopen" ? "Results will be hidden from students until you publish again." : "Teachers will be able to enter marks for their subjects and sections."}
               confirmLabel={confirm === "publish" ? "Publish results" : "Confirm"}
               loading={busy}
               onConfirm={async () => {
@@ -140,7 +140,7 @@ export function ExamDetail({ examId, area }: { examId: string; area: "admin" | "
                 try {
                   if (confirm === "publish") await services.exams.publish(e.id);
                   else await services.exams.setStatus(e.id, confirm === "start" ? "in_progress" : "marks_entry");
-                  toast({ title: confirm === "publish" ? "Results published" : "Exam status updated", description: confirm === "publish" ? "Students and guardians have been notified." : undefined });
+                  toast({ title: confirm === "publish" ? "Results published" : "Exam status updated", description: confirm === "publish" ? "Students have been notified." : undefined });
                 } catch (err) {
                   toast({ title: "Action failed", description: (err as Error).message, tone: "error" });
                 }

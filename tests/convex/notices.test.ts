@@ -119,7 +119,7 @@ describe("Notices and school events (AP-02)", () => {
     const admin = await as(t, f.users.admin);
     const classTeacher = await as(t, f.users.classTeacher); // class teacher of 8-A
     const student = await as(t, f.users.student); // enrolled in 8-A
-    const guardian = await as(t, f.users.guardian); // linked to the 8-A student
+    const legacyGuardian = await as(t, f.users.legacyGuardian); // a leftover guardian sign-in (was linked to the 8-A student)
     const post = async (title: string, audience: Audience) => {
       const { noticeId } = await admin.mutation(api.notices.createDraft, draft(title, audience));
       await admin.mutation(api.notices.publish, { noticeId });
@@ -142,8 +142,9 @@ describe("Notices and school events (AP-02)", () => {
     expect(await errorCode(student.query(api.notices.get, { noticeId: sectionBNoticeId }))).toBe("NOT_FOUND");
     expect((await student.query(api.notices.get, { noticeId: sectionANoticeId })).audienceLabel).toBe("Class 8-A");
 
-    // A guardian sees what their linked child sees.
-    expect(await feedIds(guardian)).toEqual(studentSees);
+    // A leftover guardian sign-in sees nothing (account type removed).
+    expect(await errorCode(feedIds(legacyGuardian))).toBe("NO_SCHOOL_ACCESS");
+    expect(await errorCode(legacyGuardian.query(api.studentPortal.myNotices, { today: "2026-10-12" }))).toBe("NO_SCHOOL_ACCESS");
 
     const teacherSees = await feedIds(classTeacher);
     expect(teacherSees.has(allNoticeId)).toBe(true);
@@ -152,9 +153,10 @@ describe("Notices and school events (AP-02)", () => {
 
     // Notifications follow the same audience.
     const sectionANotified = (await noticeNotifications(t, sectionANoticeId)).map((n) => n.userId);
-    expect(sectionANotified).toEqual(expect.arrayContaining([f.users.student, f.users.guardian, f.users.classTeacher]));
+    expect(sectionANotified).toEqual(expect.arrayContaining([f.users.student, f.users.classTeacher]));
+    expect(sectionANotified).not.toContain(f.users.legacyGuardian);
     expect((await noticeNotifications(t, teacherNoticeId)).some((n) => n.userId === f.users.student)).toBe(false);
-    expect((await noticeNotifications(t, sectionBNoticeId)).some((n) => n.userId === f.users.student || n.userId === f.users.guardian)).toBe(false);
+    expect((await noticeNotifications(t, sectionBNoticeId)).some((n) => n.userId === f.users.student || n.userId === f.users.legacyGuardian)).toBe(false);
 
     // Audience ids are validated against the caller's school (sections and classes); nothing is written.
     const other = await createSchool(t, "school-notices-2b");
@@ -190,7 +192,8 @@ describe("Notices and school events (AP-02)", () => {
     const rows = await noticeNotifications(t, noticeId);
     expect(rows).toHaveLength(notified);
     expect(new Set(rows.map((n) => n.userId)).size).toBe(rows.length);
-    expect(new Set(rows.map((n) => n.userId))).toEqual(new Set([f.users.classTeacher, f.users.subjectTeacher, f.users.student, f.users.guardian]));
+    // (A leftover guardian sign-in is not an active member and gets nothing.)
+    expect(new Set(rows.map((n) => n.userId))).toEqual(new Set([f.users.classTeacher, f.users.subjectTeacher, f.users.student]));
 
     // A normal-priority notice uses the ordinary title.
     const { noticeId: normalId } = await admin.mutation(api.notices.createDraft, draft("Library hours", { kind: "all" }));
@@ -247,7 +250,7 @@ describe("Notices and school events (AP-02)", () => {
     const f = await createSchool(t, "school-notices-5");
     const admin = await as(t, f.users.admin);
     const student = await as(t, f.users.student);
-    const guardian = await as(t, f.users.guardian);
+    const legacyGuardian = await as(t, f.users.legacyGuardian);
     const count = () => t.run(async (ctx) => (await ctx.db.query("notices").collect()).length);
 
     expect(await errorCode(admin.mutation(api.notices.createDraft, draft("   ", { kind: "all" })))).toBe("INVALID_ARGUMENT");
@@ -258,7 +261,7 @@ describe("Notices and school events (AP-02)", () => {
     expect(await errorCode(admin.mutation(api.notices.createDraft, draft("No sections", { kind: "sections", sectionIds: [] })))).toBe("INVALID_ARGUMENT");
     expect(await errorCode(admin.mutation(api.notices.createDraft, draft("No roles", { kind: "roles", roles: [] })))).toBe("INVALID_ARGUMENT");
     expect(await errorCode(student.mutation(api.notices.createDraft, draft("By a student", { kind: "all" })))).toBe("FORBIDDEN");
-    expect(await errorCode(guardian.mutation(api.notices.createDraft, draft("By a guardian", { kind: "sections", sectionIds: [f.sectionA] })))).toBe("FORBIDDEN");
+    expect(await errorCode(legacyGuardian.mutation(api.notices.createDraft, draft("By a legacy guardian sign-in", { kind: "sections", sectionIds: [f.sectionA] })))).toBe("NO_SCHOOL_ACCESS");
     expect(await count()).toBe(0);
 
     // Titles are trimmed; duplicate section ids are collapsed.
@@ -367,7 +370,7 @@ describe("Notices and school events (AP-02)", () => {
     const B = await createSchool(t, "school-notices-8b");
     const admin = await as(t, A.users.admin);
     const student = await as(t, A.users.student);
-    const guardian = await as(t, A.users.guardian);
+    const otherTeacher = await as(t, A.users.subjectTeacher); // another recipient of the same notices
     const teacher = await as(t, A.users.classTeacher);
     const adminB = await as(t, B.users.admin);
     for (const title of ["One", "Two", "Three"]) {
@@ -381,8 +384,8 @@ describe("Notices and school events (AP-02)", () => {
     expect(mine.every((n) => n.userId === A.users.student && n.schoolId === A.schoolId)).toBe(true);
     expect(await student.query(api.notifications.unreadCount, {})).toBe(3);
     const teacherNote = (await teacher.query(api.notifications.list, {}))[0];
-    const guardianNotes = await guardian.query(api.notifications.list, {});
-    expect(guardianNotes).toHaveLength(3);
+    const otherNotes = await otherTeacher.query(api.notifications.list, {});
+    expect(otherNotes).toHaveLength(3);
 
     // Read state.
     await student.mutation(api.notifications.markRead, { notificationId: mine[0]._id });
@@ -398,15 +401,15 @@ describe("Notices and school events (AP-02)", () => {
 
     expect(await student.mutation(api.notifications.markAllRead, {})).toEqual({ updated: 2 });
     expect(await student.query(api.notifications.unreadCount, {})).toBe(0);
-    expect(await guardian.query(api.notifications.unreadCount, {})).toBe(3); // other users untouched
+    expect(await otherTeacher.query(api.notifications.unreadCount, {})).toBe(3); // other users untouched
 
     // Remove: own only; another user's notification stays in the database.
     expect(await student.mutation(api.notifications.remove, { notificationId: mine[1]._id })).toEqual({ ok: true });
     expect(await dbRow(mine[1]._id)).toBeNull();
     expect(await student.query(api.notifications.list, {})).toHaveLength(2);
-    expect(await errorCode(student.mutation(api.notifications.remove, { notificationId: guardianNotes[0]._id }))).toBe("NOT_FOUND");
+    expect(await errorCode(student.mutation(api.notifications.remove, { notificationId: otherNotes[0]._id }))).toBe("NOT_FOUND");
     expect(await errorCode(adminB.mutation(api.notifications.remove, { notificationId: teacherNote._id }))).toBe("NOT_FOUND");
-    expect(await dbRow(guardianNotes[0]._id)).not.toBeNull();
+    expect(await dbRow(otherNotes[0]._id)).not.toBeNull();
     expect(await dbRow(teacherNote._id)).not.toBeNull();
     // Removing it again: it no longer exists.
     expect(await errorCode(student.mutation(api.notifications.remove, { notificationId: mine[1]._id }))).toBe("NOT_FOUND");
@@ -415,7 +418,7 @@ describe("Notices and school events (AP-02)", () => {
     expect(await student.mutation(api.notifications.clearAll, {})).toEqual({ ok: true, deleted: 2, remaining: false });
     expect(await student.query(api.notifications.list, {})).toEqual([]);
     expect(await t.run(async (ctx) => (await ctx.db.query("notifications").collect()).filter((n) => n.userId === A.users.student).length)).toBe(0);
-    expect(await guardian.query(api.notifications.list, {})).toHaveLength(3);
+    expect(await otherTeacher.query(api.notifications.list, {})).toHaveLength(3);
     expect(await teacher.query(api.notifications.list, {})).toHaveLength(3);
     expect(await student.mutation(api.notifications.clearAll, {})).toEqual({ ok: true, deleted: 0, remaining: false });
   });

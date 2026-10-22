@@ -211,7 +211,7 @@ describe("AP-04: Dashboards and reports reconciliation", () => {
     // 5. Query studentStatistics
     const stats = await admin.query(api.reports.studentStatistics, {});
     expect(stats.total).toBe(2);
-    expect(stats.guardians).toBe(1);
+    expect(stats.parentContacts).toBe(1);
     expect(stats.byClass.find((c) => c.name === "Grade 8")?.total).toBe(2);
     expect(stats.bySection.find((s) => s.label === "8-A")?.students).toBe(1);
 

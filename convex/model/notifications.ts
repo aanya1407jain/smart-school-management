@@ -38,7 +38,7 @@ export async function notifyUsers(ctx: MutationCtx, schoolId: Id<"schools">, use
   return written;
 }
 
-/** Active user accounts of every student actively enrolled in a section (and their linked guardians). */
+/** Active user accounts of every student actively enrolled in a section. */
 export async function userIdsForSection(ctx: QueryCtx, schoolId: Id<"schools">, sectionId: Id<"sections">): Promise<Id<"users">[]> {
   const enrollments = await ctx.db.query("enrollments").withIndex("by_section_status", (q) => q.eq("sectionId", sectionId).eq("status", "active")).take(1001);
   const ids: Id<"users">[] = [];
@@ -46,16 +46,13 @@ export async function userIdsForSection(ctx: QueryCtx, schoolId: Id<"schools">, 
   return ids;
 }
 
-/** Active user accounts that represent a student: the student's own login and linked guardians' logins. */
+/**
+ * Active user accounts that represent a student: the student's own login.
+ * (Parent contacts have no accounts, so they get no in-app notifications.)
+ */
 export async function userIdsForStudent(ctx: QueryCtx, schoolId: Id<"schools">, studentId: Id<"students">): Promise<Id<"users">[]> {
   const ids: Id<"users">[] = [];
   const own = await ctx.db.query("schoolMemberships").withIndex("by_student", (q) => q.eq("studentId", studentId)).collect();
-  own.forEach((m) => m.schoolId === schoolId && m.status === "active" && m.userId && ids.push(m.userId));
-  const links = await ctx.db.query("guardianLinks").withIndex("by_student", (q) => q.eq("studentId", studentId)).collect();
-  for (const link of links) {
-    if (link.schoolId !== schoolId) continue;
-    const gm = await ctx.db.query("schoolMemberships").withIndex("by_guardian", (q) => q.eq("guardianId", link.guardianId)).collect();
-    gm.forEach((m) => m.schoolId === schoolId && m.status === "active" && m.userId && ids.push(m.userId));
-  }
+  own.forEach((m) => m.schoolId === schoolId && m.role === "student" && m.status === "active" && !m.guardianId && m.userId && ids.push(m.userId));
   return ids;
 }

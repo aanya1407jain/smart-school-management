@@ -6,15 +6,15 @@
  *  - Authentication: Convex Auth (Login ID + password). Tokens live in httpOnly
  *    cookies managed by the Next.js proxy — never in Web Storage.
  *  - Identity: `users.session` derives the user, school, membership, role and
- *    linked teacher/student/guardian on the SERVER. The browser never
+ *    linked teacher/student on the SERVER. The browser never
  *    supplies a role; the portal opened after sign-in follows the server role.
  *  - Domain data, two sources (`dataSource`):
  *      "demo" → the demo school's persona accounts are bound (in memory) to
  *               their counterpart in the in-browser demo data — see
  *               src/lib/services/session-store.ts. Only the demo school
  *               (DEMO_SCHOOL_SLUG) can ever bind.
- *      "live" → every other student-portal account (students and guardians
- *               created by the school). The portal reads ONLY Convex
+ *      "live" → every other account created by the school (admin, teacher
+ *               or student). The portal reads ONLY Convex
  *               (convex/studentPortal.ts, attendance, notifications) for the
  *               students the server links to the membership; the demo data
  *               stays unbound, so a real account can never see a demo persona.
@@ -76,8 +76,6 @@ interface SessionContextValue {
   /** Resolves to the portal user, or null when the account is valid but has no portal data yet (go to /account). */
   login: (input: LoginInput) => Promise<CurrentUser | null>;
   logout: () => Promise<void>;
-  /** Guardians: switch the linked student being viewed (verified by the server). */
-  setActiveStudent: (id: string) => Promise<void>;
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);
@@ -94,7 +92,6 @@ function UnconfiguredSessionProvider({ children }: { children: ReactNode }) {
     can: () => false,
     login: async () => { throw new Error("Sign-in is not available: the school backend is not configured for this deployment."); },
     logout: async () => {},
-    setActiveStudent: async () => {},
   }), []);
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }
@@ -112,8 +109,6 @@ function ConvexSessionProvider({ children }: { children: ReactNode }) {
   const [bound, setBound] = useState<{ viewer: Viewer; result: BindResult } | null>(null);
   const [tick, setTick] = useState(0);
   const [verifying, setVerifying] = useState(false);
-  /** Live portal: the linked student being viewed (guardians with several children). */
-  const [liveActiveStudentId, setLiveActiveStudentId] = useState<string | null>(null);
   const pending = useRef<PendingLogin | null>(null);
 
   useEffect(() => { purgeLegacySessionStorage(); }, []);
@@ -152,8 +147,8 @@ function ConvexSessionProvider({ children }: { children: ReactNode }) {
       // Accounts created by the school (no demo persona): the live (Convex) workspace for
       // their SERVER-derived role. Never mapped onto demo personas or demo data.
       if (liveUser) {
-        const ids = liveUser.studentIds ?? [];
-        const active = liveActiveStudentId && ids.includes(liveActiveStudentId) ? liveActiveStudentId : ids[0] ?? null;
+        // A student account sees exactly its own record (the only account roles are admin, teacher and student).
+        const active = liveUser.studentIds?.[0] ?? null;
         return { status: "authenticated" as Status, notice: null, user: liveUser, activeStudentId: active, viewer: session.viewer, dataSource: "live" as DataSource };
       }
       return { status: "unavailable" as Status, ...none, notice: UNAVAILABLE_PREVIEW, viewer: session.viewer };
@@ -161,7 +156,7 @@ function ConvexSessionProvider({ children }: { children: ReactNode }) {
     const snap = services.auth.getSessionSnapshot();
     if (!snap.user) return { status: "loading" as Status, ...none };
     return { status: "authenticated" as Status, notice: null, user: snap.user, activeStudentId: snap.activeStudentId, viewer: session.viewer, dataSource: "demo" as DataSource };
-  }, [authLoading, isAuthenticated, session, bound, tick, liveUser, liveActiveStudentId]);
+  }, [authLoading, isAuthenticated, session, bound, tick, liveUser]);
 
   const finishPending = useCallback(() => {
     const p = pending.current;
@@ -209,30 +204,7 @@ function ConvexSessionProvider({ children }: { children: ReactNode }) {
     await signOut();
     services.auth.clearIdentity();
     setBound(null);
-    setLiveActiveStudentId(null);
   }, [signOut]);
-
-  const setActiveStudent = useCallback(async (mockStudentId: string) => {
-    if (base.dataSource === "live") {
-      // Live portal: ids ARE Convex student ids; the server must confirm the link.
-      if (!base.user?.studentIds?.includes(mockStudentId)) throw new Error("This student is not linked to your account.");
-      await convex.query(api.users.studentContext, {
-        studentId: mockStudentId as Id<"students">,
-        ...(activeMembershipId ? { membershipId: activeMembershipId } : {}),
-      });
-      setLiveActiveStudentId(mockStudentId);
-      return;
-    }
-    if (!bound?.result.ok) throw new Error("Your session has ended. Please sign in again.");
-    const serverId = Object.entries(bound.result.studentMap).find(([, m]) => m === mockStudentId)?.[0];
-    if (!serverId) throw new Error("This student is not linked to your account.");
-    // The server decides: only the student themself or a linked guardian passes.
-    await convex.query(api.users.studentContext, {
-      studentId: serverId as Id<"students">,
-      ...(activeMembershipId ? { membershipId: activeMembershipId } : {}),
-    });
-    services.auth.setActiveStudent(mockStudentId);
-  }, [base.dataSource, base.user, bound, convex, activeMembershipId]);
 
   const value = useMemo<SessionContextValue>(() => {
     const status: Status = verifying ? "loading" : base.status;
@@ -249,9 +221,8 @@ function ConvexSessionProvider({ children }: { children: ReactNode }) {
       can: (p) => perms.has(p),
       login,
       logout,
-      setActiveStudent,
     };
-  }, [base, verifying, login, logout, setActiveStudent]);
+  }, [base, verifying, login, logout]);
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

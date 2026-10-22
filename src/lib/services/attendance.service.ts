@@ -87,7 +87,7 @@ export const mockAttendanceService = {
         if (existing) Object.assign(existing, { entries: clean, markedById: actor.id, markedAt: new Date().toISOString() });
         else db.attendance.push({ id: newId("att"), sectionId, date, entries: clean, markedById: actor.id, markedAt: new Date().toISOString() });
 
-        // Notify students/guardians whose status is absent or late (only when it changed).
+        // Notify students whose status is absent or late (only when it changed).
         for (const s of roster) {
           const st = clean[s.id];
           if (st === "present" || prev[s.id] === st) continue;

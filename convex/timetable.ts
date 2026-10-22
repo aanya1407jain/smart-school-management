@@ -12,7 +12,7 @@
  *    section per slot (rooms are compared case-insensitively). Clashes are
  *    only checked within the same academic year.
  * Reads: admins any section; teachers their own week and sections in their
- * scope; students/guardians use studentPortal.myTimetable.
+ * scope; students use studentPortal.myTimetable.
  */
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";

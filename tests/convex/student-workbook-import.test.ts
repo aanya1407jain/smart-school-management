@@ -66,7 +66,7 @@ describe("student workbook import (student_import_test_data.xlsx)", () => {
       admissionNo: at("admissionNo"), firstName: at("firstName"), lastName: at("lastName"), gender: at("gender"),
       dateOfBirth: at("dateOfBirth"), admissionDate: at("admissionDate"), email: at("email"), phone: at("phone"), address: at("address"),
       className: at("className"), section: at("sectionName"), academicYear: at("academicYear"),
-      guardianName: at("guardianName"), guardianPhone: at("guardianPhone"), guardianEmail: at("guardianEmail"), guardianRelation: at("guardianRelationship"),
+      parentName: at("guardianName"), parentPhone: at("guardianPhone"), parentEmail: at("guardianEmail"), parentRelation: at("guardianRelationship"), // the fixture workbook still uses "guardian…" headings
     });
     expect(mapping.fullName).toBeNull();
     expect(missingRequiredFields(mapping, STUDENT_IMPORT)).toEqual([]);
@@ -78,7 +78,7 @@ describe("student workbook import (student_import_test_data.xlsx)", () => {
     expect(rowsFor(sheet, mapping)[0].values).toMatchObject({ admissionNo: "TEST-2026-0001", dateOfBirth: "2010-01-04", admissionDate: "2026-04-01", section: "8-A", className: "Grade 8" });
   });
 
-  test("all 25 rows validate and import as students, enrollments and guardian links — no accounts unless asked", async () => {
+  test("all 25 rows validate and import as students, enrollments and parent contacts — no accounts unless asked", async () => {
     const t = makeTest();
     const { A, sections } = await school(t);
     const { sheet, mapping } = await loadWorkbook();
@@ -123,8 +123,8 @@ describe("student workbook import (student_import_test_data.xlsx)", () => {
       const link = db.links.filter((l) => l.studentId === s._id);
       expect(link).toHaveLength(1);
       const g = db.guardians.find((x) => x._id === link[0].guardianId)!;
-      expect(g).toMatchObject({ name: r.values.guardianName, phone: r.values.guardianPhone, email: r.values.guardianEmail, schoolId: A.schoolId });
-      expect(link[0]).toMatchObject({ relationship: r.values.guardianRelation, isPrimary: true, schoolId: A.schoolId });
+      expect(g).toMatchObject({ name: r.values.parentName, phone: r.values.parentPhone, email: r.values.parentEmail, schoolId: A.schoolId });
+      expect(link[0]).toMatchObject({ relationship: r.values.parentRelation, isPrimary: true, schoolId: A.schoolId });
     }
 
     // Each section's complete roster (fixture students + imported) is numbered 1..n alphabetically.

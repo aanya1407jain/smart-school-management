@@ -76,7 +76,7 @@ describe("academics.getStudentProfile", () => {
     expect(p.access).toBe("school");
     expect(p.student).toMatchObject({ studentId: A.studentA, firstName: "Asha", admissionNo: "alpha-Asha" });
     expect(p.enrollment).toMatchObject({ sectionDisplayName: "8-A", className: "Grade 8", status: "active", classTeacher: "Class T" });
-    expect(p.guardians[0]).toMatchObject({ name: "Guardian", relationship: "Mother", phone: "+91-alpha" });
+    expect(p.parentContacts[0]).toMatchObject({ name: "Parent Contact", relationship: "Mother", phone: "+91-alpha" });
     expect(p.results.map((r) => r.examName)).toEqual(["Unit Test 1"]); // the unpublished exam's row is not shown
     expect(p.fees?.totals).toEqual({ grossMinor: 2000000, concessionMinor: 200000, paidMinor: 900000, outstandingMinor: 900000 });
     expect(p.homework.map((h) => h.title)).toEqual(["Fractions sheet"]);
@@ -84,12 +84,12 @@ describe("academics.getStudentProfile", () => {
     for (const k of FORBIDDEN_KEYS) expect(keys.has(k)).toBe(false);
   });
 
-  test("an assigned teacher sees the student without guardian contact details or fees; an unassigned teacher sees nothing", async () => {
+  test("an assigned teacher sees the student without parent-contact phone/email or fees; an unassigned teacher sees nothing", async () => {
     const { t, A } = await setup();
     // subjectTeacher teaches section A (where Asha is).
     const p = (await (await as(t, A.users.subjectTeacher)).query(api.academics.getStudentProfile, { studentId: A.studentA }))!;
     expect(p.access).toBe("assigned");
-    expect(p.guardians[0]).toMatchObject({ name: "Guardian", phone: null, email: null });
+    expect(p.parentContacts[0]).toMatchObject({ name: "Parent Contact", phone: null, email: null });
     expect(p.fees).toBeNull();
     // A teacher of another school / no scope:
     const outsider = await t.run(async (ctx) => {
@@ -101,7 +101,7 @@ describe("academics.getStudentProfile", () => {
     expect(await errorCode((await as(t, outsider)).query(api.academics.getStudentProfile, { studentId: A.studentA }))).toBe("NOT_FOUND");
   });
 
-  test("a student sees only their own profile; guardians only linked children; other schools and malformed ids are not found", async () => {
+  test("a student sees only their own profile; a legacy guardian sign-in sees nothing; other schools and malformed ids are not found", async () => {
     const { t, A, B } = await setup();
     const student = await as(t, A.users.student); // Asha
     const own = (await student.query(api.academics.getStudentProfile, { studentId: A.studentA }))!;
@@ -110,9 +110,8 @@ describe("academics.getStudentProfile", () => {
     expect(await errorCode(student.query(api.academics.getStudentProfile, { studentId: A.studentB }))).toBe("NOT_FOUND");
     expect(await errorCode(student.query(api.academics.getStudentProfile, { studentId: B.studentA }))).toBe("NOT_FOUND");
     expect(await student.query(api.academics.getStudentProfile, { studentId: "stu_aarav" })).toBeNull();
-    const guardian = await as(t, A.users.guardian); // linked to Asha only
-    expect((await guardian.query(api.academics.getStudentProfile, { studentId: A.studentA }))?.access).toBe("own");
-    expect(await errorCode(guardian.query(api.academics.getStudentProfile, { studentId: A.studentB }))).toBe("NOT_FOUND");
+    const legacy = await as(t, A.users.legacyGuardian); // was linked to Asha — no access any more
+    expect(await errorCode(legacy.query(api.academics.getStudentProfile, { studentId: A.studentA }))).toBe("NO_SCHOOL_ACCESS");
     expect(await errorCode((await as(t, B.users.admin)).query(api.academics.getStudentProfile, { studentId: A.studentA }))).toBe("NOT_FOUND");
   });
 
@@ -151,7 +150,7 @@ describe("student portal modules (live accounts)", () => {
     expect(notices.state === "ok" && notices.notices.map((n) => n.title).sort()).toEqual(["8-A only", "Everyone", "Grade 8", "Students"]);
   });
 
-  test("a student cannot read another student's modules; guardians only their linked children", async () => {
+  test("a student cannot read another student's modules; a legacy guardian sign-in reads none", async () => {
     const { t, A, B } = await setup();
     const me = await as(t, A.users.student);
     for (const q of [api.studentPortal.myTimetable, api.studentPortal.myHomework, api.studentPortal.myResults, api.studentPortal.myFees] as const) {
@@ -159,9 +158,9 @@ describe("student portal modules (live accounts)", () => {
       expect(await errorCode(me.query(q, { studentId: B.studentA }))).toBe("NOT_FOUND");
     }
     expect(await errorCode(me.query(api.studentPortal.myNotices, { studentId: A.studentB, today: TODAY }))).toBe("NOT_FOUND");
-    const g = await as(t, A.users.guardian);
-    expect((await g.query(api.studentPortal.myResults, { studentId: A.studentA })).state).toBe("ok");
-    expect(await errorCode(g.query(api.studentPortal.myFees, { studentId: A.studentB }))).toBe("NOT_FOUND");
+    const g = await as(t, A.users.legacyGuardian);
+    expect(await errorCode(g.query(api.studentPortal.myResults, { studentId: A.studentA }))).toBe("NO_SCHOOL_ACCESS");
+    expect(await errorCode(g.query(api.studentPortal.myFees, {}))).toBe("NO_SCHOOL_ACCESS");
     // Staff are not student-portal identities.
     expect(await errorCode((await as(t, A.users.admin)).query(api.studentPortal.myFees, {}))).toBe("FORBIDDEN");
     expect(await errorCode((await as(t, A.users.classTeacher)).query(api.studentPortal.myTimetable, {}))).toBe("FORBIDDEN");

@@ -22,20 +22,19 @@ export function canonicalLoginId(raw: unknown): string | null {
 }
 
 /** Kinds of generated Login IDs. */
-export type LoginIdKind = "admin" | "teacher" | "student" | "guardian";
+export type LoginIdKind = "admin" | "teacher" | "student";
 
 const pad = (n: number, width: number) => String(n).padStart(width, "0");
 
 /**
  * Format a generated Login ID. The deployment belongs to one school, so IDs
- * carry no school prefix: ADMIN-001, TCH-00124, STU-2026-00451, GRD-00031.
+ * carry no school prefix: ADMIN-001, TCH-00124, STU-2026-00451.
  */
 export function formatLoginId(kind: LoginIdKind, n: number, year?: string): string {
   switch (kind) {
     case "admin": return `ADMIN-${pad(n, 3)}`;
     case "teacher": return `TCH-${pad(n, 5)}`;
     case "student": return `STU-${year ?? "0000"}-${pad(n, 5)}`;
-    case "guardian": return `GRD-${pad(n, 5)}`;
   }
 }
 
@@ -54,8 +53,6 @@ export function parseGeneratedLoginId(id: string): { kind: LoginIdKind; n: numbe
   if (m) return { kind: "admin", n: Number(m[1]) };
   m = /^TCH-(\d{1,9})$/.exec(id);
   if (m) return { kind: "teacher", n: Number(m[1]) };
-  m = /^GRD-(\d{1,9})$/.exec(id);
-  if (m) return { kind: "guardian", n: Number(m[1]) };
   m = /^STU-(\d{4})-(\d{1,9})$/.exec(id);
   if (m) return { kind: "student", n: Number(m[2]), year: m[1] };
   return null;

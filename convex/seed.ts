@@ -46,7 +46,6 @@ function loginsOf(ds: SeedDataset): Login[] {
   const out: Login[] = [ds.admin.login];
   ds.teachers.forEach((t) => t.login && out.push(t.login));
   ds.students.forEach((s) => s.login && out.push(s.login));
-  ds.guardians.forEach((g) => g.login && out.push(g.login));
   return out;
 }
 
@@ -101,7 +100,6 @@ export const upgradeDemoLoginIds = internalMutation({
     const pairs: { email: string; loginId: string }[] = [{ email: ds.admin.email, loginId: ds.admin.login.loginId }];
     ds.teachers.forEach((t) => t.login && pairs.push({ email: t.email, loginId: t.login.loginId }));
     ds.students.forEach((x) => x.login && pairs.push({ email: x.email, loginId: x.login.loginId }));
-    ds.guardians.forEach((g) => g.login && pairs.push({ email: g.email, loginId: g.login.loginId }));
 
     const accountFor = (id: string) => ctx.db.query("authAccounts")
       .withIndex("providerAndAccountId", (q) => q.eq("provider", PASSWORD_PROVIDER).eq("providerAccountId", id)).unique();
@@ -226,11 +224,11 @@ export const createStructure = internalMutation({
     // Roll numbers are system-assigned (alphabetical per section), exactly as for real imports.
     await renumberSections(ctx, Object.values(sectionIds));
 
-    const guardianIds: Record<string, Id<"guardians">> = {};
-    for (const g of ds.guardians) {
-      guardianIds[g.key] = await ctx.db.insert("guardians", { schoolId, name: g.name, phone: g.phone, email: g.email, ...(g.occupation ? { occupation: g.occupation } : {}) });
-      for (const link of g.links) {
-        await ctx.db.insert("guardianLinks", { schoolId, guardianId: guardianIds[g.key], studentId: studentIds[link.student], relationship: link.relationship, isPrimary: link.isPrimary });
+    // Parent contacts (contact data only — no accounts), stored in guardians / guardianLinks.
+    for (const p of ds.parentContacts) {
+      const contactId = await ctx.db.insert("guardians", { schoolId, name: p.name, phone: p.phone, email: p.email, ...(p.occupation ? { occupation: p.occupation } : {}) });
+      for (const link of p.links) {
+        await ctx.db.insert("guardianLinks", { schoolId, guardianId: contactId, studentId: studentIds[link.student], relationship: link.relationship, isPrimary: link.isPrimary });
       }
     }
 
@@ -239,7 +237,6 @@ export const createStructure = internalMutation({
     await reserveAccount(ctx, { schoolId, role: "admin", kind: "admin", loginId: ds.admin.login.loginId, displayName: ds.admin.displayName, email: ds.admin.email });
     for (const t of ds.teachers) if (t.login) await reserveAccount(ctx, { schoolId, role: "teacher", kind: "teacher", loginId: t.login.loginId, displayName: `${t.firstName} ${t.lastName}`, email: t.email, teacherId: teacherIds[t.key] });
     for (const s of ds.students) if (s.login) await reserveAccount(ctx, { schoolId, role: "student", kind: "student", loginId: s.login.loginId, displayName: `${s.firstName} ${s.lastName}`, email: s.email, studentId: studentIds[s.key] });
-    for (const g of ds.guardians) if (g.login) await reserveAccount(ctx, { schoolId, role: "student", kind: "guardian", loginId: g.login.loginId, displayName: g.name, email: g.email, guardianId: guardianIds[g.key] });
 
     // Fee structures + per-student obligations (amounts in minor units).
     for (const fs of ds.feeStructures) {

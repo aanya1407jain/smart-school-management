@@ -107,14 +107,13 @@ export function MyHomework() {
 
 function MyHomeworkInner({ studentId }: { studentId: string | null }) {
   const { user } = useSession();
-  const isGuardian = !!user?.guardianId;
 
   const [status, setStatus] = useState<Filter>("todo");
   const [subject, setSubject] = useState("");
   const [submitId, setSubmitId] = useState<string | null>(null);
 
-  // The server resolves the student from the session; studentId only chooses
-  // among students already linked to this membership (guardians with several children).
+  // The server resolves the student from the session; studentId can only be the
+  // signed-in student's own id.
   const data = useSchoolQuery(
     api.studentPortal.myHomework,
     studentId ? { studentId: studentId as Id<"students"> } : {}
@@ -192,7 +191,7 @@ function MyHomeworkInner({ studentId }: { studentId: string | null }) {
           <li key={h.homeworkId}>
             <HomeworkCard
               h={h}
-              canSubmit={!isGuardian && h.homeworkStatus === "active" && h.submission?.status !== "reviewed"}
+              canSubmit={h.homeworkStatus === "active" && h.submission?.status !== "reviewed"}
               onSubmit={() => setSubmitId(h.homeworkId)}
             />
           </li>

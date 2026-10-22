@@ -69,10 +69,10 @@ describe("teacher dashboard (live)", () => {
     expect(other.marksTasks).toEqual([]);
   });
 
-  test("students, guardians and admins cannot open the teacher dashboard", async () => {
+  test("students and admins cannot open the teacher dashboard", async () => {
     const t = makeTest();
     const A = await createSchool(t, "alpha");
-    for (const u of [A.users.student, A.users.guardian, A.users.admin]) {
+    for (const u of [A.users.student, A.users.admin]) {
       expect(await errorCode((await as(t, u)).query(api.dashboards.teacherOverview, {}))).toBe("FORBIDDEN");
     }
   });

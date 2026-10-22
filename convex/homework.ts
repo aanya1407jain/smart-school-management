@@ -9,12 +9,12 @@
  *    (`homework:read:all`) can read everything but do not set homework.
  *  - A student submits only their OWN work, only for homework of the section
  *    they are actively enrolled in, while it is open. After the due date the
- *    submission is stored as `late`. Guardians can read but not submit.
+ *    submission is stored as `late`.
  *  - Students see only their own submission; teachers see submissions of
  *    their own homework.
  *  - Attachments use the shared upload pipeline (convex/files.ts, ownerType
  *    "homework" / "submission").
- * Students in the section (and linked guardians) get one in-app notification
+ * Students in the section get one in-app notification
  * per new homework; a reviewed student gets one per review (dedupe keys).
  */
 import { v } from "convex/values";
@@ -195,7 +195,7 @@ export const review = schoolMutation({
 // ================================================================ student
 /**
  * Submit (or resubmit before review) the caller's OWN work. Only a student
- * membership can submit; guardians cannot submit on a child's behalf.
+ * membership can submit.
  */
 export const submit = schoolMutation({
   args: { homeworkId: v.id("homework"), content: v.optional(v.string()) },
@@ -224,7 +224,7 @@ export const submit = schoolMutation({
   },
 });
 
-/** One homework item with the viewer's own submission (students/guardians), or the item alone (staff in scope). */
+/** One homework item with the viewer's own submission (students), or the item alone (staff in scope). */
 export const get = schoolQuery({
   args: { homeworkId: v.id("homework"), studentId: v.optional(v.id("students")) },
   handler: async (ctx, { homeworkId, studentId }) => {

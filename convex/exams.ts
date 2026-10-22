@@ -13,7 +13,7 @@
  *    `in_progress` or `marks_entry`.
  *  - exams:publish (admin): publish when every active student of every
  *    section × paper has a mark row (a number or "absent").
- *  - Students / guardians read published results only (studentPortal.myResults).
+ *  - Students read their own published results only (studentPortal.myResults).
  *
  * Calculation rules (documented decisions; the requirements name grades,
  * percentages and report cards but no tie or absence policy):
@@ -334,7 +334,7 @@ export function rankByPercentage<T extends { percentage: number }>(rows: T[]): (
   });
 }
 
-/** Publish: requires complete marks; writes results snapshots, locks the exam and notifies students/guardians once. */
+/** Publish: requires complete marks; writes results snapshots, locks the exam and notifies students once. */
 export const publish = schoolMutation({
   args: { examId: v.id("exams") },
   handler: async (ctx, { examId }) => {

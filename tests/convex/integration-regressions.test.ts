@@ -187,7 +187,7 @@ describe("notices", () => {
     expect(new Set(notes.map((n) => n.userId)).size).toBe(notes.length); // one per person
     expect(notes.some((n) => n.userId === A.users.admin)).toBe(false); // not the publisher
     expect(notes.some((n) => n.userId === A.users.student)).toBe(true);
-    expect(notes.some((n) => n.userId === A.users.guardian)).toBe(true);
+    expect(notes.some((n) => n.userId === A.users.legacyGuardian)).toBe(false); // leftover guardian sign-ins get nothing
   });
 
   test("a future-dated notice is notified on its publish date (school-local), not before and only once", async () => {
@@ -308,16 +308,17 @@ describe("admin and accountant boundaries", () => {
     expect((await acct.query(api.fees.listBalances, {})).rows.length).toBe(2);
     expect(await errorCode(acct.query(api.reports.studentStatistics, {}))).toBe("FORBIDDEN");
     expect(await errorCode(acct.mutation(api.academics.setCurrentAcademicYear, { academicYearId: A.yearId }))).toBe("FORBIDDEN");
-    for (const u of [A.users.classTeacher, A.users.student, A.users.guardian]) {
+    for (const u of [A.users.classTeacher, A.users.student]) {
       const c = await as(t, u);
       expect(await errorCode(c.query(api.reports.adminDashboard, {}))).toBe("FORBIDDEN");
       expect(await errorCode(c.query(api.fees.overview, {}))).toBe("FORBIDDEN");
       expect(await errorCode(c.query(api.fees.listPayments, {}))).toBe("FORBIDDEN");
     }
-    // Guardians read only their linked child's ledger.
-    const g = await as(t, A.users.guardian);
-    expect((await g.query(api.fees.studentLedger, { studentId: A.studentA })).studentId).toBe(A.studentA);
-    expect(await errorCode(g.query(api.fees.studentLedger, { studentId: A.studentB }))).toBe("NOT_FOUND");
+    // A student reads only their own ledger; a leftover guardian sign-in reads nothing.
+    const s = await as(t, A.users.student);
+    expect((await s.query(api.fees.studentLedger, { studentId: A.studentA })).studentId).toBe(A.studentA);
+    expect(await errorCode(s.query(api.fees.studentLedger, { studentId: A.studentB }))).toBe("NOT_FOUND");
+    expect(await errorCode((await as(t, A.users.legacyGuardian)).query(api.fees.studentLedger, { studentId: A.studentA }))).toBe("NO_SCHOOL_ACCESS");
   });
 
   test("reports are school-scoped and count each student once", async () => {
@@ -328,7 +329,7 @@ describe("admin and accountant boundaries", () => {
     const stats = await admin.query(api.reports.studentStatistics, {});
     expect(stats.total).toBe(2);
     expect(stats.bySection.map((s) => [s.label, s.students])).toEqual([["8-A", 1], ["8-B", 1]]);
-    expect(stats.guardians).toBe(1);
+    expect(stats.parentContacts).toBe(1);
     await t.run((ctx) => ctx.db.insert("attendanceSessions", { schoolId: A.schoolId, academicYearId: A.yearId, sectionId: A.sectionA, date: "2026-07-06", markedByUserId: A.users.classTeacher, markedByTeacherId: A.classTeacher, markedAt: 1, presentCount: 3, absentCount: 1, lateCount: 0, excusedCount: 2 }));
     const att = await admin.query(api.reports.attendanceReport, { from: "2026-07-01", to: "2026-07-31" });
     expect(att.monthly).toEqual([{ month: "2026-07", percentage: 75, late: 0, absent: 1, registers: 1 }]);

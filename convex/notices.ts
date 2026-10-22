@@ -9,7 +9,7 @@
  * Who may read:
  *  - drafts and archived notices: their author and `notices:manage` only;
  *  - published notices: members in the audience, from `publishDate` until
- *    `expiresOn` (students/guardians: studentPortal.myNotices; staff: `feed`).
+ *    `expiresOn` (students: studentPortal.myNotices; staff: `feed`).
  * Publishing notifies the audience ONCE (in-app; dedupe key per notice), at
  * publish time when the notice is already visible (publishDate ≤ today in the
  * school's timezone), otherwise by a scheduled job on its publish date.
@@ -18,6 +18,7 @@
  * (republishing is required to show it again).
  * Notices are never hard-deleted (no retention rule permits it yet).
  */
+import { grantsAccess } from "./model/memberships";
 import { v, type Infer } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, type MutationCtx, type QueryCtx } from "./_generated/server";
@@ -85,7 +86,7 @@ export async function inAudience(ctx: QueryCtx, actor: Actor, audience: Audience
 /** Active user ids of the audience (bounded). */
 async function recipients(ctx: MutationCtx, schoolId: Id<"schools">, audience: Audience): Promise<Id<"users">[]> {
   const members = await ctx.db.query("schoolMemberships").withIndex("by_school_role", (q) => q.eq("schoolId", schoolId)).take(MAX_RECIPIENTS);
-  const active = members.filter((m) => m.status === "active" && m.userId);
+  const active = members.filter((m) => grantsAccess(m) && m.userId); // legacy guardian sign-ins never receive anything
   if (audience.kind === "all") return active.map((m) => m.userId!);
   if (audience.kind === "roles") return active.filter((m) => audience.roles.includes(m.role)).map((m) => m.userId!);
   const yearId = await getCurrentAcademicYearId(ctx, schoolId);
@@ -120,7 +121,7 @@ async function richView(ctx: Ctx, n: Doc<"notices">) {
 export async function audienceLabel(ctx: Ctx, audience: Audience): Promise<string> {
   if (audience.kind === "all") return "Whole school";
   if (audience.kind === "roles") {
-    const names: Record<string, string> = { admin: "Administrators", teacher: "Teachers", student: "Students & guardians" };
+    const names: Record<string, string> = { admin: "Administrators", teacher: "Teachers", student: "Students" };
     return audience.roles.map((r) => names[r] ?? r).join(", ");
   }
   const names: string[] = [];

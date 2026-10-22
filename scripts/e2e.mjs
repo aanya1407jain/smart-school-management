@@ -104,11 +104,15 @@ async function serverAnswer(ctx, path) {
   check("Browser back after logout does not expose protected page", !(await page.getByRole("navigation", { name: /main navigation/i }).count()));
 
   // Role routing comes from the server: each account lands in its own portal.
-  for (const [loginId, password, home] of [["admin-001", "Admin@123", "/admin/dashboard"], ["STU-2026-00001", "Student@123", "/student/dashboard"], [" GRD-00001 ", "Guardian@123", "/student/dashboard"]]) {
+  for (const [loginId, password, home] of [["admin-001", "Admin@123", "/admin/dashboard"], ["STU-2026-00001", "Student@123", "/student/dashboard"], [" tch-00001 ", "Teacher@123", "/teacher/dashboard"]]) {
     await login(page, loginId, password);
     check(`${loginId.trim()} is routed to ${home} (Login ID normalised)`, new URL(page.url()).pathname === home, page.url());
     await logout(page);
   }
+  // Account roles are admin, teacher and student only: the former demo guardian login is refused.
+  await login(page, "GRD-00001", "Guardian@123", false);
+  check("ROLE Former guardian login (removed account type) cannot sign in", await waitText(page, /does not have active access|incorrect/i) && new URL(page.url()).pathname === "/login", page.url());
+  check("ROLE Login screen offers no guardian/parent demo account", !/guardian|parent/i.test(await page.locator("body").innerText()));
   // A ?next= pointing into another portal does not override the server role.
   await page.goto(BASE + "/login?next=" + encodeURIComponent("/admin/fees"));
   await page.getByLabel(/^login id/i).fill("STU-2026-00001");
@@ -161,6 +165,16 @@ async function serverAnswer(ctx, path) {
 {
   const { ctx, page } = await newPage();
   await login(page, "ADMIN-001", "Admin@123");
+  // COUNT: the Students page (opened in a second tab of the same session) shows the school's real totals.
+  const listPage = await ctx.newPage();
+  listPage.on("pageerror", (e) => errors.push(`${listPage.url()} :: ${e.message}`));
+  await listPage.goto(BASE + "/admin/students");
+  const enrolledNow = async (p) => { const v = (await p.getByTestId("students-enrolled").innerText().catch(() => "—")).trim(); return /^\d+$/.test(v) ? Number(v) : null; };
+  await listPage.getByTestId("students-enrolled").filter({ hasText: /^\d+$/ }).waitFor().catch(() => {});
+  const countBefore = await enrolledNow(listPage);
+  check("COUNT Students page shows the enrolled total (same records as Accounts & Import)", countBefore !== null && countBefore > 0, String(countBefore));
+  const dashBefore = await (async () => { await page.goto(BASE + "/admin/dashboard"); await page.getByTestId("dash-students").filter({ hasText: /^\d+$/ }).waitFor().catch(() => {}); return (await page.getByTestId("dash-students").innerText().catch(() => "")).trim(); })();
+  check("COUNT Dashboard total equals the Students page total", dashBefore === String(countBefore), `${dashBefore} vs ${countBefore}`);
   await page.goto(BASE + "/admin/students/new");
   // A unique surname per run: the admission is a real (Convex) record, so earlier runs' students remain.
   const ISHITA_LAST = `Menon${Array.from({ length: 5 }, () => String.fromCharCode(97 + Math.floor(Math.random() * 26))).join("")}`;
@@ -172,8 +186,9 @@ async function serverAnswer(ctx, path) {
   // The form lists the school's REAL classes/sections (Convex), not demo ids.
   await page.getByRole("combobox", { name: /^Class/ }).selectOption({ label: "Grade 10" });
   await page.getByRole("combobox", { name: /^Section/ }).selectOption({ index: 1 }); // first section of Grade 10 → 10-A
-  await page.getByLabel(/guardian name/i).fill("Kavita Menon");
-  await page.getByLabel(/guardian phone/i).fill("+91 98450 77777");
+  check("W1 Admit form asks for a parent contact (no guardian wording)", await page.getByText("Parent contact", { exact: true }).first().isVisible() && !/guardian/i.test(await page.locator("main").innerText()));
+  await page.getByLabel(/parent name/i).fill("Kavita Menon");
+  await page.getByLabel(/parent phone/i).fill("+91 98450 77777");
   await page.getByRole("button", { name: /^add student$/i }).click();
   check("W1 Admin adds student", await waitText(page, /Student enrolled/i));
   const dialogText = await page.getByRole("dialog").innerText();
@@ -182,6 +197,20 @@ async function serverAnswer(ctx, path) {
   await page.getByRole("button", { name: /open profile/i }).click();
   await page.waitForURL(/\/admin\/students\/[a-z0-9]{20,}$/);
   const newStudentPath = new URL(page.url()).pathname;
+  // The other tab updates by itself (reactive query), with no reload.
+  const live = await listPage.getByTestId("students-enrolled").filter({ hasText: String((countBefore ?? 0) + 1) }).waitFor({ timeout: 10000 }).then(() => true, () => false);
+  check("COUNT Total increases by one without a page refresh", live, `${countBefore} → ${await enrolledNow(listPage)}`);
+  await listPage.reload();
+  await listPage.getByTestId("students-enrolled").filter({ hasText: /^\d+$/ }).waitFor().catch(() => {});
+  check("COUNT Total stays correct after a refresh", (await enrolledNow(listPage)) === (countBefore ?? 0) + 1, String(await enrolledNow(listPage)));
+  await listPage.getByLabel(/filter students by name/i).fill(ISHITA_LAST);
+  check("COUNT New student is found in the list by search; search does not change the total",
+    await listPage.getByTestId("live-students").getByText(ISHITA).waitFor().then(() => true, () => false) && (await enrolledNow(listPage)) === (countBefore ?? 0) + 1);
+  await listPage.goto(BASE + "/admin/attendance");
+  await listPage.goto(BASE + "/admin/students");
+  await listPage.getByTestId("students-enrolled").filter({ hasText: /^\d+$/ }).waitFor().catch(() => {});
+  check("COUNT Total is unchanged after navigating away and back", (await enrolledNow(listPage)) === (countBefore ?? 0) + 1);
+  await listPage.close();
   check("W1 New student profile (real record) opens with class 10-A", await waitText(page, /Class 10-A/) && await waitText(page, new RegExp(ISHITA)));
   await page.goto(BASE + "/admin/accounts");
   await page.getByLabel(/filter students by section/i).selectOption({ label: "10-A" });
@@ -207,7 +236,7 @@ async function serverAnswer(ctx, path) {
   await logout(page);
 
   // The register is stored in Convex: a fresh load shows the saved statuses.
-  // (The demo student/guardian dashboards read the in-browser demo dataset, so the
+  // (The demo student dashboards read the in-browser demo dataset, so the
   // Convex register is verified here and through live student accounts below.)
   await login(page, "TCH-00001", "Teacher@123");
   await page.goto(BASE + "/teacher/attendance?section=10-A");
@@ -285,7 +314,7 @@ async function serverAnswer(ctx, path) {
   check("A8/A9 Admin has no mark/edit controls", await readOnly() && await waitText(page, /Administrators can view and monitor attendance/));
   await logout(page);
 
-  // Student & guardian — view only
+  // Student — view only
   await login(page, "STU-2026-00001", "Student@123");
   await page.goto(BASE + "/student/attendance");
   check("A10 Student can view own attendance", await waitText(page, /Attendance calendar/));
@@ -296,19 +325,10 @@ async function serverAnswer(ctx, path) {
   check("A11 Student has no attendance edit controls", (await page.getByRole("radiogroup", { name: /^Attendance for / }).count()) === 0 && (await page.getByRole("button", { name: /save attendance|update attendance|mark all/i }).count()) === 0);
   await page.goto(BASE + "/teacher/attendance?section=10-A");
   check("A11b Student blocked from the register route", await waitText(page, /don't have access/i));
-  await logout(page);
-  await login(page, "GRD-00001", "Guardian@123");
   await page.goto(BASE + "/student/attendance");
-  await waitText(page, /Attendance calendar/);
-  const guardianAaravCells = await markedCells();
-  await page.getByRole("button", { name: /switch student/i }).click();
-  await page.getByRole("menuitem", { name: /Ananya Sharma/ }).click();
-  await page.waitForTimeout(800);
-  check("A12a Each linked child shows their own demo records", JSON.stringify(await markedCells()) !== JSON.stringify(guardianAaravCells) && (await daysShown()) > 7);
-  check("A12 Guardian views linked student's attendance (switch to Ananya)", await waitText(page, /Attendance calendar/) && (await page.getByRole("button", { name: /switch student/i }).innerText()).includes("Ananya"));
-  check("A13 Guardian has no attendance edit controls", (await page.getByRole("radiogroup", { name: /^Attendance for / }).count()) === 0 && (await page.getByRole("button", { name: /save attendance|update attendance|mark all/i }).count()) === 0);
+  check("A12 Student has no student switcher (own record only)", await waitText(page, /Attendance calendar/) && (await page.getByRole("button", { name: /switch student/i }).count()) === 0);
   await page.goto(BASE + "/admin/attendance");
-  check("A13b Guardian blocked from admin attendance route", await waitText(page, /don't have access/i));
+  check("A13 Student blocked from admin attendance route", await waitText(page, /don't have access/i));
   await ctx.close();
 }
 
@@ -428,7 +448,7 @@ async function serverAnswer(ctx, path) {
   await ctx.close();
 }
 
-// ------------------------------------------------------------------ WORKFLOW 6: class-specific notice + guardian
+// ------------------------------------------------------------------ WORKFLOW 6: class-specific notice
 {
   const { ctx, page } = await newPage();
   await login(page, "ADMIN-001", "Admin@123");
@@ -449,15 +469,6 @@ async function serverAnswer(ctx, path) {
   await page.goto(BASE + "/student/notices");
   await page.waitForTimeout(1500);
   check("W6 10-A student does NOT see the 10-B notice", !(await page.getByText(/Lab coats required/).count()));
-  await logout(page);
-
-  await login(page, "GRD-00001", "Guardian@123");
-  check("Guardian sees linked student (Aarav) by default", await waitText(page, /Viewing Aarav Sharma/));
-  await page.getByRole("button", { name: /switch student/i }).click();
-  await page.getByRole("menuitem", { name: /Ananya Sharma/ }).click();
-  check("Guardian can switch to second linked student (Ananya, 8-B)", await waitText(page, /Viewing Ananya Sharma/));
-  await page.goto(BASE + "/student/fees");
-  check("Guardian sees Ananya's sibling concession", await waitText(page, /concession/i));
   await ctx.close();
 }
 
@@ -542,7 +553,7 @@ async function serverAnswer(ctx, path) {
   // Bulk import: one bad row blocks the whole file; the corrected file imports.
   await page.getByRole("tab", { name: /^import$/i }).click();
   const csv = (rows) => ({ name: "students.csv", mimeType: "text/csv", buffer: Buffer.from(rows.join("\r\n"), "utf8") });
-  const header = "Full name,Class,Section,Date of birth,Gender,Guardian name,Guardian phone";
+  const header = "Full name,Class,Section,Date of birth,Gender,Parent name,Parent phone";
   // A unique surname per run, so repeated runs against the same deployment stay unambiguous.
   const IRA = `Ira Kulkarni${Array.from({ length: 5 }, () => String.fromCharCode(97 + Math.floor(Math.random() * 26))).join("")}`;
   const good = `${IRA},10,C,03/09/2011,F,Meena Kulkarni,98450 66001`;

@@ -52,7 +52,7 @@ describe("notices", () => {
     const other = await as(t, A.users.classTeacher);
     expect(await errorCode(other.mutation(api.notices.publish, { noticeId }))).toBe("FORBIDDEN");
     await teacher.mutation(api.notices.publish, { noticeId });
-    const portal = await (await as(t, A.users.guardian)).query(api.studentPortal.myNotices, { today: TODAY });
+    const portal = await (await as(t, A.users.student)).query(api.studentPortal.myNotices, { today: TODAY });
     expect(portal.state === "ok" && portal.notices.map((n) => n.noticeId)).toEqual([noticeId]);
     expect((await admin.query(api.notices.listManaged, {})).map((n) => n.noticeId)).toContain(noticeId);
     expect((await other.query(api.notices.listManaged, {})).length).toBe(0);

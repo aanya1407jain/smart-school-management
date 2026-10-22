@@ -433,7 +433,7 @@ function Structures() {
             }
           } else {
             const r = await assign.mutate(assignId!);
-            if (r) toast({ title: `Assigned to ${r.assigned} students`, description: r.skipped ? `${r.skipped} already had it.` : "Students and guardians were notified." });
+            if (r) toast({ title: `Assigned to ${r.assigned} students`, description: r.skipped ? `${r.skipped} already had it.` : "Students were notified." });
             setAssignId(null);
           }
         }}

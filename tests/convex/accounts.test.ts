@@ -97,7 +97,7 @@ describe("accounts.create", () => {
 
   test("non-admins cannot create accounts; other schools' records are NOT_FOUND", async () => {
     const { t, A, B } = await setup();
-    for (const u of [A.users.classTeacher, A.users.student, A.users.guardian]) {
+    for (const u of [A.users.classTeacher, A.users.student]) {
       expect(await errorCode((await as(t, u)).action(api.accounts.create, { person: { kind: "student", studentId: A.studentB } }))).toBe("FORBIDDEN");
     }
     expect(await errorCode((await as(t, A.users.admin)).action(api.accounts.create, { person: { kind: "student", studentId: B.studentB } }))).toBe("NOT_FOUND");

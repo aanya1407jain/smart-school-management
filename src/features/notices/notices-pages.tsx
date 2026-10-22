@@ -613,7 +613,7 @@ function ComposeModal({ existing, onClose, teacherMode = false }: { existing?: N
       open
       onOpenChange={(o) => !o && onClose()}
       title={existing ? "Edit notice" : teacherMode ? "New class notice" : "New notice"}
-      description={teacherMode ? "Only the sections you teach are listed. Their students and guardians are notified once." : undefined}
+      description={teacherMode ? "Only the sections you teach are listed. Their students are notified once." : undefined}
       size="lg"
       footer={
         <>
@@ -750,7 +750,7 @@ function ComposeModal({ existing, onClose, teacherMode = false }: { existing?: N
               Will reach{" "}
               <span className="font-semibold">
                 {reach.data
-                  ? `${reach.data.studentAccounts} student/guardian accounts and ${reach.data.teachers} teachers`
+                  ? `${reach.data.studentAccounts} student accounts and ${reach.data.teachers} teachers`
                   : "…"}
               </span>
               . Accounts outside this scope will not see it.

@@ -34,8 +34,8 @@ describe("exam lifecycle and report cards", () => {
     await admin.mutation(api.exams.publish, { examId });
     expect(await errorCode(admin.mutation(api.exams.publish, { examId }))).toBe("CONFLICT");
     const notes = await t.run(async (ctx) => (await ctx.db.query("notifications").collect()).filter((n) => n.dedupeKey === `exam.published:${examId}`));
-    // Asha's own login and her guardian, once each; Bala has no login.
-    expect(notes.map((n) => n.userId).sort()).toEqual([A.users.student, A.users.guardian].sort());
+    // Asha's own login, once; Bala has no login; a leftover guardian sign-in is never notified.
+    expect(notes.map((n) => n.userId)).toEqual([A.users.student]);
 
     const sec = await admin.query(api.exams.sectionResults, { examId, sectionId: A.sectionA });
     expect(JSON.stringify(sec)).toContain("Mathematics");

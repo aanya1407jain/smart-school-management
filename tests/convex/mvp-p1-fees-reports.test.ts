@@ -39,7 +39,7 @@ describe("fee corrections", () => {
     const concessionId = l.concessions[0].concessionId;
 
     expect(await errorCode(admin.mutation(api.fees.revokeConcession, { concessionId, reason: "  " }))).toBe("INVALID_ARGUMENT");
-    for (const u of [A.users.classTeacher, A.users.student, A.users.guardian]) {
+    for (const u of [A.users.classTeacher, A.users.student]) {
       expect(await errorCode((await as(t, u)).mutation(api.fees.revokeConcession, { concessionId, reason: "x" }))).toBe("FORBIDDEN");
     }
     expect(await errorCode((await as(t, B.users.admin)).mutation(api.fees.revokeConcession, { concessionId, reason: "x" }))).toBe("NOT_FOUND");
@@ -101,21 +101,21 @@ describe("fee-due reminders", () => {
     let r = await t.mutation(internal.feeReminders.remindSchool, { schoolId: A.schoolId, cursor: null, today });
     expect(r.done).toBe(true);
     let notes = await feeNotes(t);
-    // Term 2 (due 10-20) for Asha → her login and her guardian.
-    expect(notes.map((n) => [n.title, n.userId]).sort()).toEqual([["Fee due soon", A.users.guardian], ["Fee due soon", A.users.student]].sort());
+    // Term 2 (due 10-20) for Asha → her own login only (no parent/guardian accounts exist).
+    expect(notes.map((n) => [n.title, n.userId])).toEqual([["Fee due soon", A.users.student]]);
     expect(new Set(notes.map((n) => n.key)).size).toBe(1);
     expect(notes[0].key).toMatch(/^fees\.due:/);
 
     // Re-run: nothing new.
     r = await t.mutation(internal.feeReminders.remindSchool, { schoolId: A.schoolId, cursor: null, today });
     expect(r.sent).toBe(0);
-    expect(await feeNotes(t)).toHaveLength(2);
+    expect(await feeNotes(t)).toHaveLength(1);
 
-    // After the due date: one overdue reminder each, once.
+    // After the due date: one overdue reminder, once.
     await t.mutation(internal.feeReminders.remindSchool, { schoolId: A.schoolId, cursor: null, today: "2026-10-25" });
     await t.mutation(internal.feeReminders.remindSchool, { schoolId: A.schoolId, cursor: null, today: "2026-10-26" });
     notes = await feeNotes(t);
-    expect(notes.filter((n) => n.title === "Fee overdue")).toHaveLength(2);
+    expect(notes.filter((n) => n.title === "Fee overdue")).toHaveLength(1);
 
     // Paying it off stops further reminders for that installment (Term 3 is due 01-01 but fully paid).
     await admin.mutation(api.fees.recordPayment, pay(A.studentA, 30000, "full"));
@@ -152,7 +152,7 @@ describe("fee-due reminders", () => {
     await admin.mutation(api.fees.assignStructure, { structureId, target: { kind: "students", studentIds: [A.studentA] } });
     expect(await t.mutation(internal.feeReminders.runDaily, {})).toEqual({ scheduled: 2 });
     await t.finishAllScheduledFunctions(vi.runAllTimers);
-    expect((await feeNotes(t)).map((n) => n.title)).toEqual(["Fee due soon", "Fee due soon"]);
+    expect((await feeNotes(t)).map((n) => n.title)).toEqual(["Fee due soon"]);
   });
 });
 
@@ -186,7 +186,7 @@ describe("low-attendance report", () => {
     // Other school: nothing of A; A's section id is not found there.
     expect((await (await as(t, B.users.admin)).query(api.reports.lowAttendance, {})).students).toEqual([]);
     expect(await errorCode((await as(t, B.users.admin)).query(api.reports.lowAttendance, { sectionId: A.sectionA }))).toBe("NOT_FOUND");
-    for (const u of [A.users.student, A.users.guardian, A.users.classTeacher]) {
+    for (const u of [A.users.student, A.users.classTeacher]) {
       expect(await errorCode((await as(t, u)).query(api.reports.lowAttendance, {}))).toBe("FORBIDDEN");
     }
     expect(await errorCode(admin.query(api.reports.lowAttendance, { from: "2026-10-10", to: "2026-10-01" }))).toBe("INVALID_ARGUMENT");

@@ -107,11 +107,13 @@ export default defineSchema({
 
   /**
    * A user's access to ONE school. This is the only thing that grants access.
-   * role = portal (admin | teacher | student). Links:
+   * role = portal (admin | teacher | student) — the ONLY three account roles.
+   * Links:
    *  - teacher role → teacherId (required)
-   *  - student role → studentId (the student) OR guardianId (a guardian using
-   *    the student portal for their linked children). Exactly one of the two.
+   *  - student role → studentId (required): the student's own account
    *  - admin role   → optionally teacherId if the principal also teaches.
+   * There are no parent/guardian accounts. Parent contact details are plain
+   * records on the student (`guardians` + `guardianLinks` tables below).
    * Accounts are created by the school, never self-registered: an admin (or
    * the deployment setup / import) creates the membership with status
    * "invited" and a reserved `loginId`; creating the Convex Auth account for
@@ -130,6 +132,14 @@ export default defineSchema({
     permissionSets: v.array(vPermissionSet),
     teacherId: v.optional(v.id("teachers")),
     studentId: v.optional(v.id("students")),
+    /**
+     * LEGACY — set only on memberships of the removed guardian sign-in. Never
+     * written any more and never accepted for access (core/actor.ts). Kept
+     * optional so not-yet-migrated deployments still validate; the one-off
+     * internal migration `migrations:removeGuardianAccounts` deletes those
+     * memberships. Remove this field and `by_guardian` after every deployment
+     * has run it.
+     */
     guardianId: v.optional(v.id("guardians")),
     /** Administrator who created the account (absent for setup/seed). */
     createdByUserId: v.optional(v.id("users")),
@@ -280,6 +290,11 @@ export default defineSchema({
     .index("by_school_admission", ["schoolId", "admissionNo"])
     .index("by_school_status_name", ["schoolId", "status", "lastName"]),
 
+  /**
+   * Parent contacts of students (name, phone, email…). CONTACT DATA ONLY — a
+   * parent contact never has an account or any access. (Storage name kept from
+   * the original design; shown in the product as "Parent contact".)
+   */
   guardians: defineTable({
     schoolId: v.id("schools"),
     name: v.string(),
@@ -289,12 +304,12 @@ export default defineSchema({
     address: v.optional(v.string()),
   }).index("by_school_phone", ["schoolId", "phone"]),
 
-  /** Guardian ↔ student (many-to-many). The ONLY basis for guardian data access. */
+  /** Parent contact ↔ student (many-to-many). Contact data only; grants no access. */
   guardianLinks: defineTable({
     schoolId: v.id("schools"),
     guardianId: v.id("guardians"),
     studentId: v.id("students"),
-    relationship: v.string(), // "Mother", "Father", "Guardian", …
+    relationship: v.string(), // "Mother", "Father", "Grandparent", …
     isPrimary: v.boolean(),
   })
     .index("by_guardian", ["guardianId"])

@@ -59,7 +59,7 @@ export function StudentsList() {
 
   const exportCsv = () => {
     const rows = q.data?.items ?? [];
-    const header = ["Admission No", "Name", "Class", "Roll", "Guardian", "Phone", "Attendance %", "Fee status", "Outstanding"];
+    const header = ["Admission No", "Name", "Class", "Roll", "Parent contact", "Phone", "Attendance %", "Fee status", "Outstanding"];
     const csv = [header, ...rows.map((r) => [r.admissionNo, r.name, r.classLabel, r.rollNo ?? "", r.guardianName ?? "", r.guardianPhone ?? "", r.attendancePct?.toFixed(1) ?? "", r.feeStanding ?? "", r.outstanding ?? ""])]
       .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
     const a = document.createElement("a");
@@ -98,7 +98,7 @@ export function StudentsList() {
         </div>
 
         <FilterBar>
-          <SearchInput value={search} onChange={setSearch} placeholder="Search name, admission no. or guardian" className="col-span-2 sm:w-72" label="Search students" />
+          <SearchInput value={search} onChange={setSearch} placeholder="Search name, admission no. or parent" className="col-span-2 sm:w-72" label="Search students" />
           <FilterSelect label="Class" value={classId} onChange={(v) => { setClassId(v); setSectionId(""); }} allLabel="All classes" options={(opts.data?.classes ?? []).map((c) => ({ value: c.id, label: c.name }))} />
           <FilterSelect label="Section" value={sectionId} onChange={setSectionId} allLabel="All sections" options={sectionOptions} />
           <FilterSelect label="Academic year" value={yearId} onChange={setYearId} allLabel="Current year" options={(opts.data?.years ?? []).filter((y) => y.id !== opts.data?.currentYearId).map((y) => ({ value: y.id, label: y.name }))} />
@@ -137,7 +137,7 @@ export function StudentsList() {
                   { key: "id", header: "Student ID", sortKey: "admissionNo", headerClassName: "whitespace-nowrap", cell: (r) => <span className="whitespace-nowrap font-mono text-[12.5px]">{r.admissionNo}</span> },
                   { key: "class", header: "Class", sortKey: "class", cell: (r) => <span className="font-medium text-ink">{r.grade || "—"}</span> },
                   { key: "section", header: "Section", cell: (r) => <span>{r.classLabel.split("-")[1] ?? "—"}{r.rollNo ? <span className="ml-1 text-[12px] text-ink-muted">· #{r.rollNo}</span> : null}</span> },
-                  { key: "guardian", header: "Guardian", cell: (r) => r.guardianName ? <div><p className="text-ink">{r.guardianName}</p><p className="text-[12px] text-ink-muted">{r.guardianRelation}</p></div> : "—" },
+                  { key: "guardian", header: "Parent contact", cell: (r) => r.guardianName ? <div><p className="text-ink">{r.guardianName}</p><p className="text-[12px] text-ink-muted">{r.guardianRelation}</p></div> : "—" },
                   { key: "attendance", header: "Attendance", sortKey: "attendance", cell: (r) => <AttendancePill value={r.attendancePct} /> },
                   { key: "fees", header: "Fee status", sortKey: "outstanding", cell: (r) => r.feeStanding ? <div className="space-y-0.5"><StatusBadge status={r.feeStanding} />{(r.outstanding ?? 0) > 0 && <p className="text-[12px] text-ink-muted">{formatCurrency(r.outstanding!)} due</p>}</div> : "—" },
                   { key: "status", header: "Status", cell: (r) => <StatusBadge status={r.status} /> },

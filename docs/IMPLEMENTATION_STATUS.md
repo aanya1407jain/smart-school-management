@@ -1,5 +1,30 @@
 # Implementation status — Smart School Management System
 
+## Update — 22 Oct 2026: student totals fixed; Guardian account type removed
+
+_Uncommitted on `feat/convex-backend-foundation` @ `2ba4f97` (the previously pushed MVP pass). Verified on the isolated local sandbox Convex backend only — no shared or production deployment was touched. Evidence: `docs/VERIFICATION_REPORT.md` (top section)._
+
+### Re-audit (22 Oct, same day) — verified, three gaps fixed
+- **Counting rule vs. list.** `enrolled` counted any active enrollment, even when the student record was no longer `active` (an enrollment left open on an inactive/alumni/transferred record), while the Students list hides such records. The rule now counts only ACTIVE student records with an active current-year enrollment, so list, totals and dashboard always agree (`model/studentCounts.ts`; `academics.studentCounts`; `reports.adminDashboard`).
+- **Section duplicates.** A duplicate active enrollment in one section listed the student twice in the section view (`accounts.listPeople`), and the section total used only the first enrollment's section. Both now count/list a student once per section.
+- **Roles.** `grantsAccess` now also refuses any role value outside admin/teacher/student and any admin/teacher membership carrying a student link (it would have given a staff login "own student" rights). Server-side, at sign-in and on every call. A student login whose record link is missing keeps the explicit `no_student_record` portal state (reads nothing).
+- **Migration.** `removeGuardianAccounts` also deletes the in-app notifications of a sign-in it deletes (they could no longer be read); teachers' and other users' notifications are kept.
+- UI text: the student-documents card said "visible to … the student's family"; now "the student".
+
+### Student count (bug fixed — DONE)
+- **Root cause.** The admit form (`/admin/students/new`) always writes to Convex (`academics.createStudentWithEnrollment`), but for the demo school's persona admins (e.g. `ADMIN-001`, the "Principal" profile) the Students page rendered the **mock** list, which reads the in-browser demo dataset; its totals (status tabs, pagination total) therefore never included a newly admitted student, while Accounts & Import and Attendance — both Convex-backed — showed it. For school-created admins the Convex list had **no total at all**, and the dashboard's count used its own query.
+- **Fix.** One counting rule in `convex/model/studentCounts.ts`: **enrolled this year** = distinct students whose record is active and who have an active enrollment in the current academic year (duplicates and accounts never count twice); **active student records** = students with status `active` (incl. not yet placed in a class). Exposed by `academics.studentCounts` (students:read:all, school-scoped, optional section count) and reused by `reports.adminDashboard`. The Students page now uses the Convex list for **every** admin session (demo personas included) with the totals shown above it, plus server-side search; totals are independent of pagination and search and update reactively. The demo admin dashboard's student card shows the same Convex number. Demo-dataset student ids (`stu_…`) still open the demo editor for demo personas.
+
+### Account roles: Admin, Teacher, Student only (DONE)
+- Decision (owner, 22 Oct): no Parent or Guardian accounts. Parent details stay on the student as **"Parent contact"** (contact data only, no access); existing guardian sign-ins are **deleted**.
+- Server: a membership carrying `guardianId` never grants access (`model/memberships.grantsAccess` — actor resolution, sign-in gate, notification recipients); it cannot be created (`assertMembershipShape`, `accounts.create` no longer accepts a guardian person), activated, re-enabled or given credentials. `linkedStudentIds` = the student's own record only; `users.studentContext` (child switching) removed; `requireGuardianStudentAccess` → `requireOwnStudentAccess`. Notifications go to the student's own account only. Login ID kind `GRD-` removed (formats: `ADMIN-###`, `TCH-#####`, `STU-<year>-#####`).
+- Migration: `migrations:removeGuardianAccounts` (internal, dry run by default; `{"apply":true}` deletes guardian memberships, and the sign-in itself — sessions, refresh tokens, password account, user row — when it has no other membership; parent contacts untouched; audited `account.deleted`). Ran on the sandbox only.
+- API renames: `createStudentWithEnrollment({ parentContact })`, profile/portal `parentContacts`, `reports.studentStatistics().parentContacts`, import fields `parentName/parentPhone/parentRelation/parentEmail` (old "guardian …" spreadsheet headings still map via aliases).
+- UI: no guardian demo login, no student switcher, "Parent contact" labels on admit form, profiles, import and lists; audience label "Students".
+- Storage names kept: tables `guardians` / `guardianLinks` and the legacy `schoolMemberships.guardianId` field + `by_guardian` index (needed until every deployment has run the migration). Mock demo-data internals keep their `Guardian` type names.
+
+---
+
 _Status as of **18 Oct 2026** (MVP-completion pass, uncommitted on `feat/convex-backend-foundation` @ `9ffbbc6`, whose tree equals `origin/main` @ `a9cf740`). Verified against an isolated **sandbox** Convex backend (local, throwaway — never a shared or production deployment). Evidence: `docs/VERIFICATION_REPORT.md`. Open items: `docs/REMAINING_WORK.md`._
 
 Status words: **DONE** = implemented for real (school-created) accounts on Convex, server-enforced, and covered by automated tests that ran against Convex (convex-test and/or the sandbox E2E/integration runs). **PARTIAL** = usable, with named gaps. Mock-layer tests (`scripts/*.test.ts`) are never counted as proof of a live workflow.
@@ -9,18 +34,18 @@ Status words: **DONE** = implemented for real (school-created) accounts on Conve
 | Requirement module | Status | What a school-created account can do now | Remaining (see REMAINING_WORK) |
 |---|---|---|---|
 | Authentication & users | **DONE** | Login ID sign-in, forced temporary-password change, admin-issued resets, suspend/reactivate (sessions revoked), **admin-portal office logins incl. accountant-only (restricted admin)**, access changes audited | Self-service email/SMS reset deliberately not built (no approved provider) |
-| Student management | **DONE** | Admit, edit, list (roster order), profile with attendance/results/homework/fees, **documents (admins upload/delete; admins + family read)**, **enrollment history**, **withdraw / complete / transfer section** (renumbered, history kept) | — |
+| Student management | **DONE** | Admit, edit, list (roster order, server-side search, live totals), profile with attendance/results/homework/fees, **documents (admins upload/delete; admins + the student read)**, **enrollment history**, **withdraw / complete / transfer section** (renumbered, history kept) | — |
 | Academic management | **DONE** | Years, classes, sections, subjects, curriculum, class & subject teachers, enrolment | — |
 | Teacher & staff | **DONE** (no payroll by design) | **Teacher records list/edit/deactivate, daily staff attendance, leave apply/withdraw (teacher), approve/reject (admin) with one notification**; teacher & admin **profiles** | New teachers are added via Accounts & Import (single row or file); no separate "add teacher" form |
-| Student attendance | **DONE** | Class-teacher marking/correction, admin view, student/guardian view | — |
-| Examinations & results | **DONE** | **Exam create/edit, papers, status lifecycle, marks-entry progress, admin & teacher marks entry, publish (gated on complete marks), published results, printable report card**, notifications once per family member | — |
+| Student attendance | **DONE** | Class-teacher marking/correction, admin view, student view | — |
+| Examinations & results | **DONE** | **Exam create/edit, papers, status lifecycle, marks-entry progress, admin & teacher marks entry, publish (gated on complete marks), published results, printable report card**, notifications once per student account | — |
 | Timetable | **DONE** | **Admin builder: periods, per-section weekly grid, subject + qualified teacher + room, clash checks on server**; teacher and student views | — |
 | Homework | **DONE** | Teacher create/edit/close, **attachments**, review with feedback; student submit (text and/or file); **admin oversight by section** | — |
 | Fee management | **DONE** | Structures (**edit while unused; name/classes always**), assignment, payments, receipts, concessions, **reversal / concession revoke / cancel assignment with reason + confirmation (append-only, audited, accountant-aware)** | — |
 | Notices & events | **DONE** | Notices with audiences, **events/holidays calendar UI (admin manage, everyone views)**, **teacher class-notice composer** | — |
 | Dashboards & reports | **DONE** | Admin dashboard (finance-only for accountants), **live teacher dashboard**, reports (tabs follow permissions), **per-student low-attendance list using the school threshold** | Attendance "bands per student" chart still not computed for live data |
 | Notifications | **DONE** | In-app list, mark read, remove, **clear all**, producers for attendance, homework, exams (once), notices, fees (payment), **fee-due reminders (daily job, one per installment & recipient, respects setting)**, leave decisions | Fee-reminder cron verified in convex-test only; not yet observed on a cloud deployment |
-| Student-focused portal | **DONE** | Dashboard, attendance, timetable, homework (submit with file), results + report card, fees, notices + calendar, profile; guardians switch children | — |
+| Student-focused portal | **DONE** | Dashboard, attendance, timetable, homework (submit with file), results + report card, fees, notices + calendar, profile (own record only; no parent/guardian accounts since 22 Oct) | — |
 | Audit log | **DONE** (P2) | **Admin audit-log viewer** (paginated, filter by action, actor named) | — |
 
 Demo personas of the seeded demo school still use the mock services (by design, `PortalPage demo/live`); demo and live components are now separate files (§C).
@@ -33,7 +58,7 @@ Backend (Convex):
 - `profile.ts` (new) — `mine`, `updateMine` (admin rename; teacher own phone), audited.
 - `staff.ts` — `listTeachers`, `updateTeacher` (validated, audited, sign-in display name kept in step).
 - `academics.ts` — `enrollmentHistory`.
-- `files.ts` — `student_document` reads limited to `students:write` (admins) + linked student/guardian; `listForOwner` applies the rule per file kind.
+- `files.ts` — `student_document` reads limited to `students:write` (admins) + the student themself (no guardian/parent access since 22 Oct); `listForOwner` applies the rule per file kind.
 - `fees.ts` — `revokeConcession` validates the reason before writing.
 - `reports.ts` — `lowAttendance` (school threshold + late rule, section filter, bounded).
 - `feeReminders.ts` + `crons.ts` (new) — daily fan-out, paginated per school, dedupe keys `fees.due:<installment>` / `fees.overdue:<installment>`, skipped when the school setting is off or the school is not active.
@@ -52,7 +77,7 @@ Convex-wired components that had been placed in demo slots were restored to thei
 ## D. Decisions recorded
 
 - **Accountant** = restricted admin (no new primary role), server-enforced, audited (`membership.access_changed`, `account.created`).
-- **Student documents**: upload/delete by administrators only (audited); readable by administrators and the student/linked guardians; teachers and accountant-only logins cannot read them.
+- **Student documents**: upload/delete by administrators only (audited); readable by administrators and the student; teachers and accountant-only logins cannot read them.
 - **Password reset**: administrator-issued temporary password (Accounts → … → Reset password; forced change at next sign-in; sessions revoked) plus operator break-glass `setup:issueTemporaryPassword`. No email/SMS reset until a provider and design are approved.
 - **No payroll/HR**: staff attendance is one daily status; leave is apply/decide only.
 

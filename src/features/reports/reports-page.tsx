@@ -75,7 +75,7 @@ function StudentStats() {
       total: liveStats.total,
       status: liveStats.status,
       bySection: liveStats.bySection.map((s) => ({ label: s.label, students: s.students, capacity: s.capacity })),
-      guardians: liveStats.guardians,
+      parentContacts: liveStats.parentContacts,
       byClass: liveStats.byClass.map((c) => ({ name: c.name, male: c.male, female: c.female, total: c.total })),
     };
   }, [liveStats]);
@@ -92,7 +92,7 @@ function StudentStats() {
           <div className="grid gap-4 sm:grid-cols-3">
             <StatCard label="Enrolled students" value={d.total} icon={<GraduationCap className="h-5 w-5" />} hint={`${d.status?.active ?? d.total} active`} />
             <StatCard label="Sections" value={d.bySection.length} icon={<Users className="h-5 w-5" />} tone="sapphire" hint={`Avg ${(d.total / Math.max(1, d.bySection.length)).toFixed(1)} per section`} />
-            <StatCard label="Linked guardians" value={d.guardians} icon={<Users className="h-5 w-5" />} tone="purple" hint="Guardians can see only their linked students" />
+            <StatCard label="Parent contacts" value={d.parentContacts} icon={<Users className="h-5 w-5" />} tone="purple" hint="Contact records linked to enrolled students" />
           </div>
           <div className="grid gap-4 lg:grid-cols-2">
             <ChartCard title="Students by class" description="Split by gender">
@@ -200,7 +200,7 @@ function AttendanceReport() {
           </ChartCard>
           {live && <LiveLowAttendance />}
           {d.lowAttendance !== null && <Card>
-            <CardHeader title={`Students below ${d.threshold}%`} description="Follow up with these students and their guardians" />
+            <CardHeader title={`Students below ${d.threshold}%`} description="Follow up with these students and their parents" />
             <div className="p-5">
               <DataTable rows={d.lowAttendance as any[]} getRowId={(s: any) => s.id} empty={<EmptyState title="No students below the threshold" />}
                 columns={[
