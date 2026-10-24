@@ -62,7 +62,6 @@ const ADMIN_NAV: NavGroup[] = [
       { label: "Fees", href: "/admin/fees", icon: "fees", anyOf: ["fees:manage"], module: "finance", live: true },
       { label: "Examinations", href: "/admin/examinations", icon: "exams", anyOf: ["exams:manage"], module: "academics", live: true },
       { label: "Timetable", href: "/admin/timetable", icon: "timetable", anyOf: ["timetable:manage"], module: "academics", live: true },
-      { label: "Homework", href: "/admin/homework", icon: "homework", anyOf: ["homework:read:all"], module: "academics", live: true },
     ],
   },
   {

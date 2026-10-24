@@ -13,8 +13,9 @@ import type { api } from "@convex/_generated/api";
 import { Badge, Button, Card, CardHeader, EmptyState, StatusBadge } from "@/components/ui";
 import { ReportCardModal } from "@/features/examinations/report-card";
 import { formatCurrency, formatPercent } from "@/lib/utils/format";
-import { dueLabel, formatClock, formatDate, todayISO, WEEKDAY_NAMES } from "@/lib/utils/dates";
+import { dueLabel, formatDate, todayISO } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils/cn";
+import { TimetableGrid, daysWithLessons } from "@/features/timetable/timetable-grid";
 
 type Ok<T> = Extract<T, { state: "ok" }>;
 export type LiveResult = Ok<FunctionReturnType<typeof api.studentPortal.myResults>>["results"][number];
@@ -187,32 +188,19 @@ export function LiveHomeworkList({ homework, today = todayISO() }: { homework: L
 
 // ------------------------------------------------------------------ timetable
 export function LiveTimetableGrid({ timetable }: { timetable: LiveTimetable }) {
-  const days = [...new Set(timetable.lessons.map((l) => l.dayOfWeek))].sort((a, b) => a - b);
   const periods = [...timetable.periods].sort((a, b) => a.index - b.index);
   if (timetable.lessons.length === 0) return <Card><EmptyState title="No timetable yet" description="The school has not published a timetable for this class." /></Card>;
   return (
-    <Card className="overflow-x-auto" data-testid="live-timetable">
-      <table className="w-full min-w-[640px] text-sm">
-        <caption className="px-3 pt-3 text-left text-[12px] font-semibold uppercase tracking-wide text-ink-muted">Weekly timetable</caption>
-        <thead>
-          <tr><th className="px-3 py-2.5 text-left text-[12px] font-semibold text-ink-muted">Period</th>{days.map((d) => <th key={d} className="px-3 py-2.5 text-left text-[12px] font-semibold text-ink-muted">{WEEKDAY_NAMES[d]}</th>)}</tr>
-        </thead>
-        <tbody>
-          {periods.map((p) => (
-            <tr key={p.periodId} className="border-t border-line/50 align-top">
-              <th scope="row" className="whitespace-nowrap px-3 py-2.5 text-left font-medium text-ink">{p.label}<span className="block text-[11.5px] font-normal text-ink-muted">{formatClock(p.startTime)}–{formatClock(p.endTime)}</span></th>
-              {days.map((d) => {
-                const l = timetable.lessons.find((x) => x.dayOfWeek === d && x.periodId === p.periodId);
-                return (
-                  <td key={d} className="px-3 py-2.5">
-                    {p.isBreak ? <span className="text-ink-muted">Break</span> : l ? (<><p className="font-semibold text-ink">{l.subject}</p><p className="text-[11.5px] text-ink-muted">{l.teacher}{l.room ? ` · ${l.room}` : ""}</p></>) : <span className="text-ink-muted">—</span>}
-                  </td>
-                );
-              })}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <Card className="p-4 sm:p-5" data-testid="live-timetable">
+      <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-muted">Weekly timetable</p>
+      <TimetableGrid
+        days={daysWithLessons(timetable.lessons.map((l) => l.dayOfWeek))}
+        periods={periods.map((p) => ({ key: p.periodId, label: p.label, startTime: p.startTime, endTime: p.endTime, isBreak: p.isBreak }))}
+        lessonAt={(d, gp) => {
+          const l = timetable.lessons.find((x) => x.dayOfWeek === d && x.periodId === gp.key);
+          return l ? { subject: l.subject, detail: [l.room, l.teacher].filter(Boolean).join(" · ") } : undefined;
+        }}
+      />
     </Card>
   );
 }

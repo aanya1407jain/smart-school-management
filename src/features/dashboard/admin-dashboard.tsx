@@ -16,6 +16,8 @@ import { formatDate, formatShortDate, greeting, formatLongDate, todayISO } from 
 import { NoticeListItem } from "@/features/notices/notice-list-item";
 import { useMemo } from "react";
 import type { ModuleKey } from "@convex/core/modules";
+import type { StudentAchievement } from "@/types/domain";
+import { StudentAchievementsCard } from "./student-achievements";
 
 const QUICK_ACTIONS: { label: string; href: string; Icon: typeof UserPlus; module: ModuleKey }[] = [
   { label: "Add student", href: "/admin/students/new", Icon: UserPlus, module: "students" },
@@ -71,6 +73,8 @@ export function AdminDashboard() {
         id: n.noticeId as string, title: n.title, body: n.body, type: n.type, priority: n.priority, publishDate: n.publishDate, eventDate: n.eventDate,
         audienceLabel: n.audienceLabel, status: "published" as const, audience: { scope: "school" as const }, createdBy: "",
       })),
+      // Achievements are not stored for live schools yet; never show demo data to a real school.
+      achievements: [] as StudentAchievement[],
       tasks: o.tasks,
     };
   }, [liveData]);
@@ -211,6 +215,8 @@ export function AdminDashboard() {
                 </ResponsiveContainer>
               </ChartCard>}
             </div>}
+
+            {S && <StudentAchievementsCard achievements={d.achievements} live={live} />}
 
             <div className="grid gap-4 lg:grid-cols-3">
               {AD && <Card className="lg:col-span-2">

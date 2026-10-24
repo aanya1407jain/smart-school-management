@@ -20,9 +20,9 @@ import { formatDate, formatLongDate, greeting, todayISO } from "@/lib/utils/date
 import { useSession } from "@/features/auth/session-provider";
 import { AttachmentList, UploadButton } from "@/features/shared/attachments";
 import { getAppError } from "@/lib/convex/errors";
+import { TimetableGrid, daysWithLessons } from "@/features/timetable/timetable-grid";
 
 const errText = (e: unknown) => getAppError(e)?.message ?? (e instanceof Error ? e.message : String(e));
-const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const clock = (t: string) => {
   const [h, m] = t.split(":").map(Number);
   return `${((h + 11) % 12) + 1}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
@@ -32,27 +32,21 @@ const clock = (t: string) => {
 export function LiveTeacherTimetable() {
   const t = useSchoolQuery(api.timetable.myTimetable, {});
   if (t === undefined) return <LoadingState variant="table" label="Loading timetable" />;
-  const days = [...new Set(t.lessons.map((l) => l.dayOfWeek))].sort((a, b) => a - b);
   const periods = [...t.periods].sort((a, b) => a.index - b.index);
   return (
     <div>
       <PageHeader title="My Timetable" description={`${t.lessons.length} lesson${t.lessons.length === 1 ? "" : "s"} a week, from the school's published timetable.`} />
       {t.lessons.length === 0 ? <Card><EmptyState icon={<CalendarDays className="h-6 w-6" />} title="No lessons scheduled" description="The school has not placed any of your lessons in the timetable yet." /></Card> : (
-        <Card className="overflow-x-auto" data-testid="live-teacher-timetable">
-          <table className="w-full min-w-[640px] text-sm">
-            <thead><tr><th className="px-3 py-2.5 text-left text-[12px] font-semibold text-ink-muted">Period</th>{days.map((d) => <th key={d} className="px-3 py-2.5 text-left text-[12px] font-semibold text-ink-muted">{WEEKDAYS[d]}</th>)}</tr></thead>
-            <tbody>
-              {periods.map((p) => (
-                <tr key={p.periodId} className="border-t border-line/50 align-top">
-                  <th scope="row" className="whitespace-nowrap px-3 py-2.5 text-left font-medium text-ink">{p.label}<span className="block text-[11.5px] font-normal text-ink-muted">{clock(p.startTime)}–{clock(p.endTime)}</span></th>
-                  {days.map((d) => {
-                    const l = t.lessons.find((x) => x.dayOfWeek === d && x.periodId === p.periodId);
-                    return <td key={d} className="px-3 py-2.5">{p.isBreak ? <span className="text-ink-muted">Break</span> : l ? <><p className="font-semibold text-ink">{l.subject}</p><p className="text-[11.5px] text-ink-muted">Class {l.section}{l.room ? ` · ${l.room}` : ""}</p></> : <span className="text-ink-muted">—</span>}</td>;
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <Card className="p-4 sm:p-5" data-testid="live-teacher-timetable">
+          <TimetableGrid
+            caption="My weekly timetable"
+            days={daysWithLessons(t.lessons.map((l) => l.dayOfWeek))}
+            periods={periods.map((p) => ({ key: p.periodId, label: p.label, startTime: p.startTime, endTime: p.endTime, isBreak: p.isBreak }))}
+            lessonAt={(d, gp) => {
+              const l = t.lessons.find((x) => x.dayOfWeek === d && x.periodId === gp.key);
+              return l ? { subject: l.subject, detail: [`Class ${l.section}`, l.room].filter(Boolean).join(" · ") } : undefined;
+            }}
+          />
         </Card>
       )}
     </div>
