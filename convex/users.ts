@@ -25,6 +25,7 @@ import { linkedStudentIds } from "./core/authorization";
 import { AppError } from "./core/errors";
 import { fullName, teacherDisplayName } from "./model/academics";
 import { temporaryPasswordExpiresAt } from "./model/accounts";
+import { enabledList, moduleStateOf } from "./model/modules";
 
 async function membershipsOf(ctx: QueryCtx, userId: Id<"users">) {
   const memberships = await activeMembershipsOf(ctx, userId);
@@ -66,6 +67,19 @@ async function buildViewer(ctx: QueryCtx, actor: Actor) {
     temporaryPasswordExpiresAt: user ? temporaryPasswordExpiresAt(user) : null,
     permissions: [...actor.permissions].sort(),
     permissionSets: [...actor.permissionSets],
+    /**
+     * Restricted office login (admin membership with Principal-set grants, or
+     * the legacy accountant set) and its display label. UI only — the server
+     * already applied it to `permissions`.
+     */
+    restricted: actor.restricted,
+    accessProfile: (await ctx.db.get(actor.membershipId))?.accessProfile ?? null,
+    /**
+     * Modules the SCHOOL is entitled to (convex/model/modules.ts), in catalogue
+     * order. Reactive: an operator change reaches open sessions immediately.
+     * Only drives what the UI shows; every module function re-checks on the server.
+     */
+    modules: enabledList(await moduleStateOf(ctx, actor.schoolId)),
     school: { _id: school._id, name: school.name, shortName: school.shortName, slug: school.slug, timezone: school.timezone, locale: school.locale, currency: school.currency },
     teacher: teacher && teacher.schoolId === actor.schoolId ? { teacherId: teacher._id, name: teacherDisplayName(teacher) } : null,
     /** Set when this membership IS a student. */

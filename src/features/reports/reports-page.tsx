@@ -27,15 +27,16 @@ import { LiveLowAttendance } from "./low-attendance-live";
 export function ReportsPage() {
   const params = useSearchParams();
   const router = useRouter();
-  const { can } = useSession();
+  const { can, hasModule } = useSession();
   // Tabs follow the server's permissions: school-wide reports need reports:read (attendance also
   // attendance:read:all); finance needs reports:finance or fees:manage (e.g. an accountant-only login).
   const schoolWide = can("reports:read");
   const tabs = [
-    ...(schoolWide ? [{ value: "students", label: "Student statistics" }] : []),
-    ...(schoolWide || can("attendance:read:all") ? [{ value: "attendance", label: "Attendance" }] : []),
-    ...(can("reports:finance") || can("fees:manage") ? [{ value: "fees", label: "Fees" }] : []),
-    ...(schoolWide ? [{ value: "exams", label: "Examination performance" }, { value: "academic", label: "Academic performance" }] : []),
+    // Each report also needs the module its data comes from (module entitlements; the server checks too).
+    ...(schoolWide && hasModule("students") ? [{ value: "students", label: "Student statistics" }] : []),
+    ...((schoolWide || can("attendance:read:all")) && hasModule("attendance") ? [{ value: "attendance", label: "Attendance" }] : []),
+    ...((can("reports:finance") || can("fees:manage")) && hasModule("finance") ? [{ value: "fees", label: "Fees" }] : []),
+    ...(schoolWide && hasModule("academics") ? [{ value: "exams", label: "Examination performance" }, { value: "academic", label: "Academic performance" }] : []),
   ];
   const allowed = new Set(tabs.map((t) => t.value));
   const fallback = tabs[0]?.value ?? "students";

@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox, FormField, Input } from "@/components/ui/form";
 import { Modal } from "@/components/ui/modal";
 import { useSession } from "./session-provider";
-import { canAccessRoute, homeRouteFor } from "@/lib/permissions";
+import { canAccessRoute, landingRouteFor } from "@/lib/permissions";
 import { loginFormSchema, type LoginFormValues } from "./login-form";
 import { cn } from "@/lib/utils/cn";
 import { DEMO_ACCOUNTS } from "./demo-accounts";
@@ -37,7 +37,7 @@ export function LoginScreen() {
 
   // Already signed in → straight to the right workspace.
   useEffect(() => {
-    if (status === "authenticated" && user) router.replace(homeRouteFor(user));
+    if (status === "authenticated" && user) router.replace(landingRouteFor(user));
   }, [status, user, router]);
 
   const onSubmit = async (values: FormValues) => {
@@ -49,7 +49,7 @@ export function LoginScreen() {
         return;
       }
       const next = params.get("next");
-      router.replace(next && canAccessRoute(u, next) === "allowed" ? next : homeRouteFor(u));
+      router.replace(next && canAccessRoute(u, next) === "allowed" ? next : landingRouteFor(u));
     } catch (e) {
       setError((e as Error).message);
     }

@@ -24,6 +24,7 @@ import { internalMutation } from "./_generated/server";
 import { addDays, todayIn } from "./model/calendar";
 import { computeLedger, effectivePayments } from "./model/feeMath";
 import { notifyUsers, userIdsForStudent } from "./model/notifications";
+import { isModuleEnabled } from "./model/modules";
 
 export const REMINDER_LEAD_DAYS = 3;
 export const OVERDUE_LOOKBACK_DAYS = 30;
@@ -50,6 +51,8 @@ export const remindSchool = internalMutation({
     if (!school || school.status !== "active") return { sent: 0, done: true, skipped: "inactive" as const };
     const settings = await ctx.db.query("schoolSettings").withIndex("by_school", (q) => q.eq("schoolId", schoolId)).unique();
     if (!settings?.notifications.feeReminders) return { sent: 0, done: true, skipped: "disabled" as const };
+    // Module entitlement: a school without Accounts & Finance gets no fee reminders (its fee data is kept).
+    if (!(await isModuleEnabled(ctx, schoolId, "finance"))) return { sent: 0, done: true, skipped: "module_disabled" as const };
     // The first page fixes "today" for the whole run so a run crossing midnight stays consistent.
     const today = fixedToday ?? todayIn(school.timezone);
     const from = addDays(today, -OVERDUE_LOOKBACK_DAYS);

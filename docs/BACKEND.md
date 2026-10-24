@@ -250,6 +250,32 @@ Use `requirePermission(ctx.actor, "...")` / `requireAnyPermission` — **never**
 
 ---
 
+## 5b. Rules: school module entitlements
+
+Which of the five configurable modules a school may use is a property of the SCHOOL, separate from account roles and permissions. An enabled module never grants a permission; a disabled module blocks its functions for everyone in that school.
+
+| Key | Module | Requires |
+| --- | --- | --- |
+| `students` | Student Management (admission, list/totals, enrollment, student import, student documents) | — |
+| `academics` | Academics & Examinations (exams, marks, results, timetable, homework) | `students` |
+| `attendance` | Attendance & Operations (student attendance, staff attendance, leave) | `students` |
+| `finance` | Accounts & Finance (fees, payments, receipts, balances, fee reports, reminders) | `students` |
+| `administration` | Administration & Insights (notices, events, reports pages) | — |
+
+Always on (core): sign-in, accounts and staff access, school profile and settings, academic structure, teacher records, read-only student profiles, notifications, profile/school files, audit log, role dashboards (each panel gated by its module).
+
+- **Catalogue:** `convex/core/modules.ts` (shared with the frontend). **State and enforcement:** `convex/model/modules.ts`. **Table:** `schoolModules` (one row per school and module).
+- **Policy (fail-closed):** a school with no rows keeps the original five modules (`legacyDefault`); a future key must be added with `legacyDefault: false`. A configured school has a module only if its row says enabled; a missing key, conflicting duplicate rows or a missing dependency means disabled.
+- **Server:** module functions use `moduleQuery("<key>")` / `moduleMutation("<key>")` (`core/functions.ts`): actor resolution, then `MODULE_DISABLED`, then the handler's own permission and record checks. Mixed views (`reports.adminDashboard`, `dashboards.teacherOverview`, `academics.getStudentProfile`, `files.*` by file kind) gate their parts inside. Fee reminders and scheduled notice notifications skip a disabled module.
+- **Who changes it:** the deployment operator only, through internal functions (no school role can):
+  `npx convex run schoolModules:getSchoolModules '{}'` and
+  `npx convex run schoolModules:setSchoolModules '{"enabled":[...],"updatedBy":"<name>","reason":"<ref>","dryRun":true}'` (then without `dryRun`). Every change writes `school.modules_changed` with before/after. `setup:initSchool` accepts an optional `modules` list.
+- **Data:** disabling deletes nothing; enabling again restores access to the kept records.
+- **Notifications:** while a module is off it sends nothing (its functions cannot run; fee reminders skip; a scheduled notice whose publish date falls in that time is skipped and reports `skipped: "module_disabled"`). Nothing is sent retroactively when the module comes back. Notifications already in a user's inbox, and audit entries, stay visible (core records).
+- **Known cross-module read:** `model/calendar.ts` `isSchoolDay` reads holiday `events` (Administration) for Attendance; see REMAINING_WORK G16.
+- **Client:** `users.session` → `viewer.modules`; navigation (`src/lib/permissions/navigation.ts`) and the route guard (`routes.ts`, `canAccessRoute` → `module_disabled`) hide the module; pages skip its queries. The UI is a convenience only.
+- **Tests:** `tests/convex/module-entitlements.test.ts` (including a source inventory that classifies every public function).
+
 ## 6. Rules: academic structure & teacher scope
 
 ```

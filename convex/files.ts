@@ -25,6 +25,8 @@ import { conflict, forbidden, invalid, invalidRelationship, notFound } from "./c
 import { assertNonEmpty, vFileKind, vFileOwnerType } from "./core/validators";
 import { writeAudit } from "./model/audit";
 import { canReadHomework } from "./model/homeworkAccess";
+import { requireModule } from "./model/modules";
+import type { ModuleKey } from "./core/modules";
 
 type Ctx = QueryCtx & { actor: Actor };
 type OwnerType = Infer<typeof vFileOwnerType>;
@@ -44,6 +46,26 @@ const WRITE_POLICY: Record<FileKind, { owners: OwnerType[]; permission: Paramete
   homework_attachment: { owners: ["homework"], permission: "homework:manage:assigned" },
   submission_attachment: { owners: ["submission"], permission: "homework:submit" },
 };
+
+/**
+ * Module entitlement per file kind (model/modules.ts). A kind whose module the
+ * school does not have cannot be uploaded, listed, opened or deleted; the
+ * files themselves are kept. Profile photos and school documents are core.
+ */
+const KIND_MODULE: Record<FileKind, ModuleKey | null> = {
+  student_document: "students",
+  profile_photo: null,
+  receipt: "finance",
+  report_card: "academics",
+  school_document: null,
+  homework_attachment: "academics",
+  submission_attachment: "academics",
+};
+
+async function requireKindModule(ctx: Ctx, kind: FileKind) {
+  const module = KIND_MODULE[kind];
+  if (module) await requireModule(ctx, ctx.actor.schoolId, module);
+}
 
 const OWNER_TABLE = { student: "students", teacher: "teachers", receipt: "receipts", result: "results", homework: "homework", submission: "homeworkSubmissions" } as const;
 
@@ -86,6 +108,7 @@ async function loadOwner(ctx: Ctx, ownerType: OwnerType, ownerId: string) {
 
 /** Read access to a file, based on its owner. */
 async function requireFileRead(ctx: Ctx, file: Doc<"files">) {
+  await requireKindModule(ctx, file.kind);
   switch (file.ownerType) {
     case "school":
       return; // any member of the school
@@ -137,6 +160,7 @@ export const generateUploadUrl = schoolMutation({
 export const register = schoolMutation({
   args: { storageId: v.id("_storage"), kind: vFileKind, ownerType: vFileOwnerType, ownerId: v.string(), fileName: v.string() },
   handler: async (ctx, a) => {
+    await requireKindModule(ctx, a.kind);
     const policy = WRITE_POLICY[a.kind];
     if (!policy.owners.includes(a.ownerType)) throw invalidRelationship(`A ${a.kind} cannot be attached to a ${a.ownerType}.`);
     const teacherSelfPhoto = a.kind === "profile_photo" && a.ownerType === "teacher" && ctx.actor.teacherId === a.ownerId;
@@ -195,6 +219,7 @@ export const remove = schoolMutation({
   args: { fileId: v.id("files") },
   handler: async (ctx, { fileId }) => {
     const file = await getInSchool(ctx, "files", fileId, "File");
+    await requireKindModule(ctx, file.kind);
     if (!hasPermission(ctx.actor, WRITE_POLICY[file.kind].permission)) throw forbidden();
     const record = await requireRecordWrite(ctx, file.ownerType, file.ownerId);
     await ctx.storage.delete(file.storageId);

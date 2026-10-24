@@ -20,19 +20,22 @@ import {
 } from "@/components/ui";
 import { formatDate, todayISO } from "@/lib/utils/dates";
 import { LEAVE_LABEL } from "@/features/profile/staff-profile-live";
+import { useSession } from "@/features/auth/session-provider";
 
 type Teacher = FunctionReturnType<typeof api.staff.listTeachers>[number];
 
 export function LiveTeachersWorkspace() {
-  const pending = useSchoolQuery(api.staff.listLeave, { status: "pending" });
+  // Teacher records are core; staff attendance and leave are Attendance & Operations (module entitlement).
+  const attendanceOn = useSession().hasModule("attendance");
+  const pending = useSchoolQuery(api.staff.listLeave, attendanceOn ? { status: "pending" } : "skip");
   return (
     <div data-testid="live-teachers">
       <PageHeader title="Teachers & Staff" description="Teacher records, daily staff attendance and leave requests." actions={<LinkButton href="/admin/accounts" variant="outline"><Upload className="h-4 w-4" /> Add or import teachers</LinkButton>} />
       <Tabs defaultValue="teachers">
-        <TabsList items={[{ value: "teachers", label: "Teachers" }, { value: "attendance", label: "Staff attendance" }, { value: "leave", label: "Leave", count: pending?.length || undefined }]} />
+        <TabsList items={[{ value: "teachers", label: "Teachers" }, ...(attendanceOn ? [{ value: "attendance", label: "Staff attendance" }, { value: "leave", label: "Leave", count: pending?.length || undefined }] : [])]} />
         <TabsContent value="teachers"><TeacherRecords /></TabsContent>
-        <TabsContent value="attendance"><StaffAttendance /></TabsContent>
-        <TabsContent value="leave"><LeaveRequests /></TabsContent>
+        {attendanceOn && <TabsContent value="attendance"><StaffAttendance /></TabsContent>}
+        {attendanceOn && <TabsContent value="leave"><LeaveRequests /></TabsContent>}
       </Tabs>
     </div>
   );

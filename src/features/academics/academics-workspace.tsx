@@ -50,6 +50,8 @@ function LiveAcademicsWorkspace() {
   const router = useRouter();
   const [selectedYearId, setSelectedYearId] = useState<string>("");
   const [tab, setTab] = useState(params.get("tab") ?? "setup");
+  // Enrolling students is Student Management (module entitlement); the rest of Academics setup is core.
+  const studentsOn = useSession().hasModule("students");
 
   const years = useSchoolQuery(api.academics.listAcademicYears, {});
   const classes = useSchoolQuery(api.academics.listClasses, {});
@@ -106,21 +108,21 @@ function LiveAcademicsWorkspace() {
             { value: "years", label: "Academic years", count: years.length },
             { value: "classes", label: "Classes & sections", count: sections?.length ?? 0 },
             { value: "subjects", label: "Subjects", count: subjects.length },
-            { value: "enrollments", label: "Enrollments" },
+            ...(studentsOn ? [{ value: "enrollments", label: "Enrollments" }] : []),
             { value: "assignments", label: "Teacher assignments" },
           ]}
         />
         <TabsContent value="setup">
-          <SetupOverview years={years} year={activeYear} classes={classes} sections={sections ?? []} subjects={subjects} go={changeTab} />
+          <SetupOverview years={years} year={activeYear} classes={classes} sections={sections ?? []} subjects={subjects} go={changeTab} studentsOn={studentsOn} />
         </TabsContent>
         <TabsContent value="years"><YearsTab years={years} /></TabsContent>
         <TabsContent value="classes">
           {activeYear ? <ClassesTab year={activeYear} classes={classes} sections={sections ?? []} subjects={subjects} teachers={teachers} /> : <NeedYear />}
         </TabsContent>
         <TabsContent value="subjects"><SubjectsTab subjects={subjects} /></TabsContent>
-        <TabsContent value="enrollments">
+        {studentsOn && <TabsContent value="enrollments">
           {activeYear ? <EnrollmentsTab year={activeYear} sections={sections ?? []} /> : <NeedYear />}
-        </TabsContent>
+        </TabsContent>}
         <TabsContent value="assignments">
           {activeYear ? <AssignmentsTab year={activeYear} sections={sections ?? []} teachers={teachers} /> : <NeedYear />}
         </TabsContent>
@@ -144,8 +146,8 @@ function useSectionSelection(sections: Section[]) {
 
 // ------------------------------------------------------------------ Setup overview
 
-function SetupOverview({ years, year, classes, sections, subjects, go }: { years: Year[]; year: Year | null; classes: Klass[]; sections: Section[]; subjects: Subject[]; go: (t: string) => void }) {
-  const steps = [
+function SetupOverview({ years, year, classes, sections, subjects, go, studentsOn }: { years: Year[]; year: Year | null; classes: Klass[]; sections: Section[]; subjects: Subject[]; go: (t: string) => void; studentsOn: boolean }) {
+  const allSteps = [
     { tab: "years", Icon: CalendarRange, title: "Academic year", detail: year ? `${year.name} · ${formatDate(year.startDate)} – ${formatDate(year.endDate)}${year.isCurrent ? " (current)" : ""}` : "No current academic year", done: years.some((y) => y.isCurrent) },
     { tab: "classes", Icon: School, title: "Classes", detail: `${classes.length} classes created`, done: classes.length > 0 },
     { tab: "classes", Icon: Layers, title: "Sections", detail: year ? `${sections.length} sections in ${year.name}` : "—", done: sections.length > 0 },
@@ -153,6 +155,7 @@ function SetupOverview({ years, year, classes, sections, subjects, go }: { years
     { tab: "enrollments", Icon: GraduationCap, title: "Enroll students", detail: "Place students in sections; roll numbers follow automatically", done: sections.length > 0 },
     { tab: "assignments", Icon: UserCheck, title: "Assign teachers", detail: "Class teachers and subject teachers", done: sections.length > 0 && sections.every((s) => s.classTeacherId) },
   ];
+  const steps = allSteps.filter((s) => studentsOn || s.tab !== "enrollments");
   const doneCount = steps.filter((s) => s.done).length;
   return (
     <div className="grid gap-4 lg:grid-cols-3">

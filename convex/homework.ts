@@ -19,7 +19,7 @@
  */
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import { schoolMutation, schoolQuery } from "./core/functions";
+import { moduleQuery, moduleMutation } from "./core/functions";
 import {
   enrollmentFor, getInSchool, hasPermission, isSubjectTeacherOf, linkedStudentIds, requirePermission, requireSectionRead, requireSubjectTeacher, teacherSectionIds,
 } from "./core/authorization";
@@ -30,6 +30,9 @@ import { canReadHomework } from "./model/homeworkAccess";
 import { todayIn } from "./model/calendar";
 import { writeAudit } from "./model/audit";
 import { notifyUsers, userIdsForSection, userIdsForStudent } from "./model/notifications";
+
+const academicsQuery = moduleQuery("academics");
+const academicsMutation = moduleMutation("academics");
 
 /** Most homework items returned by one list call. */
 const LIST_LIMIT = 200;
@@ -56,7 +59,7 @@ async function ownHomework(ctx: Parameters<typeof requireSectionRead>[0], homewo
 }
 
 // ================================================================ teacher
-export const create = schoolMutation({
+export const create = academicsMutation({
   args: { sectionId: v.id("sections"), subjectId: v.id("subjects"), title: v.string(), description: v.string(), dueDate: v.string() },
   handler: async (ctx, a) => {
     requirePermission(ctx.actor, "homework:manage:assigned");
@@ -85,7 +88,7 @@ export const create = schoolMutation({
   },
 });
 
-export const update = schoolMutation({
+export const update = academicsMutation({
   args: { homeworkId: v.id("homework"), title: v.optional(v.string()), description: v.optional(v.string()), dueDate: v.optional(v.string()) },
   handler: async (ctx, a) => {
     const hw = await ownHomework(ctx, a.homeworkId);
@@ -107,7 +110,7 @@ export const update = schoolMutation({
 });
 
 /** Close for submissions (idempotent). */
-export const close = schoolMutation({
+export const close = academicsMutation({
   args: { homeworkId: v.id("homework") },
   handler: async (ctx, { homeworkId }) => {
     const hw = await ownHomework(ctx, homeworkId);
@@ -119,7 +122,7 @@ export const close = schoolMutation({
 });
 
 /** The calling teacher's homework, newest due date first. */
-export const listMine = schoolQuery({
+export const listMine = academicsQuery({
   args: {},
   handler: async (ctx) => {
     requirePermission(ctx.actor, "homework:manage:assigned");
@@ -136,7 +139,7 @@ export const listMine = schoolQuery({
 });
 
 /** Homework of one section (admin: any; teachers: sections in their scope). */
-export const listForSection = schoolQuery({
+export const listForSection = academicsQuery({
   args: { sectionId: v.id("sections") },
   handler: async (ctx, { sectionId }) => {
     const section = await requireSectionRead(ctx, sectionId, { all: "homework:read:all", assigned: "homework:manage:assigned" });
@@ -152,7 +155,7 @@ export const listForSection = schoolQuery({
 });
 
 /** Submissions of one homework (its teacher, or `homework:read:all`), with the section roster so missing work is visible. */
-export const submissions = schoolQuery({
+export const submissions = academicsQuery({
   args: { homeworkId: v.id("homework") },
   handler: async (ctx, { homeworkId }) => {
     const hw = await getInSchool(ctx, "homework", homeworkId, "Homework");
@@ -176,7 +179,7 @@ export const submissions = schoolQuery({
 });
 
 /** Feedback on one submission (teacher who set the homework). Marks it reviewed and notifies the student once. */
-export const review = schoolMutation({
+export const review = academicsMutation({
   args: { submissionId: v.id("homeworkSubmissions"), feedback: v.string() },
   handler: async (ctx, { submissionId, feedback }) => {
     const sub = await getInSchool(ctx, "homeworkSubmissions", submissionId, "Submission");
@@ -197,7 +200,7 @@ export const review = schoolMutation({
  * Submit (or resubmit before review) the caller's OWN work. Only a student
  * membership can submit.
  */
-export const submit = schoolMutation({
+export const submit = academicsMutation({
   args: { homeworkId: v.id("homework"), content: v.optional(v.string()) },
   handler: async (ctx, { homeworkId, content }) => {
     requirePermission(ctx.actor, "homework:submit");
@@ -225,7 +228,7 @@ export const submit = schoolMutation({
 });
 
 /** One homework item with the viewer's own submission (students), or the item alone (staff in scope). */
-export const get = schoolQuery({
+export const get = academicsQuery({
   args: { homeworkId: v.id("homework"), studentId: v.optional(v.id("students")) },
   handler: async (ctx, { homeworkId, studentId }) => {
     const hw = await getInSchool(ctx, "homework", homeworkId, "Homework");

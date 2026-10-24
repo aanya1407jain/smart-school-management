@@ -17,7 +17,7 @@
 import { v } from "convex/values";
 import { internalQuery, type QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
-import { schoolQuery } from "./core/functions";
+import { schoolQuery, moduleQuery } from "./core/functions";
 import type { Actor } from "./core/actor";
 import type { Permission } from "./core/permissions";
 import { getSchoolSettings, linkedStudentIds, requireOwnStudentAccess, requirePermission } from "./core/authorization";
@@ -26,6 +26,11 @@ import { fullName } from "./model/academics";
 import {
   currentYear, feeLedger, parentContactsOf, homeworkFor, noticesForStudent, placement, publishedResults, studentFields, timetableFor,
 } from "./model/studentRecords";
+
+// Module entitlements (model/modules.ts): myProfile is core; the other pages belong to their module.
+const academicsQuery = moduleQuery("academics");
+const financeQuery = moduleQuery("finance");
+const administrationQuery = moduleQuery("administration");
 
 type Ctx = QueryCtx & { actor: Actor };
 
@@ -83,7 +88,7 @@ export const myProfile = schoolQuery({
 });
 
 /** Weekly timetable of the student's current section. */
-export const myTimetable = schoolQuery({
+export const myTimetable = academicsQuery({
   args: vPortalStudent,
   handler: async (ctx, { studentId }) => {
     const student = await resolvePortalStudent(ctx, studentId, "timetable:read:own");
@@ -95,7 +100,7 @@ export const myTimetable = schoolQuery({
 });
 
 /** Homework set for the student's current section, with their own submission status. */
-export const myHomework = schoolQuery({
+export const myHomework = academicsQuery({
   args: vPortalStudent,
   handler: async (ctx, { studentId }) => {
     const student = await resolvePortalStudent(ctx, studentId, "homework:read:own");
@@ -107,7 +112,7 @@ export const myHomework = schoolQuery({
 });
 
 /** Published exam results of the student. */
-export const myResults = schoolQuery({
+export const myResults = academicsQuery({
   args: vPortalStudent,
   handler: async (ctx, { studentId }) => {
     const student = await resolvePortalStudent(ctx, studentId, "results:read:own");
@@ -118,7 +123,7 @@ export const myResults = schoolQuery({
 });
 
 /** The student's fee obligations, payments and receipts for the current year. */
-export const myFees = schoolQuery({
+export const myFees = financeQuery({
   args: vPortalStudent,
   handler: async (ctx, { studentId }) => {
     const student = await resolvePortalStudent(ctx, studentId, "fees:read:own");
@@ -135,7 +140,7 @@ export const myFees = schoolQuery({
  * timezone — queries must not read the clock; it only hides notices whose
  * publish date has not arrived or that have expired.
  */
-export const myNotices = schoolQuery({
+export const myNotices = administrationQuery({
   args: { ...vPortalStudent, today: v.string() },
   handler: async (ctx, { studentId, today }) => {
     assertIsoDate(today, "today");

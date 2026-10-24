@@ -12,6 +12,7 @@ import { Bell, CalendarCheck2, GraduationCap, Hash, IdCard, Lock, School, UserRo
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { useSchoolQuery } from "@/lib/convex/membership";
+import type { ModuleKey } from "@convex/core/modules";
 import { getAppError } from "@/lib/convex/errors";
 import { useActiveStudentId, useSession, type DataSource } from "@/features/auth/session-provider";
 import { PasswordCard } from "@/features/profile/profile-page";
@@ -91,22 +92,23 @@ function EnrollmentNotice({ p }: { p: OkProfile }) {
 const classLabel = (p: OkProfile) => p.enrollment?.sectionDisplayName ?? (p.enrollment?.className ? `${p.enrollment.className}${p.enrollment.sectionName ? `-${p.enrollment.sectionName}` : ""}` : "—");
 
 /** Student-portal pages backed by the school's real records (live mode). */
-const LIVE_MODULES = [
-  { label: "My Timetable", href: "/student/timetable" },
-  { label: "My Homework", href: "/student/homework" },
-  { label: "My Results", href: "/student/results" },
-  { label: "My Fees", href: "/student/fees" },
-  { label: "Notices", href: "/student/notices" },
+const LIVE_MODULES: { label: string; href: string; module: ModuleKey }[] = [
+  { label: "My Timetable", href: "/student/timetable", module: "academics" },
+  { label: "My Homework", href: "/student/homework", module: "academics" },
+  { label: "My Results", href: "/student/results", module: "academics" },
+  { label: "My Fees", href: "/student/fees", module: "finance" },
+  { label: "Notices", href: "/student/notices", module: "administration" },
 ];
 
 // ------------------------------------------------------------------ dashboard
 export function LiveStudentDashboard() {
   const p = useMyProfile();
-  const { user } = useSession();
+  const { user, hasModule } = useSession();
+  const attendanceOn = hasModule("attendance");
   const unread = useSchoolQuery(api.notifications.unreadCount, {});
   const attendance = useSchoolQuery(
     api.attendance.studentHistory,
-    p?.state === "ok" && p.academicYear && p.enrollment ? { studentId: p.student.studentId } : "skip",
+    attendanceOn && p?.state === "ok" && p.academicYear && p.enrollment ? { studentId: p.student.studentId } : "skip",
   );
   if (p === undefined) return <LoadingState variant="page" label="Loading your dashboard" />;
   if (p.state === "no_student_record") return <MissingRecord />;
@@ -121,14 +123,14 @@ export function LiveStudentDashboard() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Class & section" value={<span data-testid="dash-class">{classLabel(p)}</span>} icon={<GraduationCap className="h-5 w-5" />} hint={p.enrollment?.classTeacher ? `Class teacher: ${p.enrollment.classTeacher}` : undefined} />
         <StatCard label="Roll number" value={<span data-testid="dash-roll">{p.enrollment?.rollNo ?? "—"}</span>} icon={<Hash className="h-5 w-5" />} tone="sapphire" hint="Assigned alphabetically by the school" />
-        <StatCard
+        {attendanceOn && <StatCard
           label="Attendance this year"
           value={attendance?.percentage != null ? `${attendance.percentage}%` : "—"}
           icon={<CalendarCheck2 className="h-5 w-5" />}
           tone="purple"
           hint={attendance ? (attendance.percentage == null ? "No attendance marked yet" : `${attendance.totals.presentCount + attendance.totals.lateCount} of ${attendance.records.filter((r) => r.status !== "excused").length} days`) : undefined}
           href="/student/attendance"
-        />
+        />}
         <StatCard label="Unread notifications" value={unread ?? "—"} icon={<Bell className="h-5 w-5" />} tone="lavender" href="/student/notifications" />
       </div>
       <div className="mt-5 grid gap-4 lg:grid-cols-3">
@@ -147,7 +149,7 @@ export function LiveStudentDashboard() {
           <CardHeader title="My school" description="Records kept by your school office" />
           <CardBody>
             <ul className="space-y-2 text-sm">
-              {LIVE_MODULES.map((m) => <li key={m.href}><Link href={m.href} className="font-medium text-lagoon hover:underline">{m.label}</Link></li>)}
+              {LIVE_MODULES.filter((m) => hasModule(m.module)).map((m) => <li key={m.href}><Link href={m.href} className="font-medium text-lagoon hover:underline">{m.label}</Link></li>)}
             </ul>
           </CardBody>
         </Card>

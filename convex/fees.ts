@@ -32,7 +32,7 @@
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
-import { schoolMutation, schoolQuery } from "./core/functions";
+import { moduleQuery, moduleMutation } from "./core/functions";
 import type { Actor } from "./core/actor";
 import { enrollmentFor, getCurrentAcademicYearId, getInSchool, getSchoolSettings, hasPermission, requireAnyPermission, requirePermission, requireStudentAccess } from "./core/authorization";
 import { conflict, invalid, invalidRelationship, notFound } from "./core/errors";
@@ -48,6 +48,9 @@ const activeEnrollments = (ctx: Ctx, yearId: Id<"academicYears">) => activeEnrol
 const schoolYearFees = (ctx: Ctx, yearId: Id<"academicYears">) => schoolYearFeesOf(ctx, ctx.actor.schoolId, yearId);
 import { writeAudit } from "./model/audit";
 import { notifyUsers, userIdsForStudent } from "./model/notifications";
+
+const financeQuery = moduleQuery("finance");
+const financeMutation = moduleMutation("finance");
 
 type Ctx = QueryCtx & { actor: Actor };
 
@@ -96,7 +99,7 @@ function structureView(s: Doc<"feeStructures">) {
 }
 
 // ================================================================ structures
-export const listStructures = schoolQuery({
+export const listStructures = financeQuery({
   args: { academicYearId: v.optional(v.id("academicYears")) },
   handler: async (ctx, { academicYearId }) => {
     requireAnyPermission(ctx.actor, ["fees:manage", "reports:finance"]);
@@ -120,7 +123,7 @@ export const listStructures = schoolQuery({
   },
 });
 
-export const createStructure = schoolMutation({
+export const createStructure = financeMutation({
   args: {
     academicYearId: v.optional(v.id("academicYears")), name: v.string(), classIds: v.array(v.id("classes")), components: v.array(vComponent), installments: v.array(vInstallment),
     /** Create it already active (ready to assign) instead of as a draft. */
@@ -142,7 +145,7 @@ export const createStructure = schoolMutation({
 });
 
 /** Edit a structure. Amounts and installments can only change while no student has been assigned it. */
-export const updateStructure = schoolMutation({
+export const updateStructure = financeMutation({
   args: { structureId: v.id("feeStructures"), name: v.optional(v.string()), classIds: v.optional(v.array(v.id("classes"))), components: v.optional(v.array(vComponent)), installments: v.optional(v.array(vInstallment)) },
   handler: async (ctx, a) => {
     requirePermission(ctx.actor, "fees:manage");
@@ -167,7 +170,7 @@ export const updateStructure = schoolMutation({
   },
 });
 
-export const setStructureStatus = schoolMutation({
+export const setStructureStatus = financeMutation({
   args: { structureId: v.id("feeStructures"), status: v.union(v.literal("active"), v.literal("archived")) },
   handler: async (ctx, { structureId, status }) => {
     requirePermission(ctx.actor, "fees:manage");
@@ -187,7 +190,7 @@ export const setStructureStatus = schoolMutation({
  * Ineligible students are rejected for explicit lists and skipped for
  * section/class targets; already-assigned students are skipped.
  */
-export const assignStructure = schoolMutation({
+export const assignStructure = financeMutation({
   args: {
     structureId: v.id("feeStructures"),
     target: v.union(
@@ -253,7 +256,7 @@ export const assignStructure = schoolMutation({
 });
 
 /** Cancel a student's obligations of one structure — only if nothing has been paid against them. */
-export const cancelAssignment = schoolMutation({
+export const cancelAssignment = financeMutation({
   args: { studentId: v.id("students"), structureId: v.id("feeStructures"), reason: v.string() },
   handler: async (ctx, a) => {
     requirePermission(ctx.actor, "fees:manage");
@@ -275,7 +278,7 @@ export const cancelAssignment = schoolMutation({
 });
 
 // ================================================================ concessions
-export const addConcession = schoolMutation({
+export const addConcession = financeMutation({
   args: {
     studentId: v.id("students"), academicYearId: v.optional(v.id("academicYears")), studentFeeId: v.optional(v.id("studentFees")),
     kind: vConcessionKind, value: v.number(), reason: v.string(),
@@ -300,7 +303,7 @@ export const addConcession = schoolMutation({
   },
 });
 
-export const revokeConcession = schoolMutation({
+export const revokeConcession = financeMutation({
   args: { concessionId: v.id("feeConcessions"), reason: v.string() },
   handler: async (ctx, { concessionId, reason }) => {
     requirePermission(ctx.actor, "fees:manage");
@@ -328,7 +331,7 @@ export function allocate(amountMinor: number, outstanding: { obligationId: Id<"s
   return { allocations, unallocated: left };
 }
 
-export const recordPayment = schoolMutation({
+export const recordPayment = financeMutation({
   args: {
     studentId: v.id("students"), academicYearId: v.optional(v.id("academicYears")), amountMinor: v.number(), method: vPaymentMethod,
     paidOn: v.string(), reference: v.optional(v.string()), note: v.optional(v.string()),
@@ -380,7 +383,7 @@ export const recordPayment = schoolMutation({
 });
 
 /** Reverse a payment (append-only: a new row points at the original). Its allocations stop counting. */
-export const reversePayment = schoolMutation({
+export const reversePayment = financeMutation({
   args: { paymentId: v.id("feePayments"), reason: v.string() },
   handler: async (ctx, { paymentId, reason }) => {
     requirePermission(ctx.actor, "fees:manage");
@@ -401,7 +404,7 @@ export const reversePayment = schoolMutation({
 
 // ================================================================ reads
 /** A student's ledger for a year: obligations (with status), concessions, payments, receipts, balance and standing. */
-export const studentLedger = schoolQuery({
+export const studentLedger = financeQuery({
   args: { studentId: v.id("students"), academicYearId: v.optional(v.id("academicYears")) },
   handler: async (ctx, { studentId, academicYearId }) => {
     const student = await requireStudentAccess(ctx, studentId, OWN);
@@ -444,7 +447,7 @@ export const studentLedger = schoolQuery({
 });
 
 /** One receipt with its payment, allocations, who recorded it and the student's balance now (fee managers, or the student themself). */
-export const receipt = schoolQuery({
+export const receipt = financeQuery({
   args: { receiptId: v.id("receipts") },
   handler: async (ctx, { receiptId }) => {
     const r = await getInSchool(ctx, "receipts", receiptId, "Receipt");
@@ -473,7 +476,7 @@ export const receipt = schoolQuery({
 });
 
 /** Payments in a date range (≤ 366 days): totals by method and the rows (fee managers / finance reports). */
-export const collectionSummary = schoolQuery({
+export const collectionSummary = financeQuery({
   args: { from: v.string(), to: v.string() },
   handler: async (ctx, { from, to }) => {
     requireAnyPermission(ctx.actor, ["fees:manage", "reports:finance"]);
@@ -510,7 +513,7 @@ const FINANCE = ["fees:manage", "reports:finance"] as const;
  * students actively enrolled in the year. Monthly collections and recent
  * payments use effective payments only (reversed ones excluded).
  */
-export const overview = schoolQuery({
+export const overview = financeQuery({
   args: { academicYearId: v.optional(v.id("academicYears")) },
   handler: async (ctx, { academicYearId }) => {
     requireAnyPermission(ctx.actor, [...FINANCE]);
@@ -562,7 +565,7 @@ export const overview = schoolQuery({
 });
 
 /** Balance of every actively enrolled student of the year (optionally one class / section), with filters. */
-export const listBalances = schoolQuery({
+export const listBalances = financeQuery({
   args: {
     academicYearId: v.optional(v.id("academicYears")), classId: v.optional(v.id("classes")), sectionId: v.optional(v.id("sections")),
     standing: v.optional(vStanding), search: v.optional(v.string()), dueBy: v.optional(v.string()),
@@ -603,7 +606,7 @@ export const listBalances = schoolQuery({
 });
 
 /** Payments of a year, newest first, with receipt numbers (reversed ones are flagged, not hidden). */
-export const listPayments = schoolQuery({
+export const listPayments = financeQuery({
   args: {
     academicYearId: v.optional(v.id("academicYears")), from: v.optional(v.string()), to: v.optional(v.string()),
     classId: v.optional(v.id("classes")), method: v.optional(vPaymentMethod), search: v.optional(v.string()), limit: v.optional(v.number()),

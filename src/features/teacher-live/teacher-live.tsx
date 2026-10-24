@@ -400,11 +400,13 @@ function MarksSheet({ examSubjectId, sectionId }: { examSubjectId: Id<"examSubje
 // ------------------------------------------------------------------ dashboard (landing page)
 /** The live teacher landing page: today's work from Convex for the signed-in teacher only. */
 export function LiveTeacherDashboard() {
+  const { user, hasModule } = useSession();
+  // Panels follow the school's module entitlements; a disabled module's query is not called.
+  const A = hasModule("attendance"), AC = hasModule("academics"), AD = hasModule("administration");
   const d = useSchoolQuery(api.dashboards.teacherOverview, {});
-  const notices = useSchoolQuery(api.notices.feed, {});
-  const { user } = useSession();
+  const notices = useSchoolQuery(api.notices.feed, AD ? {} : "skip");
   if (d === undefined) return <LoadingState variant="cards" label="Loading your day" />;
-  const pendingRegisters = d.isWorkingDay ? d.classTeacherOf.filter((s) => !s.registerMarked) : [];
+  const pendingRegisters = A && d.isWorkingDay ? d.classTeacherOf.filter((s) => s.registerMarked === false) : [];
   const toReview = d.homeworkToReview.reduce((a, h) => a + h.pending, 0);
   const marksLeft = d.marksTasks.reduce((a, t) => a + (t.total - t.entered), 0);
   const nothingAssigned = d.classTeacherOf.length === 0 && d.assignments.length === 0;
@@ -421,8 +423,8 @@ export function LiveTeacherDashboard() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <LinkButton href="/teacher/homework" variant="outline"><Plus className="h-4 w-4" /> Homework</LinkButton>
-          <LinkButton href="/teacher/attendance"><CalendarDays className="h-4 w-4" /> {d.classTeacherOf.length ? "Mark attendance" : "View attendance"}</LinkButton>
+          {AC && <LinkButton href="/teacher/homework" variant="outline"><Plus className="h-4 w-4" /> Homework</LinkButton>}
+          {A && <LinkButton href="/teacher/attendance"><CalendarDays className="h-4 w-4" /> {d.classTeacherOf.length ? "Mark attendance" : "View attendance"}</LinkButton>}
         </div>
       </div>
 
@@ -431,14 +433,14 @@ export function LiveTeacherDashboard() {
       ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Registers to mark today" value={pendingRegisters.length} hint={d.isWorkingDay ? (d.classTeacherOf.length ? `${d.classTeacherOf.length - pendingRegisters.length}/${d.classTeacherOf.length} marked` : "You are not a class teacher") : "Not a school day"} icon={<CalendarDays className="h-5 w-5" />} tone="sapphire" href="/teacher/attendance" />
-        <StatCard label="Lessons today" value={d.todayLessons.length} hint={d.todayLessons.length ? `First at ${clock(d.todayLessons[0].startTime)}` : "None scheduled"} icon={<BookOpenCheck className="h-5 w-5" />} tone="teal" href="/teacher/timetable" />
-        <StatCard label="Submissions to review" value={toReview} hint={`${d.homeworkToReview.length} homework item${d.homeworkToReview.length === 1 ? "" : "s"}`} icon={<ClipboardList className="h-5 w-5" />} tone="purple" href="/teacher/homework" />
-        <StatCard label="Marks to enter" value={marksLeft} hint={`${d.marksTasks.length} paper${d.marksTasks.length === 1 ? "" : "s"} open`} icon={<Save className="h-5 w-5" />} tone="lavender" href="/teacher/examinations/marks" />
+        {A && <StatCard label="Registers to mark today" value={pendingRegisters.length} hint={d.isWorkingDay ? (d.classTeacherOf.length ? `${d.classTeacherOf.length - pendingRegisters.length}/${d.classTeacherOf.length} marked` : "You are not a class teacher") : "Not a school day"} icon={<CalendarDays className="h-5 w-5" />} tone="sapphire" href="/teacher/attendance" />}
+        {AC && <StatCard label="Lessons today" value={d.todayLessons.length} hint={d.todayLessons.length ? `First at ${clock(d.todayLessons[0].startTime)}` : "None scheduled"} icon={<BookOpenCheck className="h-5 w-5" />} tone="teal" href="/teacher/timetable" />}
+        {AC && <StatCard label="Submissions to review" value={toReview} hint={`${d.homeworkToReview.length} homework item${d.homeworkToReview.length === 1 ? "" : "s"}`} icon={<ClipboardList className="h-5 w-5" />} tone="purple" href="/teacher/homework" />}
+        {AC && <StatCard label="Marks to enter" value={marksLeft} hint={`${d.marksTasks.length} paper${d.marksTasks.length === 1 ? "" : "s"} open`} icon={<Save className="h-5 w-5" />} tone="lavender" href="/teacher/examinations/marks" />}
       </div>
 
       <div className="grid gap-5 lg:grid-cols-2">
-        <Card>
+        {AC && <Card>
           <CardHeader title="Today's lessons" description={d.isWorkingDay ? "From the school's published timetable." : "No lessons on non-working days."} />
           <div className="p-5 pt-2">
             {d.todayLessons.length === 0 ? <EmptyState icon={<CalendarDays className="h-6 w-6" />} title="No lessons scheduled today" description="Lessons appear here once the school places them in the timetable." /> : (
@@ -453,8 +455,8 @@ export function LiveTeacherDashboard() {
               </ul>
             )}
           </div>
-        </Card>
-        <Card>
+        </Card>}
+        {A && <Card>
           <CardHeader title="Attendance registers" description="Sections you own as class teacher." />
           <div className="p-5 pt-2">
             {d.classTeacherOf.length === 0 ? <EmptyState title="You are not a class teacher" description="Only a section's class teacher marks its register." /> : (
@@ -468,8 +470,8 @@ export function LiveTeacherDashboard() {
               </ul>
             )}
           </div>
-        </Card>
-        <Card>
+        </Card>}
+        {AC && <Card>
           <CardHeader title="Homework to review" description="Your open homework with submissions waiting for feedback." />
           <div className="p-5 pt-2">
             {d.homeworkToReview.length === 0 ? <EmptyState title="Nothing waiting for review" /> : (
@@ -483,8 +485,8 @@ export function LiveTeacherDashboard() {
               </ul>
             )}
           </div>
-        </Card>
-        <Card>
+        </Card>}
+        {AC && <Card>
           <CardHeader title="Marks to enter" description="Papers you are assigned to, in exams open for marks entry." />
           <div className="p-5 pt-2">
             {d.marksTasks.length === 0 ? <EmptyState title="No marks pending" /> : (
@@ -498,10 +500,10 @@ export function LiveTeacherDashboard() {
               </ul>
             )}
           </div>
-        </Card>
+        </Card>}
       </div>
 
-      <Card>
+      {AD && <Card>
         <CardHeader title="Recent notices" action={<Link href="/teacher/notices" className="text-[13px] font-medium text-lagoon hover:underline">All notices</Link>} />
         <div className="p-5 pt-2">
           {notices === undefined ? <LoadingState variant="inline" /> : notices.length === 0 ? <EmptyState title="No notices" /> : (
@@ -512,7 +514,7 @@ export function LiveTeacherDashboard() {
             </ul>
           )}
         </div>
-      </Card>
+      </Card>}
     </div>
   );
 }

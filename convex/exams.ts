@@ -29,7 +29,7 @@
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
-import { schoolMutation, schoolQuery } from "./core/functions";
+import { moduleQuery, moduleMutation } from "./core/functions";
 import type { Actor } from "./core/actor";
 import {
   getCurrentAcademicYearId, getInSchool, getSchoolSettings, hasPermission, isSubjectTeacherOf, requireAnyPermission, requirePermission, teacherSectionIds,
@@ -40,6 +40,9 @@ import { activeRoster, fullName, subjectInCurriculum } from "./model/academics";
 import { gradeFor } from "./model/grading";
 import { writeAudit } from "./model/audit";
 import { notifyUsers, userIdsForStudent } from "./model/notifications";
+
+const academicsQuery = moduleQuery("academics");
+const academicsMutation = moduleMutation("academics");
 
 type Ctx = QueryCtx & { actor: Actor };
 const ENTRY_STATUSES: ExamStatusValue[] = ["in_progress", "marks_entry"];
@@ -80,7 +83,7 @@ function examView(e: Doc<"exams">) {
 
 // ================================================================ exams
 /** Admin: all exams of the year. Teachers: exams of classes they teach in. */
-export const list = schoolQuery({
+export const list = academicsQuery({
   args: { academicYearId: v.optional(v.id("academicYears")) },
   handler: async (ctx, { academicYearId }) => {
     requireAnyPermission(ctx.actor, ["exams:manage", "exams:read:assigned"]);
@@ -99,7 +102,7 @@ export const list = schoolQuery({
   },
 });
 
-export const get = schoolQuery({
+export const get = academicsQuery({
   args: { examId: v.id("exams") },
   handler: async (ctx, { examId }) => {
     requireAnyPermission(ctx.actor, ["exams:manage", "exams:read:assigned"]);
@@ -127,7 +130,7 @@ async function validateDates(ctx: Ctx, yearId: Id<"academicYears">, startDate: s
   if (startDate < year.startDate || endDate > year.endDate) throw invalid(`Exam dates must fall within ${year.name}.`, { startDate: "Outside the year" });
 }
 
-export const create = schoolMutation({
+export const create = academicsMutation({
   args: { academicYearId: v.optional(v.id("academicYears")), name: v.string(), term: v.optional(v.string()), classIds: v.array(v.id("classes")), startDate: v.string(), endDate: v.string() },
   handler: async (ctx, a) => {
     requirePermission(ctx.actor, "exams:manage");
@@ -147,7 +150,7 @@ export const create = schoolMutation({
   },
 });
 
-export const update = schoolMutation({
+export const update = academicsMutation({
   args: { examId: v.id("exams"), name: v.optional(v.string()), term: v.optional(v.string()), classIds: v.optional(v.array(v.id("classes"))), startDate: v.optional(v.string()), endDate: v.optional(v.string()) },
   handler: async (ctx, a) => {
     requirePermission(ctx.actor, "exams:manage");
@@ -182,7 +185,7 @@ export const update = schoolMutation({
 });
 
 /** Move the exam forward (never back, never to `published` — use publish). */
-export const setStatus = schoolMutation({
+export const setStatus = academicsMutation({
   args: { examId: v.id("exams"), status: v.union(v.literal("scheduled"), v.literal("in_progress"), v.literal("marks_entry")) },
   handler: async (ctx, { examId, status }) => {
     requirePermission(ctx.actor, "exams:manage");
@@ -198,7 +201,7 @@ export const setStatus = schoolMutation({
 
 // ================================================================ papers
 /** Add or edit the paper for (class, subject) in an exam. */
-export const upsertPaper = schoolMutation({
+export const upsertPaper = academicsMutation({
   args: {
     examId: v.id("exams"), classId: v.id("classes"), subjectId: v.id("subjects"),
     date: v.string(), startTime: v.string(), endTime: v.string(), maxMarks: v.number(), passMarks: v.number(),
@@ -235,7 +238,7 @@ export const upsertPaper = schoolMutation({
   },
 });
 
-export const removePaper = schoolMutation({
+export const removePaper = academicsMutation({
   args: { examSubjectId: v.id("examSubjects") },
   handler: async (ctx, { examSubjectId }) => {
     requirePermission(ctx.actor, "exams:manage");
@@ -251,7 +254,7 @@ export const removePaper = schoolMutation({
 
 // ================================================================ marks
 /** The marks sheet for one paper in one section (marks enterers and exam managers). */
-export const marksSheet = schoolQuery({
+export const marksSheet = academicsQuery({
   args: { examSubjectId: v.id("examSubjects"), sectionId: v.id("sections") },
   handler: async (ctx, { examSubjectId, sectionId }) => {
     const paper = await getInSchool(ctx, "examSubjects", examSubjectId, "Paper");
@@ -277,7 +280,7 @@ export const marksSheet = schoolQuery({
 });
 
 /** Enter/correct marks for students of one section (upsert per student). */
-export const enterMarks = schoolMutation({
+export const enterMarks = academicsMutation({
   args: {
     examSubjectId: v.id("examSubjects"), sectionId: v.id("sections"),
     entries: v.array(v.object({ studentId: v.id("students"), marks: v.optional(v.number()), isAbsent: v.boolean() })),
@@ -335,7 +338,7 @@ export function rankByPercentage<T extends { percentage: number }>(rows: T[]): (
 }
 
 /** Publish: requires complete marks; writes results snapshots, locks the exam and notifies students once. */
-export const publish = schoolMutation({
+export const publish = academicsMutation({
   args: { examId: v.id("exams") },
   handler: async (ctx, { examId }) => {
     requirePermission(ctx.actor, "exams:publish");
@@ -407,7 +410,7 @@ export const publish = schoolMutation({
 });
 
 /** Section results of a PUBLISHED exam (exam managers; teachers for sections in their scope). */
-export const sectionResults = schoolQuery({
+export const sectionResults = academicsQuery({
   args: { examId: v.id("exams"), sectionId: v.id("sections") },
   handler: async (ctx, { examId, sectionId }) => {
     const exam = await getInSchool(ctx, "exams", examId, "Exam");
@@ -439,7 +442,7 @@ export const sectionResults = schoolQuery({
  * how many active students have a mark row (a number or "absent").
  * `ready` is true when publish would succeed (every paper complete).
  */
-export const progress = schoolQuery({
+export const progress = academicsQuery({
   args: { examId: v.id("exams") },
   handler: async (ctx, { examId }) => {
     requirePermission(ctx.actor, "exams:manage");

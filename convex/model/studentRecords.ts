@@ -71,6 +71,7 @@ export function studentFields(s: Doc<"students">) {
     firstName: s.firstName,
     lastName: s.lastName,
     admissionNo: s.admissionNo,
+    scholarNo: s.scholarNo ?? null,
     admissionDate: s.admissionDate ?? null,
     status: s.status,
     gender: s.gender ?? null,

@@ -107,6 +107,19 @@ export async function teacherSectionIds(ctx: QueryCtx, teacherId: Id<"teachers">
   return ids;
 }
 
+/**
+ * Sections whose data the actor may READ at the "assigned" tier in a year:
+ * their teaching sections (teacherSectionIds) plus any sections the Principal
+ * added to their Students/Attendance view grants (`actor.sectionScope`).
+ * Use only for READ checks — teaching duties (marking attendance, homework,
+ * marks entry) keep using the teacher's own assignments.
+ */
+export async function readScopeSectionIds(ctx: QueryCtx, actor: Actor, academicYearId: Id<"academicYears">): Promise<Set<Id<"sections">>> {
+  const ids = actor.teacherId ? await teacherSectionIds(ctx, actor.teacherId, academicYearId) : new Set<Id<"sections">>();
+  for (const id of actor.sectionScope) ids.add(id);
+  return ids;
+}
+
 /** Require that the actor teaches (any subject) in, or is class teacher of, the section. */
 export async function requireTeacherAssignment(ctx: Ctx, sectionId: Id<"sections">): Promise<Doc<"sections">> {
   const section = await getInSchool(ctx, "sections", sectionId, "Section");
@@ -128,8 +141,8 @@ export async function requireSectionRead(
 ): Promise<Doc<"sections">> {
   const section = await getInSchool(ctx, "sections", sectionId, "Section");
   if (hasPermission(ctx.actor, perms.all)) return section;
-  if (hasPermission(ctx.actor, perms.assigned) && ctx.actor.teacherId) {
-    const ids = await teacherSectionIds(ctx, ctx.actor.teacherId, section.academicYearId);
+  if (hasPermission(ctx.actor, perms.assigned)) {
+    const ids = await readScopeSectionIds(ctx, ctx.actor, section.academicYearId);
     if (ids.has(section._id)) return section;
   }
   throw forbidden();
@@ -178,11 +191,11 @@ export async function requireStudentAccess(
   const { actor } = ctx;
   if (perms.all && hasPermission(actor, perms.all)) return student;
 
-  if (perms.assigned && hasPermission(actor, perms.assigned) && actor.teacherId) {
+  if (perms.assigned && hasPermission(actor, perms.assigned) && (actor.teacherId || actor.sectionScope.length)) {
     const yearId = await getCurrentAcademicYearId(ctx, actor.schoolId);
     const enrollment = await enrollmentFor(ctx, student._id, yearId);
     if (enrollment && enrollment.status === "active") {
-      const scope = await teacherSectionIds(ctx, actor.teacherId, yearId);
+      const scope = await readScopeSectionIds(ctx, actor, yearId);
       if (scope.has(enrollment.sectionId)) return student;
     }
   }

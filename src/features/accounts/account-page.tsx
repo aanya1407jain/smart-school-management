@@ -13,7 +13,7 @@ import { LogoMark } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
 import { useSession } from "@/features/auth/session-provider";
 import { PasswordCard } from "@/features/profile/profile-page";
-import { homeRouteFor } from "@/lib/permissions";
+import { landingRouteFor } from "@/lib/permissions";
 
 export function AccountPage() {
   const { status, user, viewer, notice, mustChangePassword, logout } = useSession();
@@ -30,7 +30,7 @@ export function AccountPage() {
     if (mustChangePassword) wasForced.current = true;
     else if (wasForced.current && status === "authenticated" && user) {
       wasForced.current = false;
-      router.replace(homeRouteFor(user));
+      router.replace(landingRouteFor(user));
     }
   }, [mustChangePassword, status, user, router]);
 
@@ -90,7 +90,7 @@ export function AccountPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <Button variant="outline" onClick={async () => { await logout(); router.replace("/login"); }}><LogOut className="h-4 w-4" /> Sign out</Button>
           {user && !mustChangePassword && (
-            <Link href={homeRouteFor(user)} className="inline-flex items-center gap-1.5 text-sm font-medium text-lagoon hover:text-sapphire">
+            <Link href={landingRouteFor(user)} className="inline-flex items-center gap-1.5 text-sm font-medium text-lagoon hover:text-sapphire">
               Go to my portal <ArrowRight className="h-4 w-4" />
             </Link>
           )}

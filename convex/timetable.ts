@@ -16,18 +16,21 @@
  */
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import { schoolMutation, schoolQuery } from "./core/functions";
-import { getInSchool, getSchoolSettings, hasPermission, isSubjectTeacherOf, requirePermission, requireSectionRead } from "./core/authorization";
+import { moduleQuery, moduleMutation } from "./core/functions";
+import { getInSchool, getSchoolSettings, isSubjectTeacherOf, requirePermission, requireSectionRead } from "./core/authorization";
 import { conflict, forbidden, invalid, invalidRelationship } from "./core/errors";
 import { assertNonEmpty, assertTime } from "./core/validators";
 import { subjectInCurriculum, teacherDisplayName } from "./model/academics";
 import { timetableFor } from "./model/studentRecords";
 import { writeAudit } from "./model/audit";
 
+const academicsQuery = moduleQuery("academics");
+const academicsMutation = moduleMutation("academics");
+
 const roomKey = (room?: string) => room?.trim().toLowerCase() || null;
 
 // ================================================================ periods
-export const listPeriods = schoolQuery({
+export const listPeriods = academicsQuery({
   args: {},
   handler: async (ctx) => {
     const rows = await ctx.db.query("periods").withIndex("by_school_index", (q) => q.eq("schoolId", ctx.actor.schoolId)).collect();
@@ -36,7 +39,7 @@ export const listPeriods = schoolQuery({
 });
 
 /** Create or edit one period. Positions are unique; periods may not overlap in time. */
-export const upsertPeriod = schoolMutation({
+export const upsertPeriod = academicsMutation({
   args: { periodId: v.optional(v.id("periods")), index: v.number(), label: v.string(), startTime: v.string(), endTime: v.string(), isBreak: v.boolean() },
   handler: async (ctx, a) => {
     requirePermission(ctx.actor, "timetable:manage");
@@ -68,7 +71,7 @@ export const upsertPeriod = schoolMutation({
   },
 });
 
-export const removePeriod = schoolMutation({
+export const removePeriod = academicsMutation({
   args: { periodId: v.id("periods") },
   handler: async (ctx, { periodId }) => {
     requirePermission(ctx.actor, "timetable:manage");
@@ -83,7 +86,7 @@ export const removePeriod = schoolMutation({
 
 // ================================================================ lessons
 /** Place (or replace) the lesson in one section slot. */
-export const setEntry = schoolMutation({
+export const setEntry = academicsMutation({
   args: {
     sectionId: v.id("sections"), dayOfWeek: v.number(), periodId: v.id("periods"),
     subjectId: v.id("subjects"), teacherId: v.id("teachers"), room: v.optional(v.string()),
@@ -137,7 +140,7 @@ export const setEntry = schoolMutation({
   },
 });
 
-export const removeEntry = schoolMutation({
+export const removeEntry = academicsMutation({
   args: { entryId: v.id("timetableEntries") },
   handler: async (ctx, { entryId }) => {
     requirePermission(ctx.actor, "timetable:manage");
@@ -149,7 +152,7 @@ export const removeEntry = schoolMutation({
 });
 
 /** A section's week (admin: any section; teachers: sections in their scope). */
-export const sectionTimetable = schoolQuery({
+export const sectionTimetable = academicsQuery({
   args: { sectionId: v.id("sections") },
   handler: async (ctx, { sectionId }) => {
     const section = await requireSectionRead(ctx, sectionId, { all: "timetable:manage", assigned: "timetable:read:own" });
@@ -158,7 +161,7 @@ export const sectionTimetable = schoolQuery({
 });
 
 /** The calling teacher's own week across sections. */
-export const myTimetable = schoolQuery({
+export const myTimetable = academicsQuery({
   args: {},
   handler: async (ctx) => {
     requirePermission(ctx.actor, "timetable:read:own");
@@ -175,6 +178,3 @@ export const myTimetable = schoolQuery({
     return { periods: periods.map((p) => ({ periodId: p._id, index: p.index, label: p.label, startTime: p.startTime, endTime: p.endTime, isBreak: p.isBreak })), lessons };
   },
 });
-
-/** Whether the caller can manage the timetable (UI helper; the mutations check again). */
-export const canManage = schoolQuery({ args: {}, handler: async (ctx) => hasPermission(ctx.actor, "timetable:manage") });

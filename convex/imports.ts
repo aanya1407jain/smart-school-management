@@ -13,11 +13,14 @@
  * the default admission date and as the "not in the future" bound.
  */
 import { v } from "convex/values";
-import { schoolMutation, schoolQuery } from "./core/functions";
+import { schoolMutation, schoolQuery, moduleQuery, moduleMutation } from "./core/functions";
 import { requirePermission } from "./core/authorization";
 import type { Actor } from "./core/actor";
 import { assertIsoDate } from "./core/validators";
 import { analyzeStudents, analyzeTeachers, commitStudents, commitTeachers, summarize } from "./model/importers";
+
+const studentsQuery = moduleQuery("students");
+const studentsMutation = moduleMutation("students");
 
 const vRows = v.array(v.object({ rowNumber: v.number(), values: v.record(v.string(), v.string()) }));
 const importArgs = { rows: vRows, createAccounts: v.boolean(), today: v.string() };
@@ -27,7 +30,7 @@ function authorize(actor: Actor, target: "students" | "teachers", createAccounts
   if (createAccounts) requirePermission(actor, "users:manage");
 }
 
-export const previewStudents = schoolQuery({
+export const previewStudents = studentsQuery({
   args: importArgs,
   handler: async (ctx, { rows, createAccounts, today }) => {
     authorize(ctx.actor, "students", createAccounts);
@@ -37,7 +40,7 @@ export const previewStudents = schoolQuery({
   },
 });
 
-export const commitStudentRows = schoolMutation({
+export const commitStudentRows = studentsMutation({
   args: importArgs,
   handler: async (ctx, { rows, createAccounts, today }) => {
     authorize(ctx.actor, "students", createAccounts);

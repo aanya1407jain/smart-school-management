@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { LogoMark } from "@/components/brand/logo";
 import { useSession } from "@/features/auth/session-provider";
-import { homeRouteFor } from "@/lib/permissions";
+import { landingRouteFor } from "@/lib/permissions";
 import { useSchoolProfile } from "@/lib/hooks/use-school-profile";
 import { PRODUCT } from "@/lib/constants/product";
 
@@ -16,7 +16,7 @@ export default function SplashPage() {
 
   useEffect(() => {
     if (status === "loading") return;
-    const t = setTimeout(() => router.replace(user ? homeRouteFor(user) : "/login"), 2300);
+    const t = setTimeout(() => router.replace(user ? landingRouteFor(user) : "/login"), 2300);
     return () => clearTimeout(t);
   }, [status, user, router]);
 

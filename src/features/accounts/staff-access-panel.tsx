@@ -8,6 +8,7 @@
  * nobody can change their own access here.
  */
 import { useState } from "react";
+import Link from "next/link";
 import { Calculator, KeyRound, MoreHorizontal, Power, PowerOff, ShieldCheck, UserPlus } from "lucide-react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
@@ -20,7 +21,7 @@ import { errorMessage } from "@/lib/convex/errors";
 import { canonicalLoginId, LOGIN_ID_RULES_TEXT } from "@convex/model/loginIds";
 import { CredentialsModal, type IssuedCredential } from "./credentials-modal";
 
-type Row = { membershipId: Id<"schoolMemberships">; loginId: string | null; displayName: string; email: string | null; state: "pending" | "active" | "suspended"; accountantOnly: boolean; isSelf: boolean };
+type Row = { membershipId: Id<"schoolMemberships">; loginId: string | null; displayName: string; email: string | null; state: "pending" | "active" | "suspended"; accountantOnly: boolean; isSelf: boolean; customAccess: string | null };
 type Pending = { row: Row; action: "reset" | "suspend" | "reactivate" | "restrict" | "unrestrict" };
 
 const COPY: Record<Pending["action"], { title: string; body: (n: string) => string; label: string; danger?: boolean }> = {
@@ -62,7 +63,7 @@ export function StaffAccessPanel() {
   const columns: Column<Row>[] = [
     { key: "name", header: "Name", primary: true, cell: (r) => <div className="min-w-0"><p className="truncate font-medium text-ink">{r.displayName}{r.isSelf && <span className="ml-1.5 text-[12px] font-normal text-ink-muted">(you)</span>}</p>{r.email && <p className="text-[12.5px] text-ink-muted">{r.email}</p>}</div> },
     { key: "login", header: "Login ID", cell: (r) => <span className="font-mono text-[13px] text-ink">{r.loginId ?? "—"}</span> },
-    { key: "access", header: "Access", cell: (r) => r.accountantOnly ? <Badge tone="lavender"><Calculator className="h-3 w-3" /> Accountant only</Badge> : <Badge tone="sapphire"><ShieldCheck className="h-3 w-3" /> Administrator</Badge> },
+    { key: "access", header: "Access", cell: (r) => r.customAccess ? <Link href="/admin/permissions" title={r.customAccess} className="hover:underline"><Badge tone="plum"><ShieldCheck className="h-3 w-3" /> Custom access</Badge></Link> : r.accountantOnly ? <Badge tone="lavender"><Calculator className="h-3 w-3" /> Accountant only</Badge> : <Badge tone="sapphire"><ShieldCheck className="h-3 w-3" /> Administrator</Badge> },
     { key: "state", header: "Status", cell: (r) => <Badge dot tone={r.state === "active" ? "teal" : r.state === "pending" ? "lavender" : "plum"}>{r.state === "active" ? "Active" : r.state === "pending" ? "Pending" : "Suspended"}</Badge> },
   ];
 
@@ -77,7 +78,9 @@ export function StaffAccessPanel() {
                 <DropdownTrigger asChild><Button variant="ghost" size="icon-sm" aria-label={`Access actions for ${r.displayName}`}><MoreHorizontal className="h-4 w-4" /></Button></DropdownTrigger>
                 <DropdownContent>
                   {r.state !== "suspended" && <DropdownItem onSelect={() => setPending({ row: r, action: "reset" })}><KeyRound className="h-4 w-4" /> {r.state === "pending" ? "Issue password" : "Reset password"}</DropdownItem>}
-                  {r.accountantOnly
+                  {r.customAccess
+                    ? <DropdownItem onSelect={() => { window.location.href = "/admin/permissions"; }}><ShieldCheck className="h-4 w-4" /> Edit permissions</DropdownItem>
+                    : r.accountantOnly
                     ? <DropdownItem onSelect={() => setPending({ row: r, action: "unrestrict" })}><ShieldCheck className="h-4 w-4" /> Give full admin access</DropdownItem>
                     : <DropdownItem onSelect={() => setPending({ row: r, action: "restrict" })}><Calculator className="h-4 w-4" /> Restrict to accountant</DropdownItem>}
                   {r.state === "active" && <DropdownItem tone="danger" onSelect={() => setPending({ row: r, action: "suspend" })}><PowerOff className="h-4 w-4" /> Suspend</DropdownItem>}

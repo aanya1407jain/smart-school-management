@@ -9,6 +9,7 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { as, createSchool, errorCode, makeTest, type T } from "./fixtures";
 import { liveStaffUser, liveWorkspaceUser } from "../../src/features/auth/live-user";
 import { isLiveRoute, liveNavItems } from "../../src/lib/permissions/navigation";
+import { MODULE_KEYS } from "../../convex/core/modules";
 
 async function signedInAfterPasswordChange(t: T, membershipId: Id<"schoolMemberships">, temporaryPassword: string) {
   const m = (await t.run((ctx) => ctx.db.get(membershipId)))!;
@@ -116,9 +117,12 @@ describe("live admin / teacher sessions", () => {
     for (const p of ["/admin/unknown", "/teacher/payroll", "/admin/payroll/run"]) {
       expect(isLiveRoute(p), p).toBe(false);
     }
-    expect(liveNavItems({ role: "teacher", permissionSets: [] }).map((i) => i.href)).toEqual(["/teacher/dashboard", "/teacher/classes", "/teacher/attendance", "/teacher/homework", "/teacher/examinations", "/teacher/timetable", "/teacher/notices", "/teacher/notifications", "/teacher/profile"]);
-    expect(liveNavItems({ role: "admin", permissionSets: [] }).map((i) => i.href)).toEqual(["/admin/dashboard", "/admin/students", "/admin/academics", "/admin/teachers", "/admin/accounts", "/admin/attendance", "/admin/fees", "/admin/examinations", "/admin/timetable", "/admin/homework", "/admin/notices", "/admin/notifications", "/admin/reports", "/admin/audit", "/admin/settings", "/admin/profile"]);
+    // Module entitlements: a real session always carries the school's modules (here: all five, an
+    // unconfigured school). Module filtering itself is tested in module-entitlements.test.ts.
+    const modules = [...MODULE_KEYS];
+    expect(liveNavItems({ role: "teacher", permissionSets: [], modules }).map((i) => i.href)).toEqual(["/teacher/dashboard", "/teacher/classes", "/teacher/attendance", "/teacher/homework", "/teacher/examinations", "/teacher/timetable", "/teacher/notices", "/teacher/notifications", "/teacher/profile"]);
+    expect(liveNavItems({ role: "admin", permissionSets: [], modules }).map((i) => i.href)).toEqual(["/admin/dashboard", "/admin/students", "/admin/promotions", "/admin/academics", "/admin/teachers", "/admin/accounts", "/admin/permissions", "/admin/attendance", "/admin/fees", "/admin/examinations", "/admin/timetable", "/admin/homework", "/admin/notices", "/admin/notifications", "/admin/reports", "/admin/audit", "/admin/settings", "/admin/profile"]);
     // A restricted (accountant-only) admin sees finance pages only.
-    expect(liveNavItems({ role: "admin", permissionSets: ["accountant"] }).map((i) => i.href)).toEqual(["/admin/dashboard", "/admin/students", "/admin/fees", "/admin/notifications", "/admin/reports", "/admin/profile"]);
+    expect(liveNavItems({ role: "admin", permissionSets: ["accountant"], modules }).map((i) => i.href)).toEqual(["/admin/dashboard", "/admin/students", "/admin/fees", "/admin/notifications", "/admin/reports", "/admin/profile"]);
   });
 });

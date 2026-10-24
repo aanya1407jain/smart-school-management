@@ -15,7 +15,9 @@
  */
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import { schoolQuery } from "./core/functions";
+import { schoolQuery, moduleQuery } from "./core/functions";
+import { enabledList, moduleStateOf, requireModule } from "./model/modules";
+import type { ModuleKey } from "./core/modules";
 import { getCurrentAcademicYearId, getInSchool, hasPermission, requireAnyPermission, requirePermission } from "./core/authorization";
 import { conflict, invalid } from "./core/errors";
 import { assertIsoDate } from "./core/validators";
@@ -28,12 +30,15 @@ import { activeRoster, fullName } from "./model/academics";
 import { enrolledStudents } from "./model/studentCounts";
 import type { Actor } from "./core/actor";
 
+const administrationQuery = moduleQuery("administration");
+
 const MAX_STUDENTS = 5000;
 const MAX_REPORT_DAYS = 120;
 
-export const enrollmentSummary = schoolQuery({
+export const enrollmentSummary = administrationQuery({
   args: {},
   handler: async (ctx) => {
+    await requireModule(ctx, ctx.actor.schoolId, "students"); // data comes from that module (administration checked by the wrapper)
     requirePermission(ctx.actor, "reports:read");
     const yearId = await getCurrentAcademicYearId(ctx, ctx.actor.schoolId);
     const byStatus: Record<string, number> = {};
@@ -64,9 +69,10 @@ export const enrollmentSummary = schoolQuery({
   },
 });
 
-export const attendanceSummary = schoolQuery({
+export const attendanceSummary = administrationQuery({
   args: { from: v.string(), to: v.string() },
   handler: async (ctx, { from, to }) => {
+    await requireModule(ctx, ctx.actor.schoolId, "attendance"); // data comes from that module (administration checked by the wrapper)
     requireAnyPermission(ctx.actor, ["reports:read", "attendance:read:all"]);
     assertIsoDate(from, "from");
     assertIsoDate(to, "to");
@@ -100,9 +106,10 @@ export const attendanceSummary = schoolQuery({
 });
 
 /** Fee position for the year, per class. Reads each enrolled student's ledger once (≤ 5000 students). */
-export const feeSummary = schoolQuery({
+export const feeSummary = administrationQuery({
   args: { academicYearId: v.optional(v.id("academicYears")) },
   handler: async (ctx, { academicYearId }) => {
+    await requireModule(ctx, ctx.actor.schoolId, "finance"); // data comes from that module (administration checked by the wrapper)
     requireAnyPermission(ctx.actor, ["reports:finance", "fees:manage"]);
     const yearId = academicYearId ? (await getInSchool(ctx, "academicYears", academicYearId, "Academic year"))._id : await getCurrentAcademicYearId(ctx, ctx.actor.schoolId);
     const year = (await ctx.db.get(yearId))!;
@@ -112,9 +119,10 @@ export const feeSummary = schoolQuery({
   },
 });
 
-export const examPerformance = schoolQuery({
+export const examPerformance = administrationQuery({
   args: { examId: v.id("exams") },
   handler: async (ctx, { examId }) => {
+    await requireModule(ctx, ctx.actor.schoolId, "academics"); // data comes from that module (administration checked by the wrapper)
     requirePermission(ctx.actor, "reports:read");
     const exam = await getInSchool(ctx, "exams", examId, "Exam");
     if (exam.status !== "published") throw conflict("Performance reports use published results only.");
@@ -225,21 +233,26 @@ export const adminDashboard = schoolQuery({
     const today = todayIn(school.timezone);
     const yearId = settings.currentAcademicYearId ?? null;
     const year = yearId ? await ctx.db.get(yearId) : null;
-    const base = { school: { name: school.name, shortName: school.shortName, code: school.code }, academicYear: year ? { academicYearId: year._id, name: year.name } : null, today };
+    // Each panel comes from one module and is left out (null / empty) when the school does not have it:
+    // students → Student Management, attendance/leave/tasks → Attendance, exams → Academics,
+    // notices → Administration, fees → Finance. Sections and teachers are core.
+    const moduleState = await moduleStateOf(ctx, school._id);
+    const on = (k: ModuleKey) => moduleState.enabled.has(k);
+    const base = { school: { name: school.name, shortName: school.shortName, code: school.code }, academicYear: year ? { academicYearId: year._id, name: year.name } : null, today, modules: enabledList(moduleState) };
     if (!year) return { ...base, overview: null, fees: null };
 
     let overview = null;
     if (schoolWide) {
       // Same rule as the Students page (model/studentCounts.ts): distinct students enrolled this year.
-      const students = (await enrolledStudents(ctx, school._id, year._id)).size;
+      const students = on("students") ? (await enrolledStudents(ctx, school._id, year._id)).size : null;
       const sections = await ctx.db.query("sections").withIndex("by_school_year", (q) => q.eq("schoolId", school._id).eq("academicYearId", year._id)).collect();
       const teachers = await ctx.db.query("teachers").withIndex("by_school_status", (q) => q.eq("schoolId", school._id).eq("status", "active")).collect();
-      const approved = await ctx.db.query("leaveRequests").withIndex("by_school_status_from", (q) => q.eq("schoolId", school._id).eq("status", "approved").lte("fromDate", today)).collect();
-      const onLeave = new Set(approved.filter((l) => l.toDate >= today).map((l) => l.teacherId)).size;
-      const pendingLeave = (await ctx.db.query("leaveRequests").withIndex("by_school_status_from", (q) => q.eq("schoolId", school._id).eq("status", "pending")).take(500)).length;
+      const approved = on("attendance") ? await ctx.db.query("leaveRequests").withIndex("by_school_status_from", (q) => q.eq("schoolId", school._id).eq("status", "approved").lte("fromDate", today)).collect() : [];
+      const onLeave = on("attendance") ? new Set(approved.filter((l) => l.toDate >= today).map((l) => l.teacherId)).size : null;
+      const pendingLeave = on("attendance") ? (await ctx.db.query("leaveRequests").withIndex("by_school_status_from", (q) => q.eq("schoolId", school._id).eq("status", "pending")).take(500)).length : null;
       const lateCounts = settings.attendance.lateCountsAsPresent;
       // Attendance: today if any register is marked, else the latest marked date (within 60 days).
-      const recent = await ctx.db.query("attendanceSessions").withIndex("by_school_date", (q) => q.eq("schoolId", school._id).gte("date", addDays(today, -60)).lte("date", today)).order("desc").take(3000);
+      const recent = !on("attendance") ? [] : await ctx.db.query("attendanceSessions").withIndex("by_school_date", (q) => q.eq("schoolId", school._id).gte("date", addDays(today, -60)).lte("date", today)).order("desc").take(3000);
       const dates = [...new Set(recent.filter((s) => s.academicYearId === year._id).map((s) => s.date))].sort().reverse();
       const attDate = dates[0] ?? null;
       const att = attDate ? await attendanceOn(ctx, school._id, year._id, attDate, lateCounts) : null;
@@ -252,7 +265,7 @@ export const adminDashboard = schoolQuery({
         trend.push({ date: d, percentage: a.percentage });
       }
       // Latest published exam: class averages from the published result snapshots.
-      const exams = await ctx.db.query("exams").withIndex("by_school_year", (q) => q.eq("schoolId", school._id).eq("academicYearId", year._id)).collect();
+      const exams = !on("academics") ? [] : await ctx.db.query("exams").withIndex("by_school_year", (q) => q.eq("schoolId", school._id).eq("academicYearId", year._id)).collect();
       const published = exams.filter((e) => e.status === "published").sort((a, b) => b.startDate.localeCompare(a.startDate))[0] ?? null;
       const performance: { name: string; average: number }[] = [];
       if (published) {
@@ -270,7 +283,7 @@ export const adminDashboard = schoolQuery({
         for (const classId of e.classIds) papers += (await ctx.db.query("examSubjects").withIndex("by_exam_class", (q) => q.eq("examId", e._id).eq("classId", classId)).collect()).length;
         upcomingExams.push({ examId: e._id, name: e.name, status: e.status, startDate: e.startDate, endDate: e.endDate, classCount: e.classIds.length, paperCount: papers });
       }
-      const noticeRows = (await ctx.db.query("notices").withIndex("by_school_status_publish", (q) => q.eq("schoolId", school._id).eq("status", "published").lte("publishDate", today)).order("desc").take(20))
+      const noticeRows = !on("administration") ? [] : (await ctx.db.query("notices").withIndex("by_school_status_publish", (q) => q.eq("schoolId", school._id).eq("status", "published").lte("publishDate", today)).order("desc").take(20))
         .filter((n) => !n.expiresOn || n.expiresOn >= today).slice(0, 4);
       const notices = [];
       for (const n of noticeRows) notices.push({ noticeId: n._id, title: n.title, body: n.body, type: n.type, priority: n.priority, publishDate: n.publishDate, eventDate: n.eventDate ?? null, audienceLabel: await audienceLabel(ctx as Ctx, n.audience) });
@@ -280,12 +293,12 @@ export const adminDashboard = schoolQuery({
         attendanceTrend: trend,
         performance: { examName: published?.name ?? null, rows: performance },
         upcomingExams, notices,
-        tasks: { unmarkedToday: todaySchoolDay ? sections.length - markedToday : 0, pendingLeave, isSchoolDay: todaySchoolDay },
+        tasks: { unmarkedToday: !on("attendance") ? null : todaySchoolDay ? sections.length - markedToday : 0, pendingLeave, isSchoolDay: todaySchoolDay },
       };
     }
 
     let fees = null;
-    if (finance) {
+    if (finance && on("finance")) {
       const byClass = await feeByClass(ctx, school._id, year._id, today);
       const data = await schoolYearFees(ctx, school._id, year._id);
       let overdueStudents = 0;
@@ -306,9 +319,10 @@ export const adminDashboard = schoolQuery({
 
 // ================================================================ student statistics
 /** Students enrolled this year: by class and gender, by status, section fill, distinct parent contacts. */
-export const studentStatistics = schoolQuery({
+export const studentStatistics = administrationQuery({
   args: {},
   handler: async (ctx) => {
+    await requireModule(ctx, ctx.actor.schoolId, "students"); // data comes from that module (administration checked by the wrapper)
     requirePermission(ctx.actor, "reports:read");
     const yearId = await getCurrentAcademicYearId(ctx, ctx.actor.schoolId);
     const enrollments = await ctx.db.query("enrollments").withIndex("by_school_year", (q) => q.eq("schoolId", ctx.actor.schoolId).eq("academicYearId", yearId)).take(MAX_STUDENTS * 2 + 1);
@@ -358,9 +372,10 @@ export const studentStatistics = schoolQuery({
  * computed here (they would read every attendance record of the range).
  */
 export const MAX_ATTENDANCE_REPORT_DAYS = 366;
-export const attendanceReport = schoolQuery({
+export const attendanceReport = administrationQuery({
   args: { from: v.optional(v.string()), to: v.optional(v.string()) },
   handler: async (ctx, a) => {
+    await requireModule(ctx, ctx.actor.schoolId, "attendance"); // data comes from that module (administration checked by the wrapper)
     requireAnyPermission(ctx.actor, ["reports:read", "attendance:read:all"]);
     const school = (await ctx.db.get(ctx.actor.schoolId))!;
     const settings = (await ctx.db.query("schoolSettings").withIndex("by_school", (q) => q.eq("schoolId", school._id)).unique())!;
@@ -412,9 +427,10 @@ export const attendanceReport = schoolQuery({
  * than MAX_LOW_ATTENDANCE_RECORDS records asks the caller to choose a section.
  */
 export const MAX_LOW_ATTENDANCE_RECORDS = 15000;
-export const lowAttendance = schoolQuery({
+export const lowAttendance = administrationQuery({
   args: { sectionId: v.optional(v.id("sections")), from: v.optional(v.string()), to: v.optional(v.string()) },
   handler: async (ctx, a) => {
+    await requireModule(ctx, ctx.actor.schoolId, "attendance"); // data comes from that module (administration checked by the wrapper)
     requireAnyPermission(ctx.actor, ["reports:read", "attendance:read:all"]);
     const school = (await ctx.db.get(ctx.actor.schoolId))!;
     const settings = (await ctx.db.query("schoolSettings").withIndex("by_school", (q) => q.eq("schoolId", school._id)).unique())!;

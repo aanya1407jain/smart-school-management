@@ -7,11 +7,16 @@ import { Button, Card, CardHeader, EmptyState, GlassCard, QueryView, StatCard, B
 import { formatClock, formatLongDate, formatShortDate, greeting, todayISO, dueLabel, WEEKDAY_NAMES, formatDate } from "@/lib/utils/dates";
 import { NoticeListItem } from "@/features/notices/notice-list-item";
 import { cn } from "@/lib/utils/cn";
+import { useSession } from "@/features/auth/session-provider";
 
 export function TeacherDashboard() {
+  // Demo-persona dashboard (in-browser demo data). Panels follow the school's module entitlements from the
+  // server session, like the live dashboard; with every module enabled it looks exactly as before.
+  const { hasModule } = useSession();
+  const A = hasModule("attendance"), AC = hasModule("academics"), AD = hasModule("administration");
   const q = useQuery(() => services.dashboard.getTeacherDashboard(), []);
-  const marks = useQuery(() => services.exams.getMarkEntryTasks(), []);
-  const upcoming = useQuery(() => services.exams.getUpcoming(4), []);
+  const marks = useQuery(() => services.exams.getMarkEntryTasks(), [AC], { enabled: AC });
+  const upcoming = useQuery(() => services.exams.getUpcoming(4), [AC], { enabled: AC });
 
   return (
     <QueryView query={q}>
@@ -32,20 +37,20 @@ export function TeacherDashboard() {
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <LinkButton href="/teacher/homework?action=new" variant="outline"><Plus className="h-4 w-4" /> Create homework</LinkButton>
-                <LinkButton href="/teacher/attendance"><CalendarCheck2 className="h-4 w-4" /> {classTeacherTask ? "Mark attendance" : "View attendance"}</LinkButton>
+                {AC && <LinkButton href="/teacher/homework?action=new" variant="outline"><Plus className="h-4 w-4" /> Create homework</LinkButton>}
+                {A && <LinkButton href="/teacher/attendance"><CalendarCheck2 className="h-4 w-4" /> {classTeacherTask ? "Mark attendance" : "View attendance"}</LinkButton>}
               </div>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatCard label={d.day.isToday ? "Classes today" : `Classes on ${WEEKDAY_NAMES[d.day.weekday]}`} value={d.classes.length} icon={<Presentation className="h-5 w-5" />} hint={d.classes[0] ? `First at ${formatClock(d.classes[0].startTime)}` : "No classes scheduled"} href="/teacher/timetable" />
-              <StatCard label="Attendance to mark" value={pendingAttendance.length} icon={<CalendarCheck2 className="h-5 w-5" />} tone="purple" hint={!d.isSchoolDay ? "No school today" : pendingAttendance.length ? `For today, ${formatShortDate(todayISO())}` : "All registers are done"} href="/teacher/attendance" />
-              <StatCard label="Submissions to review" value={toReview} icon={<ClipboardList className="h-5 w-5" />} tone="sapphire" hint={`${d.homework.length} active homework`} href="/teacher/homework" />
+              {AC && <StatCard label={d.day.isToday ? "Classes today" : `Classes on ${WEEKDAY_NAMES[d.day.weekday]}`} value={d.classes.length} icon={<Presentation className="h-5 w-5" />} hint={d.classes[0] ? `First at ${formatClock(d.classes[0].startTime)}` : "No classes scheduled"} href="/teacher/timetable" />}
+              {A && <StatCard label="Attendance to mark" value={pendingAttendance.length} icon={<CalendarCheck2 className="h-5 w-5" />} tone="purple" hint={!d.isSchoolDay ? "No school today" : pendingAttendance.length ? `For today, ${formatShortDate(todayISO())}` : "All registers are done"} href="/teacher/attendance" />}
+              {AC && <StatCard label="Submissions to review" value={toReview} icon={<ClipboardList className="h-5 w-5" />} tone="sapphire" hint={`${d.homework.length} active homework`} href="/teacher/homework" />}
               <StatCard label="My students" value={d.studentCount} icon={<Users className="h-5 w-5" />} tone="lavender" hint={`${d.assignments.length} subject–class assignments`} href="/teacher/classes" />
             </div>
 
-            <div className="grid gap-4 lg:grid-cols-3">
-              <GlassCard className="lg:col-span-2">
+            {(AC || A) && <div className="grid gap-4 lg:grid-cols-3">
+              {AC && <GlassCard className="lg:col-span-2">
                 <CardHeader
                   title={d.day.isToday ? "Today's classes" : `Next school day · ${formatDate(d.day.date)}`}
                   description={d.day.isToday ? "Your teaching schedule for today" : "No school today — here's what's coming up"}
@@ -75,9 +80,9 @@ export function TeacherDashboard() {
                     </ol>
                   )}
                 </div>
-              </GlassCard>
+              </GlassCard>}
 
-              <GlassCard>
+              {A && <GlassCard>
                 <CardHeader title="Attendance tasks" description={d.attendanceTasks.length === 0 ? "Attendance is marked by each section's class teacher" : d.isSchoolDay ? `Registers for ${formatShortDate(todayISO())}` : "No school today — registers open on the next school day"} icon={<CalendarCheck2 className="h-4 w-4" />} />
                 <ul className="space-y-2 p-5">
                   {d.attendanceTasks.map((t) => (
@@ -96,11 +101,11 @@ export function TeacherDashboard() {
                     </li>
                   ))}
                 </ul>
-              </GlassCard>
-            </div>
+              </GlassCard>}
+            </div>}
 
             <div className="grid gap-4 lg:grid-cols-3">
-              <Card>
+              {AC && <Card>
                 <CardHeader title="Pending homework" description="Active assignments and submissions" icon={<ClipboardList className="h-4 w-4" />} action={<Link href="/teacher/homework" className="text-[13px] font-medium text-lagoon hover:underline">Manage</Link>} />
                 <ul className="space-y-3 p-5">
                   {d.homework.length === 0 && <EmptyState title="No homework assigned yet" action={<LinkButton href="/teacher/homework?action=new" size="sm">Create homework</LinkButton>} className="py-4" />}
@@ -120,9 +125,9 @@ export function TeacherDashboard() {
                     </li>
                   ))}
                 </ul>
-              </Card>
+              </Card>}
 
-              <Card>
+              {AC && <Card>
                 <CardHeader title="Examinations" description="Marks entry and upcoming papers" icon={<BookOpenCheck className="h-4 w-4" />} action={<Link href="/teacher/examinations" className="text-[13px] font-medium text-lagoon hover:underline">Open</Link>} />
                 <div className="space-y-4 p-5">
                   {(marks.data ?? []).length > 0 && (
@@ -150,7 +155,7 @@ export function TeacherDashboard() {
                     {upcoming.data && upcoming.data.length === 0 && (marks.data ?? []).length === 0 && <EmptyState title="No upcoming examinations" className="py-4" />}
                   </ul>
                 </div>
-              </Card>
+              </Card>}
 
               <Card>
                 <CardHeader title="Assigned subjects" description="What you teach this year" icon={<Presentation className="h-4 w-4" />} />
@@ -167,13 +172,13 @@ export function TeacherDashboard() {
               </Card>
             </div>
 
-            <Card>
+            {AD && <Card>
               <CardHeader title="Recent notices" icon={<Megaphone className="h-4 w-4" />} action={<Link href="/teacher/notices" className="text-[13px] font-medium text-lagoon hover:underline">All notices</Link>} />
               <ul className="divide-y divide-line/60 px-5 pb-3 pt-1">
                 {d.notices.length === 0 && <EmptyState title="No notices yet" className="py-6" />}
                 {d.notices.map((n) => <NoticeListItem key={n.id} notice={n} compact />)}
               </ul>
-            </Card>
+            </Card>}
           </div>
         );
       }}

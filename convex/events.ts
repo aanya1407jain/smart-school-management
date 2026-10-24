@@ -9,13 +9,16 @@
  */
 import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
-import { schoolMutation, schoolQuery } from "./core/functions";
+import { moduleQuery, moduleMutation } from "./core/functions";
 import { getInSchool, hasPermission, requirePermission } from "./core/authorization";
 import { conflict, invalid } from "./core/errors";
 import { assertIsoDate, assertNonEmpty, vAudience, vEventKind } from "./core/validators";
 import { daysBetween } from "./model/calendar";
 import { writeAudit } from "./model/audit";
 import { inAudience, validateAudience } from "./notices";
+
+const administrationQuery = moduleQuery("administration");
+const administrationMutation = moduleMutation("administration");
 
 const MAX_EVENT_DAYS = 60;
 const MAX_LIST_DAYS = 400;
@@ -36,7 +39,7 @@ async function assertNoRegisters(ctx: Parameters<typeof getInSchool>[0], startDa
   if (marked) throw conflict(`Attendance is already marked on ${marked.date}; a holiday cannot cover that date.`);
 }
 
-export const create = schoolMutation({
+export const create = administrationMutation({
   args: { title: v.string(), description: v.optional(v.string()), kind: vEventKind, startDate: v.string(), endDate: v.string(), audience: vAudience },
   handler: async (ctx, a) => {
     requirePermission(ctx.actor, "notices:manage");
@@ -55,7 +58,7 @@ export const create = schoolMutation({
   },
 });
 
-export const update = schoolMutation({
+export const update = administrationMutation({
   args: { eventId: v.id("events"), title: v.optional(v.string()), description: v.optional(v.string()), startDate: v.optional(v.string()), endDate: v.optional(v.string()), audience: v.optional(vAudience) },
   handler: async (ctx, a) => {
     requirePermission(ctx.actor, "notices:manage");
@@ -77,7 +80,7 @@ export const update = schoolMutation({
   },
 });
 
-export const remove = schoolMutation({
+export const remove = administrationMutation({
   args: { eventId: v.id("events") },
   handler: async (ctx, { eventId }) => {
     requirePermission(ctx.actor, "notices:manage");
@@ -89,7 +92,7 @@ export const remove = schoolMutation({
 });
 
 /** Events overlapping [from, to] (≤ 400 days) that are addressed to the caller. */
-export const list = schoolQuery({
+export const list = administrationQuery({
   args: { from: v.string(), to: v.string() },
   handler: async (ctx, { from, to }) => {
     assertIsoDate(from, "from");

@@ -14,7 +14,7 @@ import { ImportWizard } from "./import-wizard";
 import { StaffAccessPanel } from "./staff-access-panel";
 
 export function AccountsWorkspace() {
-  const { user } = useSession();
+  const { user, hasModule } = useSession();
   const header = (
     <PageHeader
       title="Accounts & Import"
@@ -29,7 +29,8 @@ export function AccountsWorkspace() {
       </div>
     );
   }
-  const canStudents = hasPermission(user, "students:write");
+  // Adding or importing students is Student Management (module entitlement); student sign-in accounts stay core.
+  const canStudents = hasPermission(user, "students:write") && hasModule("students");
   const canStaff = hasPermission(user, "staff:manage");
   const canAccounts = hasPermission(user, "users:manage");
   const importTargets: ImportTarget[] = [...(canStudents ? ["students" as const] : []), ...(canStaff ? ["teachers" as const] : [])];

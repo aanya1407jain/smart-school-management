@@ -31,6 +31,15 @@ export type Actor = {
   teacherId?: Id<"teachers">;
   /** Set when the member IS a student. */
   studentId?: Id<"students">;
+  /**
+   * Teachers only: extra sections the Principal limited this member's
+   * Students/Attendance VIEW grants to (core/grants.ts). They widen the
+   * member's READ scope (core/authorization.ts readScopeSectionIds) and never
+   * teaching duties (marking, homework, marks entry).
+   */
+  sectionScope: readonly Id<"sections">[];
+  /** The member's grants are a restricted office login (admin membership with grants). */
+  restricted: boolean;
 };
 
 /**
@@ -73,13 +82,18 @@ export function actorFromMembership(user: Doc<"users">, m: Doc<"schoolMembership
     membershipId: m._id,
     schoolId: m.schoolId,
     role: m.role,
-    permissions: resolvePermissions(m.role, m.permissionSets),
+    permissions: resolvePermissions(m.role, m.permissionSets, {
+      grants: m.role === "student" ? undefined : m.grants,
+      sectionLimited: m.role === "teacher" && (m.sectionScope?.length ?? 0) > 0,
+    }),
     permissionSets: m.permissionSets,
     displayName: m.displayName,
     loginId: user.loginId ?? m.loginId ?? null,
     email: m.email ?? user.email ?? null,
     teacherId: m.teacherId,
     studentId: m.studentId,
+    sectionScope: m.role === "teacher" ? (m.sectionScope ?? []) : [],
+    restricted: m.role === "admin" && (m.grants !== undefined || m.permissionSets.includes("accountant")),
   };
 }
 
