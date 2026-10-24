@@ -344,6 +344,20 @@ export interface HomeworkSubmission {
   feedback: string | null;
 }
 
+// ---------------------------------------------------------------- Achievements
+/** Admin dashboard "Student Achievements & Honors" showcase (demo data only; not a stored record yet). */
+export type AchievementCategory = "sports" | "academic" | "special";
+export interface StudentAchievement {
+  id: ID;
+  studentName: string;
+  /** e.g. "10-A" */
+  classLabel: string;
+  category: AchievementCategory;
+  title: string;
+  highlight: string;
+  date: ISODate;
+}
+
 // ---------------------------------------------------------------- Notices
 export type NoticeType = "notice" | "event" | "holiday";
 export type NoticePriority = "low" | "normal" | "high" | "urgent";

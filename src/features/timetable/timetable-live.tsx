@@ -14,6 +14,7 @@ import type { Id } from "@convex/_generated/dataModel";
 import { useSchoolMutation, useSchoolQuery } from "@/lib/convex/membership";
 import { getAppError } from "@/lib/convex/errors";
 import { Badge, Button, Card, CardHeader, Checkbox, ConfirmDialog, EmptyState, FormField, Input, LoadingState, Modal, PageHeader, Select, useToast } from "@/components/ui";
+import { TimetableGrid } from "./timetable-grid";
 
 const errText = (e: unknown) => getAppError(e)?.message ?? (e instanceof Error ? e.message : String(e));
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -70,31 +71,24 @@ function SectionWeek({ sectionId, classId, workingDays }: { sectionId: Id<"secti
   const periods = [...week.periods].sort((a, b) => a.index - b.index);
   const days = [...workingDays].sort((a, b) => a - b);
   if (periods.length === 0) return <div className="p-5"><EmptyState title="Add periods first" description="The bell schedule above is empty." /></div>;
+  const byId = new Map(periods.map((p) => [p.periodId as string, p]));
+  const lessonOf = (d: number, periodId: string) => week.lessons.find((x) => x.dayOfWeek === d && x.periodId === periodId);
   return (
-    <div className="overflow-x-auto p-5 pt-2">
-      <table className="w-full min-w-[720px] text-sm">
-        <caption className="sr-only">Weekly lessons for Class {week.section.displayName}</caption>
-        <thead><tr><th scope="col" className="px-2 py-2 text-left text-[12px] font-semibold text-ink-muted">Period</th>{days.map((d) => <th key={d} scope="col" className="px-2 py-2 text-left text-[12px] font-semibold text-ink-muted">{WEEKDAYS[d]}</th>)}</tr></thead>
-        <tbody>
-          {periods.map((p) => (
-            <tr key={p.periodId} className="border-t border-line/50 align-top">
-              <th scope="row" className="whitespace-nowrap px-2 py-2 text-left font-medium text-ink">{p.label}<span className="block text-[11px] font-normal text-ink-muted">{p.startTime}–{p.endTime}</span></th>
-              {days.map((d) => {
-                const l = week.lessons.find((x) => x.dayOfWeek === d && x.periodId === p.periodId);
-                if (p.isBreak) return <td key={d} className="px-2 py-2 text-[12px] text-ink-muted">Break</td>;
-                return (
-                  <td key={d} className="px-1 py-1">
-                    <button type="button" onClick={() => setSlot({ dayOfWeek: d, period: p, lesson: l })} aria-label={`${WEEKDAYS[d]} ${p.label}: ${l ? `${l.subject} with ${l.teacher}` : "empty"}`}
-                      className="w-full rounded-lg border border-dashed border-line px-2 py-1.5 text-left hover:border-teal hover:bg-teal-soft/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal">
-                      {l ? <><span className="block font-semibold text-ink">{l.subject}</span><span className="block text-[11.5px] text-ink-muted">{l.teacher}{l.room ? ` · ${l.room}` : ""}</span></> : <span className="text-[12px] text-ink-muted">+ Add</span>}
-                    </button>
-                  </td>
-                );
-              })}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="p-5 pt-2">
+      <TimetableGrid
+        caption={`Weekly lessons for Class ${week.section.displayName}`}
+        days={days}
+        periods={periods.map((p) => ({ key: p.periodId, label: p.label, startTime: p.startTime, endTime: p.endTime, isBreak: p.isBreak }))}
+        lessonAt={(d, gp) => {
+          const l = lessonOf(d, gp.key);
+          return l ? { subject: l.subject, detail: [l.room, l.teacher].filter(Boolean).join(" · ") } : undefined;
+        }}
+        onSlotClick={(d, gp) => setSlot({ dayOfWeek: d, period: byId.get(gp.key)!, lesson: lessonOf(d, gp.key) })}
+        slotLabel={(d, gp) => {
+          const l = lessonOf(d, gp.key);
+          return `${WEEKDAYS[d]} ${gp.label}: ${l ? `${l.subject} with ${l.teacher}` : "empty"}`;
+        }}
+      />
       {slot && <LessonModal sectionId={sectionId} classId={classId} sectionName={week.section.displayName} slot={slot} onClose={() => setSlot(null)} />}
     </div>
   );

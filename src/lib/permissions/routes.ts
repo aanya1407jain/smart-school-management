@@ -29,7 +29,6 @@ export const ROUTE_RULES: RouteRule[] = [
   { pattern: r("/admin/fees"), anyOf: ["fees:manage"], module: "finance" },
   { pattern: r("/admin/examinations"), anyOf: ["exams:manage"], module: "academics" },
   { pattern: r("/admin/timetable"), anyOf: ["timetable:manage"], module: "academics" },
-  { pattern: r("/admin/homework"), anyOf: ["homework:read:all"], module: "academics" },
   { pattern: r("/admin/notices"), anyOf: ["notices:manage"], module: "administration" },
   { pattern: r("/admin/notifications"), anyOf: ["notifications:read"] },
   { pattern: r("/admin/reports"), anyOf: ["reports:read", "reports:finance"], module: "administration" },
