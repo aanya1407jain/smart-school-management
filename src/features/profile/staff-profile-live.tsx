@@ -15,12 +15,15 @@ import { errorMessage } from "@/lib/convex/errors";
 import { Avatar, Badge, Button, Card, CardHeader, ConfirmDialog, DataTable, EmptyState, FormField, Input, LoadingState, Modal, PageHeader, Select, StatusBadge, Textarea, useToast } from "@/components/ui";
 import { formatDate, todayISO } from "@/lib/utils/dates";
 import { PasswordCard } from "./profile-page";
+import { useSession } from "@/features/auth/session-provider";
 
 type LeaveType = FunctionArgs<typeof api.staff.applyLeave>["type"];
 export const LEAVE_LABEL: Record<LeaveType, string> = { casual: "Casual", sick: "Sick", earned: "Earned", duty: "On duty" };
 
 export function LiveStaffProfile() {
   const p = useSchoolQuery(api.profile.mine, {});
+  // Leave requests belong to Attendance & Operations (module entitlement).
+  const attendanceOn = useSession().hasModule("attendance");
   if (p === undefined) return <LoadingState />;
   return (
     <div className="space-y-6" data-testid="live-staff-profile">
@@ -51,7 +54,7 @@ export function LiveStaffProfile() {
           </Card>
         </div>
       )}
-      {p.teacher && <MyLeave />}
+      {p.teacher && attendanceOn && <MyLeave />}
     </div>
   );
 }

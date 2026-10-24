@@ -1,5 +1,15 @@
 # Implementation status — Smart School Management System
 
+## Update — 24 Oct 2026: P1 school module entitlements (DONE, uncommitted)
+
+_On `feat/convex-backend-foundation` @ `bc8856d`, uncommitted; not deployed anywhere. Evidence: `docs/VERIFICATION_REPORT.md` (top section). Rules: `docs/BACKEND.md` §5b._
+
+- Each school can be entitled to any of five modules: `students`, `academics`, `attendance`, `finance`, `administration` (`convex/core/modules.ts`). Table `schoolModules`; policy in `convex/model/modules.ts` (unconfigured school = the original five; configured school = only rows that say enabled; fail-closed on missing, duplicate or dependency problems).
+- Server enforcement: 91 public functions (academics 32, administration 20, finance 17, attendance 13, students 9) moved to `moduleQuery` / `moduleMutation` (error `MODULE_DISABLED`); reports also require their data module; mixed views (admin and teacher dashboards, student profile, files by kind) leave disabled parts out; fee reminders and notice notifications skip a disabled module.
+- Changes: operator only (`schoolModules:setSchoolModules`, internal; dry run; dependencies validated, never auto-enabled; audited `school.modules_changed`). `setup:initSchool` takes an optional `modules` list. No school role (Admin, Teacher, Student) can change entitlements.
+- UI: session returns `viewer.modules`; navigation, route guard ("not enabled for your school" page), dashboards, Accounts & Import, Academics enrollments, Teachers & Staff, profile leave, reports tabs and the student profile follow it.
+- Not done in P1 (by scope): permission profiles, lifecycle, finance books. No real school was configured or migrated.
+
 ## Update — 22 Oct 2026: student totals fixed; Guardian account type removed
 
 _Uncommitted on `feat/convex-backend-foundation` @ `2ba4f97` (the previously pushed MVP pass). Verified on the isolated local sandbox Convex backend only — no shared or production deployment was touched. Evidence: `docs/VERIFICATION_REPORT.md` (top section)._

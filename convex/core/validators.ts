@@ -6,11 +6,17 @@
  */
 import { v, type Infer } from "convex/values";
 import { ROLES, PERMISSION_SET_NAMES } from "./permissions";
+import { ACTIONS } from "./grants";
 import { invalid } from "./errors";
 import { canonicalLoginId, LOGIN_ID_RULES_TEXT } from "../model/loginIds";
 
 // ---------------------------------------------------------------- enums
 export const vRole = v.union(v.literal("admin"), v.literal("teacher"), v.literal("student"));
+
+/** Grant actions (core/grants.ts). */
+export const vAction = v.union(v.literal("view"), v.literal("create"), v.literal("edit"), v.literal("delete"), v.literal("approve"), v.literal("export"));
+const _actionsMatch: readonly Infer<typeof vAction>[] = ACTIONS;
+void _actionsMatch;
 export type RoleValue = Infer<typeof vRole>;
 // Compile-time guard: vRole must match the permission catalogue.
 const _rolesMatch: readonly RoleValue[] = ROLES;

@@ -24,6 +24,7 @@ import { requireActor, type Actor } from "./core/actor";
 import { getCurrentAcademicYearId, getInSchool, hasPermission, requirePermission } from "./core/authorization";
 import { AppError, forbidden, invalid } from "./core/errors";
 import { assertNonEmpty } from "./core/validators";
+import { describeAccess } from "./core/grants";
 import { fullName, teacherDisplayName } from "./model/academics";
 import { generateTemporaryPassword, PASSWORD_PROVIDER, provisionAccount, reserveAccount, temporaryPasswordFields } from "./model/accounts";
 import { accountTarget, writeAudit } from "./model/audit";
@@ -264,7 +265,7 @@ export const listPeople = schoolQuery({
   },
   handler: async (ctx, { kind, sectionId, search, paginationOpts }) => {
     const needle = search?.trim().toLowerCase() ?? "";
-    const matches = (s: Doc<"students">) => !needle || fullName(s).toLowerCase().includes(needle) || s.admissionNo.toLowerCase().includes(needle);
+    const matches = (s: Doc<"students">) => !needle || fullName(s).toLowerCase().includes(needle) || s.admissionNo.toLowerCase().includes(needle) || (!!s.scholarNo && s.scholarNo.toLowerCase().includes(needle));
     const { actor } = ctx;
     // Students: account managers, or anyone who may read every student record (the
     // admin students list); sign-in account details are returned only to users:manage.
@@ -343,7 +344,9 @@ export const listStaffAccounts = schoolQuery({
     return rows
       .map((m) => ({
         membershipId: m._id, loginId: m.loginId ?? null, displayName: m.displayName, email: m.email ?? null,
-        state: accountState(m), accountantOnly: m.permissionSets.includes("accountant"), isSelf: m._id === ctx.actor.membershipId,
+        state: accountState(m), accountantOnly: m.grants === undefined && m.permissionSets.includes("accountant"), isSelf: m._id === ctx.actor.membershipId,
+        /** Set by the Principal on Staff & Permissions (module × action grants); manage it there. */
+        customAccess: m.grants !== undefined ? describeAccess(m.role, m.grants, m.permissionSets) : null,
       }))
       .sort((a, b) => a.displayName.localeCompare(b.displayName));
   },

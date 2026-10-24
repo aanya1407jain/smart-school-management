@@ -22,6 +22,7 @@ import type { Id } from "@convex/_generated/dataModel";
 import { useSchoolMutation, useSchoolPaginatedQuery, useSchoolQuery } from "@/lib/convex/membership";
 import { Avatar, Button, Card, EmptyState, FormField, Input, LinkButton, LoadingState, PageHeader, SearchInput, Select, StatCard, Textarea, useToast } from "@/components/ui";
 import { useSession } from "@/features/auth/session-provider";
+import { errorMessage } from "@/lib/convex/errors";
 
 export function LiveStudentsList() {
   const { can } = useSession();
@@ -83,13 +84,13 @@ export function LiveStudentEdit({ studentId }: { studentId: string }) {
   const { toast } = useToast();
   const profile = useSchoolQuery(api.academics.getStudentProfile, { studentId });
   const update = useSchoolMutation(api.academics.updateStudentProfile);
-  const [form, setForm] = useState<null | { firstName: string; lastName: string; gender: string; dateOfBirth: string; email: string; phone: string; address: string; bloodGroup: string }>(null);
+  const [form, setForm] = useState<null | { firstName: string; lastName: string; gender: string; dateOfBirth: string; email: string; phone: string; address: string; bloodGroup: string; scholarNo: string }>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     if (profile && !form) {
       const s = profile.student;
-      setForm({ firstName: s.firstName, lastName: s.lastName, gender: s.gender ?? "", dateOfBirth: s.dateOfBirth ?? "", email: s.email ?? "", phone: s.phone ?? "", address: s.address ?? "", bloodGroup: s.bloodGroup ?? "" });
+      setForm({ firstName: s.firstName, lastName: s.lastName, gender: s.gender ?? "", dateOfBirth: s.dateOfBirth ?? "", email: s.email ?? "", phone: s.phone ?? "", address: s.address ?? "", bloodGroup: s.bloodGroup ?? "", scholarNo: s.scholarNo ?? "" });
     }
   }, [profile, form]);
   if (profile === undefined || (profile && !form)) return <LoadingState label="Loading student" />;
@@ -101,7 +102,7 @@ export function LiveStudentEdit({ studentId }: { studentId: string }) {
     setError(null);
     try {
       // Only changed fields are sent; the server validates every one (dates in the past, phone format, blood group).
-      const was = { firstName: s.firstName, lastName: s.lastName, gender: s.gender ?? "", dateOfBirth: s.dateOfBirth ?? "", email: s.email ?? "", phone: s.phone ?? "", address: s.address ?? "", bloodGroup: s.bloodGroup ?? "" };
+      const was = { firstName: s.firstName, lastName: s.lastName, gender: s.gender ?? "", dateOfBirth: s.dateOfBirth ?? "", email: s.email ?? "", phone: s.phone ?? "", address: s.address ?? "", bloodGroup: s.bloodGroup ?? "", scholarNo: s.scholarNo ?? "" };
       const changed = (k: keyof typeof was) => form[k].trim() !== was[k];
       const args = {
         studentId: s.studentId,
@@ -113,13 +114,15 @@ export function LiveStudentEdit({ studentId }: { studentId: string }) {
         ...(changed("phone") ? { phone: form.phone.trim() } : {}),
         ...(changed("address") ? { address: form.address.trim() } : {}),
         ...(changed("bloodGroup") ? { bloodGroup: form.bloodGroup } : {}),
+        // Unique in the school — the server refuses a number another student already has.
+        ...(changed("scholarNo") ? { scholarNo: form.scholarNo.trim() } : {}),
       };
       if (Object.keys(args).length === 1) return router.push(`/admin/students/${s.studentId}`);
       const r = await update(args);
       toast({ title: "Student updated", description: r.renumberedSections ? "Roll numbers were updated for the new name." : undefined });
       router.push(`/admin/students/${s.studentId}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -137,6 +140,7 @@ export function LiveStudentEdit({ studentId }: { studentId: string }) {
           <FormField label="Email"><Input type="email" value={form.email} onChange={set("email")} /></FormField>
           <FormField label="Phone"><Input value={form.phone} onChange={set("phone")} /></FormField>
           <FormField label="Blood group"><Select value={form.bloodGroup} onChange={set("bloodGroup")}>{BLOOD.map((b) => <option key={b} value={b}>{b || "—"}</option>)}</Select></FormField>
+          <FormField label="Scholar number" hint="The school's register number. Must be unique; leave empty if not used."><Input value={form.scholarNo} onChange={set("scholarNo")} maxLength={30} /></FormField>
         </div>
         <FormField label="Address"><Textarea rows={2} value={form.address} onChange={set("address")} /></FormField>
         {error && <p role="alert" className="text-[13px] text-plum">{error}</p>}

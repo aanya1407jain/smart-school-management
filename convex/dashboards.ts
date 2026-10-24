@@ -9,12 +9,16 @@
  *  - their open homework with submissions still to review;
  *  - marks still to enter for papers they are assigned to (exams open for entry).
  * Nothing from other teachers or other schools is returned.
+ * Module panels follow the school's entitlements (model/modules.ts): the
+ * register status needs Attendance; lessons, homework and marks need
+ * Academics. A disabled module's panel is empty (`registerMarked: null`).
  */
 import type { Doc, Id } from "./_generated/dataModel";
 import { schoolQuery } from "./core/functions";
 import { getCurrentAcademicYearId, getSchoolSettings, requirePermission } from "./core/authorization";
 import { activeRoster } from "./model/academics";
 import { todayIn } from "./model/calendar";
+import { enabledList, moduleStateOf } from "./model/modules";
 
 const MAX_ITEMS = 50;
 
@@ -32,9 +36,12 @@ export const teacherOverview = schoolQuery({
     const settings = await getSchoolSettings(ctx, ctx.actor.schoolId);
     const isWorkingDay = settings.workingDays.includes(weekday);
     const teacherId = ctx.actor.teacherId;
+    const moduleState = await moduleStateOf(ctx, ctx.actor.schoolId);
+    const attendanceOn = moduleState.enabled.has("attendance");
+    const academicsOn = moduleState.enabled.has("academics");
     const empty = {
-      today, weekday, isWorkingDay, hasTeacherRecord: !!teacherId,
-      classTeacherOf: [] as { sectionId: Id<"sections">; displayName: string; students: number; registerMarked: boolean }[],
+      today, weekday, isWorkingDay, hasTeacherRecord: !!teacherId, modules: enabledList(moduleState),
+      classTeacherOf: [] as { sectionId: Id<"sections">; displayName: string; students: number; registerMarked: boolean | null }[],
       assignments: [] as { sectionId: Id<"sections">; sectionName: string; subjectId: Id<"subjects">; subjectName: string }[],
       todayLessons: [] as { entryId: Id<"timetableEntries">; periodLabel: string; startTime: string; endTime: string; section: string; subject: string; room: string | null }[],
       homeworkToReview: [] as { homeworkId: Id<"homework">; title: string; section: string; subject: string; dueDate: string; pending: number }[],
@@ -49,8 +56,8 @@ export const teacherOverview = schoolQuery({
       .filter((s) => s.schoolId === ctx.actor.schoolId);
     for (const s of owned) {
       const students = (await activeRoster(ctx, s._id)).length;
-      const session = await ctx.db.query("attendanceSessions").withIndex("by_section_date", (q) => q.eq("sectionId", s._id).eq("date", today)).first();
-      empty.classTeacherOf.push({ sectionId: s._id, displayName: s.displayName, students, registerMarked: !!session });
+      const session = attendanceOn ? await ctx.db.query("attendanceSessions").withIndex("by_section_date", (q) => q.eq("sectionId", s._id).eq("date", today)).first() : undefined;
+      empty.classTeacherOf.push({ sectionId: s._id, displayName: s.displayName, students, registerMarked: attendanceOn ? !!session : null });
     }
 
     // Subject assignments.
@@ -68,6 +75,7 @@ export const teacherOverview = schoolQuery({
     empty.assignments.sort((x, y) => x.sectionName.localeCompare(y.sectionName, undefined, { numeric: true }) || x.subjectName.localeCompare(y.subjectName));
 
     // Today's lessons.
+    if (!academicsOn) return empty;
     const periods = new Map((await ctx.db.query("periods").withIndex("by_school_index", (q) => q.eq("schoolId", ctx.actor.schoolId)).collect()).map((p) => [p._id as string, p]));
     const lessons = (await ctx.db.query("timetableEntries").withIndex("by_teacher_day_period", (q) => q.eq("teacherId", teacherId).eq("dayOfWeek", weekday)).collect())
       .filter((e) => e.schoolId === ctx.actor.schoolId && e.academicYearId === yearId);

@@ -190,7 +190,9 @@ const safeTitle = (v?: string) => (v ? titleCase(v) : dash);
 /* ------------------------------------------------------------------ */
 
 function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
-  const { can } = useSession();
+  const { can, hasModule } = useSession();
+  // Sections follow the school's module entitlements (the server already leaves their data out).
+  const A = hasModule("attendance"), AC = hasModule("academics"), F = hasModule("finance"), S = hasModule("students");
   const s = p.student;
   const name = `${s.firstName} ${s.lastName}`.trim() || "Unnamed student";
   const age = s.dateOfBirth ? Math.floor(daysBetween(s.dateOfBirth, todayISO()) / 365.25) : null;
@@ -203,11 +205,10 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
   const tabs = [
     { value: "overview", label: "Overview" },
     { value: "academic", label: "Academic" },
-    { value: "attendance", label: "Attendance" },
-    ...(p.fees ? [{ value: "fees", label: "Fees" }] : []),
-    { value: "exams", label: "Examinations", count: p.results.length },
-    { value: "homework", label: "Homework", count: p.homework.length },
-    ...(p.access !== "assigned" ? [{ value: "documents", label: "Documents" }] : []),
+    ...(A ? [{ value: "attendance", label: "Attendance" }] : []),
+    ...(p.fees && F ? [{ value: "fees", label: "Fees" }] : []),
+    ...(AC ? [{ value: "exams", label: "Examinations", count: p.results.length }, { value: "homework", label: "Homework", count: p.homework.length }] : []),
+    ...(p.access !== "assigned" && S ? [{ value: "documents", label: "Documents" }] : []),
     { value: "parent", label: "Parent contact" },
   ];
 
@@ -235,22 +236,22 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
           </div>
           <div className="flex flex-wrap gap-2">
             {backHref && <LinkButton href={backHref} variant="ghost">Back</LinkButton>}
-            {isAdmin && s.id && <LinkButton href={`/admin/fees/${s.id}`} variant="outline"><Wallet className="h-4 w-4" /> Fee ledger</LinkButton>}
-            {isAdmin && s.id && <LinkButton href={`/admin/students/${s.id}/edit`}><Pencil className="h-4 w-4" /> Edit</LinkButton>}
+            {isAdmin && F && s.id && <LinkButton href={`/admin/fees/${s.id}`} variant="outline"><Wallet className="h-4 w-4" /> Fee ledger</LinkButton>}
+            {isAdmin && S && s.id && <LinkButton href={`/admin/students/${s.id}/edit`}><Pencil className="h-4 w-4" /> Edit</LinkButton>}
           </div>
         </div>
         <dl className="relative mt-6 grid grid-cols-2 gap-4 border-t border-white/70 pt-5 sm:grid-cols-4">
-          <Metric label="Attendance" value={pct != null ? formatPercent(pct, 1) : dash} tone={pct != null && pct < 85 ? "warn" : undefined} />
-          <Metric
+          {A && <Metric label="Attendance" value={pct != null ? formatPercent(pct, 1) : dash} tone={pct != null && pct < 85 ? "warn" : undefined} />}
+          {AC && <Metric
             label="Latest result"
             value={latest?.percentage != null ? `${formatPercent(latest.percentage, 1)}${latest.grade ? ` · ${latest.grade}` : ""}` : dash}
-          />
-          <Metric label="Pending homework" value={String(pendingHw)} />
-          <Metric
+          />}
+          {AC && <Metric label="Pending homework" value={String(pendingHw)} />}
+          {F && <Metric
             label="Fee balance"
             value={p.fees ? (p.fees.totals.outstandingMinor ? formatCurrency(p.fees.totals.outstandingMinor / 100) : p.fees.obligations.length ? "Paid" : "None assigned") : "Restricted"}
             tone={p.fees?.obligations.some((o) => o.outstandingMinor > 0 && o.dueDate < todayISO()) ? "warn" : undefined}
-          />
+          />}
         </dl>
       </GlassCard>
 
@@ -308,7 +309,7 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
               <Info icon={<UserRound />} label="Section" value={safe(p.enrollment?.sectionName)} />
               <Info icon={<UserRound />} label="Roll no." value={p.enrollment?.rollNo != null ? String(p.enrollment.rollNo) : dash} />
             </dl>
-            {isAdmin && s.id && p.enrollment?.status === "active" && (
+            {isAdmin && S && s.id && p.enrollment?.status === "active" && (
               <EnrollmentActions studentId={s.id} enrollmentId={p.enrollment.enrollmentId as string} sectionLabel={p.classLabel} studentName={name} />
             )}
             {p.teachers.length > 0 && (
@@ -325,7 +326,7 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
               </>
             )}
           </Card>
-          {p.access !== "assigned" && s.id && <div className="mt-4"><EnrollmentHistory studentId={s.id} /></div>}
+          {p.access !== "assigned" && S && s.id && <div className="mt-4"><EnrollmentHistory studentId={s.id} /></div>}
         </TabsContent>
 
         <TabsContent value="attendance">

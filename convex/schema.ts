@@ -19,11 +19,12 @@
 import { defineSchema, defineTable } from "convex/server";
 import { authTables } from "@convex-dev/auth/server";
 import { v } from "convex/values";
+import { vModuleKey } from "./core/modules";
 import {
   vAcademicYearStatus, vAttendanceStatus, vAudience, vConcessionKind, vEnrollmentStatus, vEntityRef, vEventKind,
   vExamStatus, vFileKind, vFileOwnerType, vGender, vHomeworkStatus, vLeaveStatus, vLeaveType, vMembershipStatus, vNoticeStatus,
   vNoticeType, vNotificationType, vPaymentMethod, vPaymentStatus, vPermissionSet, vPersonStatus, vPriority, vRole, vSchoolStatus,
-  vStaffAttendanceStatus, vStaffStatus, vSubmissionStatus,
+  vStaffAttendanceStatus, vStaffStatus, vSubmissionStatus, vAction,
 } from "./core/validators";
 
 export default defineSchema({
@@ -106,6 +107,27 @@ export default defineSchema({
   }).index("by_school", ["schoolId"]),
 
   /**
+   * Module entitlements: which configurable modules (convex/core/modules.ts)
+   * a school may use. One row per (school, module), written only by the
+   * deployment operator (internal schoolModules.setSchoolModules). A school
+   * with NO rows is unconfigured and keeps the original modules; a configured
+   * school has a module only if its row says enabled (convex/model/modules.ts).
+   * Disabling never deletes the module's data.
+   */
+  schoolModules: defineTable({
+    schoolId: v.id("schools"),
+    module: vModuleKey,
+    enabled: v.boolean(),
+    /** When this row last changed (ms). `_creationTime` is when it was created. */
+    updatedAt: v.number(),
+    /** Who changed it: the operator's name or reference as given to the internal mutation. */
+    updatedBy: v.string(),
+    /** Why (e.g. the subscription or ticket reference). */
+    reason: v.string(),
+  }).index("by_school", ["schoolId"])
+    .index("by_school_module", ["schoolId", "module"]),
+
+  /**
    * A user's access to ONE school. This is the only thing that grants access.
    * role = portal (admin | teacher | student) — the ONLY three account roles.
    * Links:
@@ -132,6 +154,18 @@ export default defineSchema({
     permissionSets: v.array(vPermissionSet),
     teacherId: v.optional(v.id("teachers")),
     studentId: v.optional(v.id("students")),
+    /**
+     * Per-member module × action grants set by the Principal (core/grants.ts,
+     * memberships.setPermissions). On an ADMIN membership, present (even
+     * empty) = a restricted office login with exactly these grants; absent =
+     * full administrator. On a TEACHER membership: extra duties on top of
+     * teaching. Never on students.
+     */
+    grants: v.optional(v.array(v.object({ module: vModuleKey, actions: v.array(vAction) }))),
+    /** Label for the member's access, e.g. "Accountant" (display only; never used for authorization). */
+    accessProfile: v.optional(v.string()),
+    /** Teachers only: extra sections their Students/Attendance VIEW grants cover (instead of school-wide). */
+    sectionScope: v.optional(v.array(v.id("sections"))),
     /**
      * LEGACY — set only on memberships of the removed guardian sign-in. Never
      * written any more and never accepted for access (core/actor.ts). Kept
@@ -286,9 +320,58 @@ export default defineSchema({
     address: v.optional(v.string()),
     bloodGroup: v.optional(v.string()),
     photoStorageId: v.optional(v.id("_storage")),
+    /**
+     * The school's own register number ("scholar number"), entered by the
+     * office. Optional; UNIQUE per school (checked in every mutation that sets
+     * it — model/scholarNumbers.ts). `scholarNoKey` is the normalised form the
+     * uniqueness check and lookups use (upper case, no spaces).
+     */
+    scholarNo: v.optional(v.string()),
+    scholarNoKey: v.optional(v.string()),
   })
     .index("by_school_admission", ["schoolId", "admissionNo"])
-    .index("by_school_status_name", ["schoolId", "status", "lastName"]),
+    .index("by_school_status_name", ["schoolId", "status", "lastName"])
+    .index("by_school_scholar", ["schoolId", "scholarNoKey"]),
+
+  /**
+   * Transfer certificates (TC) issued when a student leaves the school
+   * (convex/studentLifecycle.ts). Historical record: never deleted; a
+   * cancelled TC keeps its row and number. `snapshot` freezes what the
+   * certificate states (name, numbers, class, dates) at issue time.
+   */
+  transferCertificates: defineTable({
+    schoolId: v.id("schools"),
+    studentId: v.id("students"),
+    tcNo: v.string(),
+    status: v.union(v.literal("issued"), v.literal("cancelled")),
+    issueDate: v.string(),
+    leavingDate: v.string(),
+    reason: v.string(),
+    conduct: v.optional(v.string()),
+    destinationSchool: v.optional(v.string()),
+    remarks: v.optional(v.string()),
+    /** Student status before the TC (restored if the TC is cancelled). */
+    previousStatus: vPersonStatus,
+    /** The enrollment the TC ended (null if the student had none in the current year). */
+    endedEnrollmentId: v.optional(v.id("enrollments")),
+    snapshot: v.object({
+      studentName: v.string(),
+      admissionNo: v.string(),
+      scholarNo: v.optional(v.string()),
+      dateOfBirth: v.optional(v.string()),
+      admissionDate: v.optional(v.string()),
+      lastClass: v.optional(v.string()),
+      lastSection: v.optional(v.string()),
+      academicYear: v.optional(v.string()),
+      parentName: v.optional(v.string()),
+    }),
+    issuedByUserId: v.id("users"),
+    cancelledAt: v.optional(v.number()),
+    cancelReason: v.optional(v.string()),
+    cancelledByUserId: v.optional(v.id("users")),
+  })
+    .index("by_school_student", ["schoolId", "studentId"])
+    .index("by_school_number", ["schoolId", "tcNo"]),
 
   /**
    * Parent contacts of students (name, phone, email…). CONTACT DATA ONLY — a

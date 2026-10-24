@@ -12,6 +12,11 @@
  *     "admin": { "displayName": "Principal" }
  *   }'
  *
+ * Optional `"modules": ["students", "academics", ...]` writes the school's
+ * module entitlements in the same transaction (convex/core/modules.ts); without
+ * it the school is unconfigured and keeps every original module. They can be
+ * changed later with `schoolModules:setSchoolModules`.
+ *
  * → returns the first administrator's Login ID (ADMIN-001 unless given) and a
  *   one-time temporary password. Everything else (classes, sections,
  *   subjects, teachers, students, accounts) is then done by that admin in the
@@ -30,6 +35,8 @@ import { conflict, invalid, notFound } from "./core/errors";
 import { assertIsoDate, assertNonEmpty } from "./core/validators";
 import { generateTemporaryPassword, PASSWORD_PROVIDER, provisionAccount, reserveAccount, temporaryPasswordFields } from "./model/accounts";
 import { canonicalLoginId } from "./model/loginIds";
+import { vModuleKey } from "./core/modules";
+import { applyModuleSelection } from "./model/modules";
 
 const vSchoolInput = v.object({
   name: v.string(),
@@ -65,9 +72,11 @@ async function onlySchoolId(ctx: MutationCtx): Promise<Id<"schools">> {
   return schools[0]._id;
 }
 
+const vModulesInput = v.optional(v.array(vModuleKey));
+
 export const createSchoolAndAdmin = internalMutation({
-  args: { school: vSchoolInput, academicYear: v.object({ name: v.string(), startDate: v.string(), endDate: v.string() }), settings: vSettingsInput, admin: vAdminInput },
-  handler: async (ctx, { school, academicYear, settings, admin }) => {
+  args: { school: vSchoolInput, academicYear: v.object({ name: v.string(), startDate: v.string(), endDate: v.string() }), settings: vSettingsInput, admin: vAdminInput, modules: vModulesInput },
+  handler: async (ctx, { school, academicYear, settings, admin, modules }) => {
     if (await ctx.db.query("schools").first()) {
       throw conflict("This deployment already has a school. Setup can only run once per deployment.");
     }
@@ -94,6 +103,9 @@ export const createSchoolAndAdmin = internalMutation({
       grading: { scheme: settings?.gradingScheme ?? "percentage", passPercentage: settings?.passPercentage ?? 33 },
       notifications: { attendanceAlerts: true, feeReminders: true, homeworkAlerts: true, examAlerts: true, noticeAlerts: true },
     });
+    if (modules !== undefined) {
+      await applyModuleSelection(ctx, { schoolId, enabled: modules, updatedBy: "setup:initSchool", reason: "Initial school setup" });
+    }
     const reserved = await reserveAccount(ctx, {
       schoolId, role: "admin", kind: "admin", displayName: assertNonEmpty(admin.displayName, "admin.displayName", 120),
       loginId: admin.loginId, email: admin.email,
@@ -103,7 +115,7 @@ export const createSchoolAndAdmin = internalMutation({
 });
 
 export const initSchool = internalAction({
-  args: { school: vSchoolInput, academicYear: v.object({ name: v.string(), startDate: v.string(), endDate: v.string() }), settings: vSettingsInput, admin: vAdminInput },
+  args: { school: vSchoolInput, academicYear: v.object({ name: v.string(), startDate: v.string(), endDate: v.string() }), settings: vSettingsInput, admin: vAdminInput, modules: vModulesInput },
   handler: async (ctx, args): Promise<{ schoolId: Id<"schools">; adminLoginId: string; temporaryPassword: string }> => {
     const { schoolId, loginId }: { schoolId: Id<"schools">; loginId: string } = await ctx.runMutation(internal.setup.createSchoolAndAdmin, args);
     const temporaryPassword = generateTemporaryPassword();

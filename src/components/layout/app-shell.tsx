@@ -4,7 +4,9 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { useSession } from "@/features/auth/session-provider";
-import { canAccessRoute, homeRouteFor } from "@/lib/permissions";
+import { canAccessRoute, landingRouteFor, routeRuleFor } from "@/lib/permissions";
+import { MODULES } from "@convex/core/modules";
+import { MODULES_UNCONFIRMED_MESSAGE } from "@/features/auth/session-modules";
 import { isLiveRoute, liveNavItems } from "@/lib/permissions/navigation";
 import { UnauthorizedState } from "@/components/ui/states";
 import { LogoMark } from "@/components/brand/logo";
@@ -23,13 +25,16 @@ const COLLAPSE_KEY = `${STORAGE_NAMESPACE}-sidebar-collapsed`;
  *  - not signed in      → redirect to /login (with ?next=)
  *  - signed in, nothing to open (no school access) → explanation + sign out
  *  - signed in, no access → Unauthorized page inside the user's OWN shell
+ *  - the school does not have the page's module → "not enabled" page; the page
+ *    itself is not rendered, so none of its queries run (the server refuses them
+ *    with MODULE_DISABLED anyway — this is a convenience, not the boundary)
  *  - temporary password → /account (the server blocks school functions until it is changed)
  *  - allowed            → page content
  *  - live account on a page that still runs on demo data → explanation + the
  *    live pages it can use (never the demo school's data)
  */
 export function AppShell({ children }: { children: ReactNode }) {
-  const { status, user, viewer, notice, mustChangePassword, logout, dataSource } = useSession();
+  const { status, user, viewer, notice, mustChangePassword, logout, dataSource, modulesStatus } = useSession();
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -99,16 +104,50 @@ export function AppShell({ children }: { children: ReactNode }) {
             {access === "forbidden" ? (
               <div className="solid-card mx-auto mt-6 max-w-xl">
                 <UnauthorizedState
-                  homeHref={homeRouteFor(user)}
+                  homeHref={landingRouteFor(user)}
                   message={`Your ${user.role} account can't open ${pathname}. Access is decided by your account's role, not by the link you followed.`}
                 />
               </div>
+            ) : access === "module_disabled" && modulesStatus !== "ok" ? (
+              <ModulesUnconfirmed homeHref={landingRouteFor(user)} />
+            ) : access === "module_disabled" ? (
+              <ModuleNotEnabled pathname={pathname} homeHref={landingRouteFor(user)} />
             ) : dataSource === "live" && !isLiveRoute(pathname) ? (
               <LiveNotConnected user={user} schoolName={viewer?.school.name ?? ""} />
             ) : children}
           </motion.div>
         </main>
       </div>
+    </div>
+  );
+}
+
+/** The school is not entitled to the module this page belongs to. Shows nothing of the module's data. */
+function ModuleNotEnabled({ pathname, homeHref }: { pathname: string; homeHref: string }) {
+  const module = routeRuleFor(pathname)?.module;
+  const label = module ? MODULES[module].label : "This module";
+  return (
+    <div className="solid-card mx-auto mt-6 max-w-xl p-8 text-center" role="status" data-testid="module-not-enabled">
+      <h1 className="font-display text-xl text-ink">{label} is not enabled for your school</h1>
+      <p className="mt-2 text-sm text-ink-soft">
+        Your school&apos;s plan does not include this module, so its pages are unavailable. Nothing has been deleted. Contact your school or service provider if you need it.
+      </p>
+      <Link href={homeHref} className="mt-4 inline-flex h-10 items-center rounded-xl bg-sapphire px-4 text-sm font-semibold text-white hover:bg-lagoon">Go to dashboard</Link>
+    </div>
+  );
+}
+
+/**
+ * The session did not carry a valid module list (e.g. the Convex deployment is
+ * older than this frontend). Module pages stay hidden — never assumed enabled —
+ * but we do not claim the school's plan lacks them.
+ */
+function ModulesUnconfirmed({ homeHref }: { homeHref: string }) {
+  return (
+    <div className="solid-card mx-auto mt-6 max-w-xl p-8 text-center" role="status" data-testid="modules-unconfirmed">
+      <h1 className="font-display text-xl text-ink">This page is unavailable right now</h1>
+      <p className="mt-2 text-sm text-ink-soft">{MODULES_UNCONFIRMED_MESSAGE}</p>
+      <Link href={homeHref} className="mt-4 inline-flex h-10 items-center rounded-xl bg-sapphire px-4 text-sm font-semibold text-white hover:bg-lagoon">Go to dashboard</Link>
     </div>
   );
 }

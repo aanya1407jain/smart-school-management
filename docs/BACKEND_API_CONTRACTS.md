@@ -7,6 +7,8 @@ reports-profile, a01-authorization, live-staff-session). Signatures are the Conv
 validators; return shapes are the handler return values (use
 `FunctionReturnType<typeof api.x.y>` in TypeScript instead of copying them).
 
+> **Staff permissions, scholar numbers, promotion, pass-out and transfer certificates** are documented in `docs/RBAC_AND_STUDENT_LIFECYCLE.md`.
+
 ## Conventions (all school functions)
 
 - **Calling.** Use `useSchoolQuery`, `useSchoolMutation`, `useSchoolPaginatedQuery`
@@ -124,7 +126,6 @@ validators; return shapes are the handler return values (use
 | `removeEntry({ entryId })` | `timetable:manage` | |
 | `sectionTimetable({ sectionId })` | Admin: any section; teachers: sections in their scope | |
 | `myTimetable()` | Teacher | Their own week |
-| `canManage()` | Any member | UI helper only; the mutations check again |
 
 - **`setEntry` validation:**
   - Working day only, and not a break.

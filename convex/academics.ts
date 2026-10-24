@@ -13,10 +13,10 @@
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
-import { schoolMutation, schoolQuery } from "./core/functions";
+import { schoolMutation, schoolQuery, moduleQuery, moduleMutation } from "./core/functions";
 import {
   getCurrentAcademicYearId, getInSchool, getSchoolSettings, hasPermission, linkedStudentIds, requirePermission,
-  requireSectionRead, requireStudentAccess, teacherSectionIds, enrollmentFor,
+  requireSectionRead, requireStudentAccess, readScopeSectionIds, enrollmentFor,
 } from "./core/authorization";
 import { AppError, conflict, invalid, invalidRelationship } from "./core/errors";
 import { assertIsoDate, assertNonEmpty, vAcademicYearStatus, vGender } from "./core/validators";
@@ -25,8 +25,14 @@ import { writeAudit } from "./model/audit";
 import { compareRosterEntries, renumberSections } from "./model/rollNumbers";
 import { notifyUsers } from "./model/notifications";
 import { nextAdmissionNumber } from "./model/counters";
+import { assertScholarNoAvailable, parseScholarNo, possibleDuplicates } from "./model/scholarNumbers";
 import { activeStudentRecordIds, enrolledInSection, enrolledStudents } from "./model/studentCounts";
+import { enabledList, moduleStateOf } from "./model/modules";
+import type { ModuleKey } from "./core/modules";
 import { attendanceRecords, currentYear, feeLedger, parentContactsOf, homeworkFor, placement, publishedResults, studentFields } from "./model/studentRecords";
+
+const studentsQuery = moduleQuery("students");
+const studentsMutation = moduleMutation("students");
 
 const byLabel = (a: { displayName: string }, b: { displayName: string }) => a.displayName.localeCompare(b.displayName, undefined, { numeric: true });
 
@@ -43,6 +49,9 @@ const byLabel = (a: { displayName: string }, b: { displayName: string }) => a.di
  * NOT_FOUND. The response lists explicit fields only (never spread documents):
  * parent-contact phone/email only for school-wide staff and the student, fee
  * details only for fee staff and the student. Returns null for a malformed id.
+ * Core (always available); each section follows the school's module
+ * entitlements: attendance → Attendance, results and homework → Academics,
+ * fees → Finance. A disabled module's section is empty / null.
  */
 export const getStudentProfile = schoolQuery({
   // A route parameter: validated here with normalizeId (an unknown or malformed id is "not found").
@@ -56,7 +65,9 @@ export const getStudentProfile = schoolQuery({
     const year = await currentYear(ctx, ctx.actor.schoolId);
     const { enrollmentState, enrollment, row } = await placement(ctx, student, year);
     const activeSection = row && row.status === "active" ? await ctx.db.get(row.sectionId) : null;
-    const canSeeFees = hasPermission(ctx.actor, "fees:manage") || (own && hasPermission(ctx.actor, "fees:read:own"));
+    const modules = await moduleStateOf(ctx, ctx.actor.schoolId);
+    const on = (k: ModuleKey) => modules.enabled.has(k);
+    const canSeeFees = on("finance") && (hasPermission(ctx.actor, "fees:manage") || (own && hasPermission(ctx.actor, "fees:read:own")));
     return {
       access: schoolWide ? ("school" as const) : own ? ("own" as const) : ("assigned" as const),
       student: studentFields(student),
@@ -64,9 +75,10 @@ export const getStudentProfile = schoolQuery({
       enrollmentState,
       enrollment,
       parentContacts: await parentContactsOf(ctx, student, schoolWide || own),
-      attendance: year ? await attendanceRecords(ctx, student._id, year) : [],
-      results: await publishedResults(ctx, student),
-      homework: activeSection && activeSection.schoolId === ctx.actor.schoolId ? await homeworkFor(ctx, student, activeSection) : [],
+      modules: enabledList(modules),
+      attendance: on("attendance") && year ? await attendanceRecords(ctx, student._id, year) : [],
+      results: on("academics") ? await publishedResults(ctx, student) : [],
+      homework: on("academics") && activeSection && activeSection.schoolId === ctx.actor.schoolId ? await homeworkFor(ctx, student, activeSection) : [],
       fees: canSeeFees && year ? await feeLedger(ctx, student, year) : null,
     };
   },
@@ -102,7 +114,7 @@ export const listSections = schoolQuery({
     let sections = await ctx.db.query("sections").withIndex("by_school_year", (q) => q.eq("schoolId", ctx.actor.schoolId).eq("academicYearId", yearId)).collect();
     if (!hasPermission(ctx.actor, "academics:manage") && !hasPermission(ctx.actor, "students:read:all")) {
       let allowed = new Set<Id<"sections">>();
-      if (ctx.actor.teacherId) allowed = await teacherSectionIds(ctx, ctx.actor.teacherId, yearId);
+      allowed = await readScopeSectionIds(ctx, ctx.actor, yearId);
       for (const studentId of await linkedStudentIds(ctx, ctx.actor)) {
         const e = await enrollmentFor(ctx, studentId, yearId);
         if (e) allowed.add(e.sectionId);
@@ -228,7 +240,7 @@ export const MAX_UNENROLLED = 500;
  * Active students with NO active enrollment in a year (default: current
  * year), in roster order, for the "enrol students" workflow. Bounded.
  */
-export const listUnenrolledStudents = schoolQuery({
+export const listUnenrolledStudents = studentsQuery({
   args: { academicYearId: v.optional(v.id("academicYears")) },
   handler: async (ctx, { academicYearId }) => {
     requirePermission(ctx.actor, "students:write");
@@ -462,7 +474,7 @@ export const removeTeacherAssignment = schoolMutation({
  * destination section — and, for a transfer, the source section — is
  * renumbered alphabetically in this same transaction (model/rollNumbers.ts).
  */
-export const enrollStudent = schoolMutation({
+export const enrollStudent = studentsMutation({
   args: { studentId: v.id("students"), sectionId: v.id("sections"), startDate: v.string() },
   handler: async (ctx, a) => {
     requirePermission(ctx.actor, "students:write");
@@ -493,7 +505,7 @@ export const enrollStudent = schoolMutation({
  * The enrollment is kept as history; the section is renumbered in the same
  * transaction so the remaining roster stays 1..n.
  */
-export const endEnrollment = schoolMutation({
+export const endEnrollment = studentsMutation({
   args: {
     enrollmentId: v.id("enrollments"),
     status: v.union(v.literal("withdrawn"), v.literal("completed")),
@@ -530,7 +542,7 @@ export const endEnrollment = schoolMutation({
  * No sign-in account is created here — that stays in Accounts & Import
  * (Login ID + temporary password), so no credentials are generated or returned.
  */
-export const createStudentWithEnrollment = schoolMutation({
+export const createStudentWithEnrollment = studentsMutation({
   args: {
     firstName: v.string(),
     lastName: v.string(),
@@ -543,6 +555,14 @@ export const createStudentWithEnrollment = schoolMutation({
     bloodGroup: v.optional(v.string()),
     classId: v.id("classes"),
     sectionId: v.id("sections"),
+    /** The school's own register number (optional; unique in the school). */
+    scholarNo: v.optional(v.string()),
+    /**
+     * Set after the office has checked that a student with the same name and
+     * date of birth is a DIFFERENT person. Without it such an admission is
+     * refused (CONFLICT) so the same child is not admitted twice. Audited.
+     */
+    confirmNotDuplicate: v.optional(v.boolean()),
     /** Parent contact (contact data only — no account is created). */
     parentContact: v.object({
       name: v.string(),
@@ -576,9 +596,18 @@ export const createStudentWithEnrollment = schoolMutation({
     if (a.admissionDate > year.endDate) throw mismatch("The admission date is after the current academic year.", { admissionDate: "After the current academic year" });
 
     const school = (await ctx.db.get(ctx.actor.schoolId))!;
+    // Scholar number: unique in the school, checked before anything is written.
+    const scholar = parseScholarNo(a.scholarNo);
+    if (scholar) await assertScholarNoAvailable(ctx, school._id, scholar.scholarNoKey);
+    // The same child must not be admitted twice (same name + date of birth, any status).
+    const duplicates = await possibleDuplicates(ctx, school._id, { firstName, lastName, dateOfBirth: a.dateOfBirth });
+    if (duplicates.length && a.confirmNotDuplicate !== true) {
+      throw new AppError("CONFLICT", `A student named ${firstName} ${lastName} with the same date of birth already exists (admission no. ${duplicates.map((d) => d.admissionNo).join(", ")}). Re-enrol that student instead, or confirm this is a different child.`, { duplicateOf: duplicates.map((d) => d._id).join(",") });
+    }
     const admissionNo = await nextAdmissionNumber(ctx, school, a.admissionDate.slice(0, 4));
     const studentId = await ctx.db.insert("students", {
       schoolId: school._id, admissionNo, firstName, lastName, status: "active", admissionDate: a.admissionDate, dateOfBirth: a.dateOfBirth, address,
+      ...(scholar ?? {}),
       ...(a.gender ? { gender: a.gender } : {}), ...(email ? { email } : {}), ...(phone ? { phone } : {}),
       ...(a.bloodGroup?.trim() ? { bloodGroup: a.bloodGroup.trim() } : {}),
     });
@@ -610,7 +639,7 @@ export const createStudentWithEnrollment = schoolMutation({
     await writeAudit(ctx, {
       schoolId: school._id, actor: ctx.actor, action: "student.admitted", entity: { table: "students", id: studentId },
       summary: `Admitted ${fullName({ firstName, lastName })} (${admissionNo}) to ${section.displayName} (${year.name})`,
-      metadata: { enrollmentId, sectionId: section._id, parentContactReused: !!existingContact },
+      metadata: { enrollmentId, sectionId: section._id, parentContactReused: !!existingContact, ...(scholar ? { scholarNo: scholar.scholarNo } : {}), ...(duplicates.length ? { confirmedNotDuplicateOf: duplicates.map((d) => d.admissionNo) } : {}) },
     });
     const rollNo = (await ctx.db.get(enrollmentId))?.rollNo ?? null;
     return {
@@ -649,7 +678,7 @@ function normalizePhone(raw: string, field: string): string {
  * transfers and withdrawals. Other students' numbers change only as far as the
  * alphabetical order requires; historical enrollments are untouched.
  */
-export const updateStudentProfile = schoolMutation({
+export const updateStudentProfile = studentsMutation({
   args: {
     studentId: v.id("students"),
     firstName: v.optional(v.string()),
@@ -660,11 +689,19 @@ export const updateStudentProfile = schoolMutation({
     phone: v.optional(v.string()),
     address: v.optional(v.string()),
     bloodGroup: v.optional(v.string()),
+    /** "" clears the scholar number; any other value must be unique in the school. */
+    scholarNo: v.optional(v.string()),
   },
   handler: async (ctx, a) => {
     requirePermission(ctx.actor, "students:write");
     const student = await getInSchool(ctx, "students", a.studentId, "Student");
     const patch: Partial<Doc<"students">> = {};
+    if (a.scholarNo !== undefined) {
+      const scholar = parseScholarNo(a.scholarNo);
+      if (scholar) await assertScholarNoAvailable(ctx, ctx.actor.schoolId, scholar.scholarNoKey, student._id);
+      patch.scholarNo = scholar?.scholarNo;
+      patch.scholarNoKey = scholar?.scholarNoKey;
+    }
     if (a.firstName !== undefined) patch.firstName = assertNonEmpty(a.firstName, "firstName", 80);
     if (a.lastName !== undefined) patch.lastName = assertNonEmpty(a.lastName, "lastName", 80);
     if (a.gender !== undefined) patch.gender = a.gender;
@@ -716,7 +753,7 @@ export const updateStudentProfile = schoolMutation({
  * section, status, dates and the last roll number. Administrators
  * (students:read:all) and the student themself (profile:read:own).
  */
-export const enrollmentHistory = schoolQuery({
+export const enrollmentHistory = studentsQuery({
   args: { studentId: v.id("students") },
   handler: async (ctx, { studentId }) => {
     const student = await requireStudentAccess(ctx, studentId, { all: "students:read:all", own: "profile:read:own" });
@@ -744,7 +781,7 @@ export const enrollmentHistory = schoolQuery({
  * that section's enrolled count. Reactive: admitting, enrolling, transferring
  * or withdrawing a student updates it immediately.
  */
-export const studentCounts = schoolQuery({
+export const studentCounts = studentsQuery({
   args: { sectionId: v.optional(v.id("sections")) },
   handler: async (ctx, { sectionId }) => {
     requirePermission(ctx.actor, "students:read:all");

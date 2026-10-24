@@ -4,6 +4,8 @@
  * IDs are plain strings so they can later map to Convex `Id<"table">`.
  */
 
+import type { ModuleKey } from "@convex/core/modules";
+
 export type ID = string;
 export type ISODate = string; // "2026-10-09"
 export type ISODateTime = string; // "2026-10-09T09:15:00.000Z"
@@ -406,6 +408,18 @@ export interface UserAccount {
    * "accountant" set for administrative staff).
    */
   permissionSets?: string[];
+  /**
+   * Modules the user's SCHOOL is entitled to (from the server session,
+   * convex/core/modules.ts). Set for the signed-in user only; drives navigation.
+   */
+  modules?: ModuleKey[];
+  /**
+   * The member's EFFECTIVE permissions as the server computed them (role +
+   * permission sets + the Principal's grants, convex/core/grants.ts). Set for
+   * the signed-in user from the server session; when present the UI uses it
+   * instead of recomputing from the role. UI only — the server re-checks.
+   */
+  permissions?: string[];
 }
 
 export interface Database {

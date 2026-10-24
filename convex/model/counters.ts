@@ -26,6 +26,8 @@ export const counterKeys = {
   employee: () => "employee",
   /** Receipt numbers restart each academic year: AA/26-27/0001. */
   receipt: (academicYearId: Id<"academicYears">) => `receipt:${academicYearId}`,
+  /** Transfer certificate numbers restart each academic year: TC/AA/26-27/0001. */
+  transferCertificate: (academicYearId: Id<"academicYears">) => `tc:${academicYearId}`,
 };
 
 function assertKey(key: string) {
@@ -102,6 +104,15 @@ export async function nextAdmissionNumber(ctx: MutationCtx, school: Doc<"schools
 
 export async function nextEmployeeId(ctx: MutationCtx, school: Doc<"schools">) {
   return formatEmployeeId(school, await allocateNumber(ctx, school._id, counterKeys.employee()));
+}
+
+/** "TC/AA/26-27/0001" */
+export function formatTransferCertificateNumber(school: Pick<Doc<"schools">, "code">, year: Pick<Doc<"academicYears">, "name">, n: number): string {
+  return `TC/${school.code}/${academicYearShortCode(year.name)}/${pad(n, 4)}`;
+}
+
+export async function nextTransferCertificateNumber(ctx: MutationCtx, school: Doc<"schools">, year: Doc<"academicYears">) {
+  return formatTransferCertificateNumber(school, year, await allocateNumber(ctx, school._id, counterKeys.transferCertificate(year._id)));
 }
 
 export async function nextReceiptNumber(ctx: MutationCtx, school: Doc<"schools">, year: Doc<"academicYears">) {

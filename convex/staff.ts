@@ -15,7 +15,7 @@
  */
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import { schoolMutation, schoolQuery } from "./core/functions";
+import { schoolMutation, schoolQuery, moduleQuery, moduleMutation } from "./core/functions";
 import { getInSchool, requirePermission } from "./core/authorization";
 import { conflict, forbidden, invalid } from "./core/errors";
 import { assertIsoDate, assertNonEmpty, vLeaveType, vStaffAttendanceStatus } from "./core/validators";
@@ -23,6 +23,9 @@ import { teacherDisplayName } from "./model/academics";
 import { daysBetween, todayIn } from "./model/calendar";
 import { writeAudit } from "./model/audit";
 import { notifyUsers } from "./model/notifications";
+
+const attendanceQuery = moduleQuery("attendance");
+const attendanceMutation = moduleMutation("attendance");
 
 const MAX_LEAVE_DAYS = 90;
 
@@ -33,7 +36,7 @@ async function approvedLeaveOn(ctx: Parameters<typeof getInSchool>[0], teacherId
 
 // ================================================================ staff attendance
 /** Every active teacher's status on a date (marked, or suggested from approved leave). */
-export const staffAttendanceByDate = schoolQuery({
+export const staffAttendanceByDate = attendanceQuery({
   args: { date: v.string() },
   handler: async (ctx, { date }) => {
     requirePermission(ctx.actor, "staff:manage");
@@ -51,7 +54,7 @@ export const staffAttendanceByDate = schoolQuery({
   },
 });
 
-export const markStaffAttendance = schoolMutation({
+export const markStaffAttendance = attendanceMutation({
   args: { date: v.string(), entries: v.array(v.object({ teacherId: v.id("teachers"), status: vStaffAttendanceStatus, note: v.optional(v.string()) })) },
   handler: async (ctx, { date, entries }) => {
     requirePermission(ctx.actor, "staff:manage");
@@ -86,7 +89,7 @@ function leaveView(r: Doc<"leaveRequests">, teacherName: string) {
 }
 
 /** A teacher applies for their own leave. */
-export const applyLeave = schoolMutation({
+export const applyLeave = attendanceMutation({
   args: { type: vLeaveType, fromDate: v.string(), toDate: v.string(), reason: v.string() },
   handler: async (ctx, a) => {
     if (!ctx.actor.teacherId) throw forbidden("Only staff with a teacher record can apply for leave.");
@@ -107,7 +110,7 @@ export const applyLeave = schoolMutation({
 });
 
 /** Withdraw one's own PENDING request (it is deleted; decided requests stay as history). */
-export const withdrawLeave = schoolMutation({
+export const withdrawLeave = attendanceMutation({
   args: { leaveRequestId: v.id("leaveRequests") },
   handler: async (ctx, { leaveRequestId }) => {
     const r = await getInSchool(ctx, "leaveRequests", leaveRequestId, "Leave request");
@@ -119,7 +122,7 @@ export const withdrawLeave = schoolMutation({
   },
 });
 
-export const myLeave = schoolQuery({
+export const myLeave = attendanceQuery({
   args: {},
   handler: async (ctx) => {
     if (!ctx.actor.teacherId) return [];
@@ -129,7 +132,7 @@ export const myLeave = schoolQuery({
   },
 });
 
-export const listLeave = schoolQuery({
+export const listLeave = attendanceQuery({
   args: { status: v.optional(v.union(v.literal("pending"), v.literal("approved"), v.literal("rejected"))) },
   handler: async (ctx, { status }) => {
     requirePermission(ctx.actor, "staff:manage");
@@ -146,7 +149,7 @@ export const listLeave = schoolQuery({
   },
 });
 
-export const decideLeave = schoolMutation({
+export const decideLeave = attendanceMutation({
   args: { leaveRequestId: v.id("leaveRequests"), decision: v.union(v.literal("approved"), v.literal("rejected")), note: v.optional(v.string()) },
   handler: async (ctx, { leaveRequestId, decision, note }) => {
     requirePermission(ctx.actor, "staff:manage");

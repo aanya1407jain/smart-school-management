@@ -15,10 +15,10 @@
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
-import { schoolMutation, schoolQuery } from "./core/functions";
+import { moduleQuery, moduleMutation } from "./core/functions";
 import {
   getSchoolSettings, hasPermission, isClassTeacherOf, requireAnyPermission, requireClassTeacher,
-  requireSectionRead, requireStudentAccess, teacherSectionIds, getCurrentAcademicYearId,
+  requireSectionRead, requireStudentAccess, readScopeSectionIds, getCurrentAcademicYearId,
 } from "./core/authorization";
 import type { Actor } from "./core/actor";
 import { conflict, invalid, invalidRelationship, notFound } from "./core/errors";
@@ -27,6 +27,9 @@ import { activeRoster, classTeacherOf, fullName, teacherDisplayName } from "./mo
 import { addDays, daysBetween, isSchoolDay, MAX_RANGE_DAYS, todayIn } from "./model/calendar";
 import { writeAudit } from "./model/audit";
 import { notifyUsers, userIdsForStudent } from "./model/notifications";
+
+const attendanceQuery = moduleQuery("attendance");
+const attendanceMutation = moduleMutation("attendance");
 
 const READ = { all: "attendance:read:all", assigned: "attendance:read:assigned" } as const;
 const vEntry = v.object({ studentId: v.id("students"), status: vAttendanceStatus, remark: v.optional(v.string()) });
@@ -75,7 +78,7 @@ function summarize(statuses: AttendanceStatusValue[]) {
  * `mark` re-checks the real date on the server, so a wrong `today` can never
  * allow marking a future date.
  */
-export const getByDate = schoolQuery({
+export const getByDate = attendanceQuery({
   args: { sectionId: v.id("sections"), date: v.string(), today: v.string() },
   handler: async (ctx, { sectionId, date, today }) => {
     assertIsoDate(date);
@@ -125,7 +128,7 @@ export const getByDate = schoolQuery({
  * MAX_RANGE_DAYS. One register per school day, so the result is bounded by the
  * range (≤ 366 rows) and is never silently truncated.
  */
-export const listBySection = schoolQuery({
+export const listBySection = attendanceQuery({
   args: { sectionId: v.id("sections"), from: v.string(), to: v.string() },
   handler: async (ctx, { sectionId, from, to }) => {
     assertIsoDate(from, "from");
@@ -151,7 +154,7 @@ export const listBySection = schoolQuery({
  * the other end is MAX_RANGE_DAYS away. Ranges longer than MAX_RANGE_DAYS are
  * rejected (request one academic year at a time) — never silently truncated.
  */
-export const studentHistory = schoolQuery({
+export const studentHistory = attendanceQuery({
   args: { studentId: v.id("students"), from: v.optional(v.string()), to: v.optional(v.string()) },
   handler: async (ctx, args) => {
     if (args.from) assertIsoDate(args.from, "from");
@@ -186,7 +189,7 @@ export const studentHistory = schoolQuery({
 });
 
 /** School-wide (admin) or teacher-scope overview of which registers are marked on a date. */
-export const dailyOverview = schoolQuery({
+export const dailyOverview = attendanceQuery({
   args: { date: v.string() },
   handler: async (ctx, { date }) => {
     assertIsoDate(date);
@@ -197,7 +200,7 @@ export const dailyOverview = schoolQuery({
       .withIndex("by_school_year", (q) => q.eq("schoolId", ctx.actor.schoolId).eq("academicYearId", yearId))
       .collect();
     if (perm === "attendance:read:assigned") {
-      const scope = ctx.actor.teacherId ? await teacherSectionIds(ctx, ctx.actor.teacherId, yearId) : new Set();
+      const scope = await readScopeSectionIds(ctx, ctx.actor, yearId);
       sections = sections.filter((s) => scope.has(s._id));
     }
     const sessions = await ctx.db.query("attendanceSessions").withIndex("by_school_date", (q) => q.eq("schoolId", ctx.actor.schoolId).eq("date", date)).collect();
@@ -234,7 +237,7 @@ async function validateEntries(ctx: Parameters<typeof activeRoster>[0], sectionI
 }
 
 /** Create the register for a school day (class teacher only). */
-export const mark = schoolMutation({
+export const mark = attendanceMutation({
   args: { sectionId: v.id("sections"), date: v.string(), entries: v.array(vEntry) },
   handler: async (ctx, { sectionId, date, entries }) => {
     assertIsoDate(date);
@@ -277,7 +280,7 @@ export const mark = schoolMutation({
 });
 
 /** Correct an existing register (class teacher only). Only the listed students change. */
-export const update = schoolMutation({
+export const update = attendanceMutation({
   args: { sectionId: v.id("sections"), date: v.string(), changes: v.array(vEntry) },
   handler: async (ctx, { sectionId, date, changes }) => {
     assertIsoDate(date);

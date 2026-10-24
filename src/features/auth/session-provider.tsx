@@ -36,6 +36,8 @@ import { permissionsFor, type Permission } from "@/lib/permissions";
 import { isConvexConfigured } from "@/lib/convex/config";
 import { useMembership } from "@/lib/convex/membership";
 import { liveStudentPortalUser, liveWorkspaceUser } from "./live-user";
+import type { ModuleKey } from "@convex/core/modules";
+import { parseSessionModules, withServerAccess, type SessionModulesStatus } from "./session-modules";
 
 export { liveStudentPortalUser };
 
@@ -73,6 +75,19 @@ interface SessionContextValue {
   /** "demo" (persona bound to demo data) or "live" (Convex only); null unless authenticated. */
   dataSource: DataSource | null;
   can: (permission: Permission) => boolean;
+  /**
+   * Modules the user's school is entitled to (server session, reactive). UI
+   * only: pages and panels of other modules are hidden and their queries are
+   * skipped; the server refuses them anyway (MODULE_DISABLED).
+   */
+  modules: readonly ModuleKey[];
+  /**
+   * Whether `modules` is a list the server actually sent ("ok"), or the session
+   * lacked it ("missing" — a backend older than module entitlements) or it was
+   * malformed. Not "ok" → `modules` is empty (fail-closed). Null when signed out.
+   */
+  modulesStatus: SessionModulesStatus | null;
+  hasModule: (module: ModuleKey) => boolean;
   /** Resolves to the portal user, or null when the account is valid but has no portal data yet (go to /account). */
   login: (input: LoginInput) => Promise<CurrentUser | null>;
   logout: () => Promise<void>;
@@ -89,7 +104,7 @@ function UnconfiguredSessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => { purgeLegacySessionStorage(); services.auth.clearIdentity(); }, []);
   const value = useMemo<SessionContextValue>(() => ({
     status: "unauthenticated", user: null, viewer: null, notice: null, mustChangePassword: false, activeStudentId: null, dataSource: null,
-    can: () => false,
+    can: () => false, modules: [], modulesStatus: null, hasModule: () => false,
     login: async () => { throw new Error("Sign-in is not available: the school backend is not configured for this deployment."); },
     logout: async () => {},
   }), []);
@@ -149,13 +164,15 @@ function ConvexSessionProvider({ children }: { children: ReactNode }) {
       if (liveUser) {
         // A student account sees exactly its own record (the only account roles are admin, teacher and student).
         const active = liveUser.studentIds?.[0] ?? null;
-        return { status: "authenticated" as Status, notice: null, user: liveUser, activeStudentId: active, viewer: session.viewer, dataSource: "live" as DataSource };
+        return { status: "authenticated" as Status, notice: null, user: withServerAccess(liveUser, session.viewer), activeStudentId: active, viewer: session.viewer, dataSource: "live" as DataSource };
       }
       return { status: "unavailable" as Status, ...none, notice: UNAVAILABLE_PREVIEW, viewer: session.viewer };
     }
     const snap = services.auth.getSessionSnapshot();
     if (!snap.user) return { status: "loading" as Status, ...none };
-    return { status: "authenticated" as Status, notice: null, user: snap.user, activeStudentId: snap.activeStudentId, viewer: session.viewer, dataSource: "demo" as DataSource };
+    // Module entitlements always come from the server session, for demo personas too
+    // (parsed fail-closed: a session without a valid list grants no module).
+    return { status: "authenticated" as Status, notice: null, user: withServerAccess(snap.user, session.viewer), activeStudentId: snap.activeStudentId, viewer: session.viewer, dataSource: "demo" as DataSource };
   }, [authLoading, isAuthenticated, session, bound, tick, liveUser]);
 
   const finishPending = useCallback(() => {
@@ -210,6 +227,8 @@ function ConvexSessionProvider({ children }: { children: ReactNode }) {
     const status: Status = verifying ? "loading" : base.status;
     const user = verifying ? null : base.user;
     const perms = permissionsFor(user);
+    const modules: readonly ModuleKey[] = user?.modules ?? [];
+    const modulesStatus = user ? parseSessionModules(base.viewer?.modules).status : null;
     return {
       status,
       user,
@@ -219,10 +238,23 @@ function ConvexSessionProvider({ children }: { children: ReactNode }) {
       activeStudentId: verifying ? null : base.activeStudentId,
       dataSource: verifying ? null : base.dataSource,
       can: (p) => perms.has(p),
+      modules,
+      modulesStatus,
+      hasModule: (m) => modules.includes(m),
       login,
       logout,
     };
   }, [base, verifying, login, logout]);
+
+  // Say once, for developers, why every module page is hidden.
+  const warned = useRef<SessionModulesStatus | null>(null);
+  useEffect(() => {
+    const s = value.modulesStatus;
+    if (s && s !== "ok" && warned.current !== s) {
+      warned.current = s;
+      console.warn(`[session] viewer.modules is ${s}; module pages are hidden. Is the Convex deployment older than this frontend (module entitlements)?`);
+    }
+  }, [value.modulesStatus]);
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

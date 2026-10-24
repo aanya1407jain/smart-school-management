@@ -23,7 +23,7 @@ import { v, type Infer } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
-import { schoolMutation, schoolQuery } from "./core/functions";
+import { moduleQuery, moduleMutation } from "./core/functions";
 import type { Actor } from "./core/actor";
 import { enrollmentFor, getCurrentAcademicYearId, getInSchool, getSchoolSettings, hasPermission, linkedStudentIds, requireAnyPermission, teacherSectionIds } from "./core/authorization";
 import { conflict, forbidden, invalid, notFound } from "./core/errors";
@@ -31,6 +31,10 @@ import { assertIsoDate, assertNonEmpty, vAudience, vNoticeType, vPriority } from
 import { todayIn } from "./model/calendar";
 import { writeAudit } from "./model/audit";
 import { notifyUsers, userIdsForSection } from "./model/notifications";
+import { isModuleEnabled } from "./model/modules";
+
+const administrationQuery = moduleQuery("administration");
+const administrationMutation = moduleMutation("administration");
 
 type Ctx = QueryCtx & { actor: Actor };
 export type Audience = Infer<typeof vAudience>;
@@ -169,7 +173,7 @@ function validateDates(publishDate: string, expiresOn?: string, eventDate?: stri
 }
 
 // ================================================================ writes
-export const createDraft = schoolMutation({
+export const createDraft = administrationMutation({
   args: {
     title: v.string(), body: v.string(), type: vNoticeType, priority: vPriority, audience: vAudience,
     publishDate: v.string(), expiresOn: v.optional(v.string()), eventDate: v.optional(v.string()),
@@ -189,7 +193,7 @@ export const createDraft = schoolMutation({
 });
 
 /** Edit a draft (published notices are immutable; archive and re-issue instead). */
-export const update = schoolMutation({
+export const update = administrationMutation({
   args: {
     noticeId: v.id("notices"), title: v.optional(v.string()), body: v.optional(v.string()), type: v.optional(vNoticeType), priority: v.optional(vPriority),
     audience: v.optional(vAudience), publishDate: v.optional(v.string()), expiresOn: v.optional(v.string()), eventDate: v.optional(v.string()),
@@ -215,7 +219,7 @@ export const update = schoolMutation({
   },
 });
 
-export const publish = schoolMutation({
+export const publish = administrationMutation({
   args: { noticeId: v.id("notices") },
   handler: async (ctx, { noticeId }) => {
     const n = await editable(ctx, noticeId);
@@ -252,6 +256,8 @@ export const notifyOnPublishDate = internalMutation({
     if (!n || n.status !== "published") return { notified: 0 };
     const school = await ctx.db.get(n.schoolId);
     if (!school) return { notified: 0 };
+    // Module entitlement: no notice notifications while Administration & Insights is off (the notice is kept).
+    if (!(await isModuleEnabled(ctx, n.schoolId, "administration"))) return { notified: 0, skipped: "module_disabled" as const };
     if (n.publishDate > todayIn(school.timezone)) {
       await ctx.scheduler.runAfter(60 * 60 * 1000, internal.notices.notifyOnPublishDate, { noticeId, exceptUserId });
       return { notified: 0 };
@@ -260,7 +266,7 @@ export const notifyOnPublishDate = internalMutation({
   },
 });
 
-export const archive = schoolMutation({
+export const archive = administrationMutation({
   args: { noticeId: v.id("notices") },
   handler: async (ctx, { noticeId }) => {
     const n = await editable(ctx, noticeId);
@@ -277,7 +283,7 @@ export const archive = schoolMutation({
  * a notice that was published before keeps its dedupe key, so republishing does
  * not notify the same people twice.
  */
-export const restore = schoolMutation({
+export const restore = administrationMutation({
   args: { noticeId: v.id("notices") },
   handler: async (ctx, { noticeId }) => {
     const n = await editable(ctx, noticeId);
@@ -290,7 +296,7 @@ export const restore = schoolMutation({
 
 // ================================================================ reads
 /** Management list: managers see every notice; teachers see the ones they wrote. */
-export const listManaged = schoolQuery({
+export const listManaged = administrationQuery({
   args: { status: v.optional(v.union(v.literal("draft"), v.literal("published"), v.literal("archived"))) },
   handler: async (ctx, { status }) => {
     requireAnyPermission(ctx.actor, ["notices:manage", "area:teacher"]);
@@ -307,7 +313,7 @@ export const listManaged = schoolQuery({
 });
 
 /** Published notices addressed to the caller (any role), visible today. */
-export const feed = schoolQuery({
+export const feed = administrationQuery({
   args: {},
   handler: async (ctx) => {
     requireAnyPermission(ctx.actor, ["notices:read", "notices:manage"]);
@@ -322,7 +328,7 @@ export const feed = schoolQuery({
   },
 });
 
-export const get = schoolQuery({
+export const get = administrationQuery({
   args: { noticeId: v.id("notices") },
   handler: async (ctx, { noticeId }) => {
     const n = await getInSchool(ctx, "notices", noticeId, "Notice");
