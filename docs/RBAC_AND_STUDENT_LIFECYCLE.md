@@ -1,6 +1,6 @@
 # Staff permissions (RBAC) and student lifecycle — contracts
 
-_24 Oct 2026. Aanya's scope: authorization engine, student administration engine, Principal's Staff & Permissions page. For teammates building on it (Teacher portal — Trisha; Student portal, Finance, Dashboard — Apoorva)._
+_24 Oct 2026, updated 25 Oct 2026 (Phase 2: import scholar numbers and duplicate blocking, roll-number history, admission register, Students → Export). Aanya's scope: authorization engine, student administration engine, Principal's Staff & Permissions page. For teammates building on it (Teacher portal — Trisha; Student portal, Finance, Dashboard — Apoorva)._
 
 ## 1. The access model in one page
 
@@ -35,7 +35,8 @@ CAPABILITIES[module][action]: { kind: "grantable"; permissions; sectionScoped?; 
 
 - **How cells take effect.** Each grantable cell maps to existing permission strings, so the existing function checks enforce it. No handler checks grants directly.
 - **Linked cells.** Cells that share one server control have the same `link` and must be granted together. The server rejects a partial group, and stored partial data grants nothing. Examples: Students Create+Edit; Finance View/Create/Edit/Delete.
-- **Unavailable cells** have no server control yet (Export, Finance Approve) or are reserved:
+- **Dependent cells** (`requires`) need another action of the same module. Students → Export (`students:export`) needs Students → View; the server rejects Export alone, and stored Export-without-View grants nothing.
+- **Unavailable cells** have no server control yet (Export outside Students, Finance Approve) or are reserved:
   - attendance marking: class teacher only;
   - Principal-only (`PRINCIPAL_ONLY`): `users:manage`, `settings:manage`, `audit:read`, `staff:manage`.
 - **Section limits** (`schoolMemberships.sectionScope`) apply to teachers only. With limits, Students/Attendance **view** grants stay at the `*:read:assigned` tier, and the member's read scope becomes their teaching sections plus the listed sections (`readScopeSectionIds`). Teaching duties (marking, homework, marks entry) never use those extra sections.
@@ -102,7 +103,31 @@ The legacy `memberships.updateAccess` (suspend/reactivate, accountant set) still
 - The certificate is numbered `TC/<code>/<yy-yy>/0001` (per academic year) and stores a snapshot.
 - One issued TC per student at a time.
 
+| `academics.rollNumberHistory` | `students:read:all`, or the student's own record | Every roll number the student was given (newest first, ≤ 200): year, section, from → to, reason |
+| `imports.previewStudents` / `commitStudentRows` | `students:write` | Optional **Scholar number** column (unique in the file and the school). A child with the same name and date of birth as an existing student (any status) or as an earlier row is an **error**, not a warning; a genuinely different child is admitted through the admission form with `confirmNotDuplicate` |
+
 All of these are in the Student Management module, so they return `MODULE_DISABLED` when it is off and keep their data.
+
+### Roll numbers (`convex/model/rollNumbers.ts`)
+
+- **Scope:** the section (one school, academic year and class). The number lives on that year's `enrollments` row, never on the student.
+- **Allocation:** the active roster is renumbered 1..n alphabetically in the same transaction as any roster change (admission, import, transfer, withdrawal, TC, promotion, name correction).
+- **History:** every assignment or change is appended to `rollNumberHistory` (`applyRollNo`) with the acting user, so the numbers a student had earlier in the year are kept. Ended enrollments keep their last number; a promotion starts a new number in the new year's section.
+
+### Admission register / CSR (`convex/admissionRegister.ts`)
+
+The register is ordered by admission number and includes every status (leavers stay in it).
+
+| Function | Permission | Behaviour |
+|---|---|---|
+| `admissionRegister.page` | `students:read:all` | Paginated rows (≤ 100 per page) + the school's active extra `columns` |
+| `admissionRegister.exportPage` | `students:read:all` **and** `students:export` | Same rows, for downloading (Students → Export) |
+| `admissionRegister.studentEntry` | `students:read:all` | One student's row |
+| `admissionRegister.fields` | `students:read:all` or `settings:manage` | Extra columns; `includeInactive` needs `settings:manage` |
+| `admissionRegister.defineField` | `settings:manage` (Principal only) | Create/change a column: `key` (a-z0-9_), `label`, `type` (`text`/`number`/`date`/`select`/`boolean`), `options`, `required`, `order`, `active`. Key and type are fixed once created; deactivate instead of deleting (values are kept) |
+| `admissionRegister.setStudentValues` | `students:write` | `{ studentId, values: { key: value \| null } }`. Unknown/inactive columns, wrong types and an empty required column are refused. Audited with column keys only |
+
+Row shape: `admissionNo, scholarNo, name, gender, dateOfBirth, admissionDate, status, address, parent { name, relation, phone }, admittedTo { academicYear, className, section }, current { academicYear, className, section, rollNo }, leaving { tcNo, leavingDate, reason }, custom { [key]: value | null }, missingRequired: key[]`. Standard columns are derived from existing records; only the school's extra columns are stored. **No extra columns exist by default** — they wait for each school to confirm its register format.
 
 **Invariants (tested):**
 - A student record is never duplicated by promotion.
@@ -116,6 +141,10 @@ All of these are in the Student Management module, so they return `MODULE_DISABL
 - **`schoolMemberships`:** `grants?`, `accessProfile?`, `sectionScope?`.
 - **`students`:** `scholarNo?`, `scholarNoKey?`, plus the index `by_school_scholar`.
 - **New table `transferCertificates`:** indexes `by_school_student` and `by_school_number`.
+- **New table `rollNumberHistory`** (append-only): `schoolId, academicYearId, sectionId, enrollmentId, studentId, fromRollNo?, toRollNo, changedAt, changedByUserId?, reason: "roster_change" | "reconciliation"`; indexes `by_school_student`, `by_enrollment`.
+- **New table `admissionRegisterFields`:** `schoolId, key, label, type, options?, required, order, active, updatedAt, updatedByUserId`; index `by_school_key`.
+- **New table `admissionRegisterValues`:** `schoolId, studentId, values: Record<key, string | number | boolean>, updatedAt, updatedByUserId`; index `by_school_student`.
+- **New permission `students:export`** (full administrators have it; grantable as Students → Export).
 
 No data migration is needed; existing documents stay valid.
 
@@ -132,8 +161,34 @@ No data migration is needed; existing documents stay valid.
 
 ## 5. Not done yet
 
-- **CSR / admission register:** waits for the school to confirm its fields.
-- **Scholar number in the spreadsheet import:** the import cannot set it yet, so it cannot create duplicates.
-- **Export controls, Finance view-only and finance approvals:** need new server controls first (see rule 3).
+- **Admission register page (UI):** the backend and pluggable columns are done; the screen and each school's extra columns wait for the school to confirm its register format.
+- **Export controls outside Students, Finance view-only and finance approvals:** need new server controls first (see rule 3). Existing on-screen CSV downloads (fees, reports, attendance) are not gated separately: anyone who can view the list can download it.
 - **Section limits for office logins:** they are school-wide by design.
 - **Live end-to-end and integration tests** for these pages need the functions on a deployment, which needs approval.
+
+## 6. Audit log conventions (all teammates)
+
+Write one audit row in the **same mutation** as the change, with `writeAudit(ctx, …)` from `convex/model/audit.ts`. It commits or rolls back with the change.
+
+| Field | Convention |
+|---|---|
+| `schoolId` | Always `ctx.actor.schoolId` (never a client value) |
+| `actor` | `ctx.actor` (records user and role). Omit only in operator tools (`internal*` functions) |
+| `action` | `<entity>.<past_tense_verb>`, lower snake case: `student.admitted`, `enrollment.transferred`, `membership.permissions_changed`, `admission_register.field_created`, `school.modules_changed` |
+| `entity` | `{ table, id }` of the main record changed |
+| `summary` | One plain sentence for the audit page (names and numbers, no secrets) |
+| `metadata` | Ids and changed field/column **names**. For access changes, `before` and `after`. Never passwords, tokens, or free-text personal values (the register audit stores column keys only) |
+
+Always audit: permission and access changes, module changes, admissions and imports, enrollment and lifecycle changes (promotion, TC, pass-out), account creation/reset/disable, fee payments and reversals, result publication. Reads and exports are not audited (queries cannot write).
+
+## 7. Frontend integration checklist (Trisha, Apoorva)
+
+1. **Call Convex through the school hooks** (`useSchoolQuery` / `useSchoolMutation`). Never pass a `schoolId`; the server takes it from the membership.
+2. **Gate UI on server-computed values only:** `useSession().can("<permission>")` and `useSession().hasModule("<module>")`. Hiding is convenience; the server refuses anyway.
+3. **New pages:** add a nav item and a route rule (`src/lib/permissions/navigation.ts`, `routes.ts`) with the same `anyOf` permissions and `module` the server checks. Mark `live: true` only when the page reads Convex.
+4. **Handle error codes:** `getAppError(e)` → `FORBIDDEN`, `NOT_FOUND` (also another school's id), `MODULE_DISABLED`, `CONFLICT` (duplicates), `INVALID_ARGUMENT` (with `fields` for form hints), `PASSWORD_CHANGE_REQUIRED`.
+5. **Student identity:** show `admissionNo` and `scholarNo`. Never create a second student for an existing child; use `enrollStudent` (section transfer) or `studentLifecycle.promote`.
+6. **Roll numbers are read-only** in every UI. Show `enrollment.rollNo`; for history use `academics.rollNumberHistory`.
+7. **Downloads of the admission register** must page through `admissionRegister.exportPage` (≤ 100 rows per page) and show the button only when `can("students:export")`.
+8. **New server actions that need their own control** (for example a finance "approve refund" or an export): ask for a permission to be added to `PERMISSIONS`, check it in the function, then map it in `CAPABILITIES` so the Principal can grant it. Until then the cell stays unavailable.
+9. **Tests:** add every new public function to the inventory in `tests/convex/module-entitlements.test.ts` (module or core). The suite fails otherwise.
