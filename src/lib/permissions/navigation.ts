@@ -89,6 +89,7 @@ const STUDENT_NAV: NavGroup[] = [
       { label: "My Timetable", href: "/student/timetable", icon: "timetable", anyOf: ["timetable:read:own"], live: true },
       { label: "My Homework", href: "/student/homework", icon: "homework", anyOf: ["homework:read:own"], live: true },
       { label: "My Results", href: "/student/results", icon: "results", anyOf: ["results:read:own"], live: true },
+      { label: "Certificates", href: "/student/certificates", icon: "results", anyOf: ["profile:read:own"], live: true },
       { label: "My Fees", href: "/student/fees", icon: "fees", anyOf: ["fees:read:own"], live: true },
     ],
   },

@@ -16,7 +16,7 @@ import type { QueryCtx } from "./_generated/server";
 import { schoolMutation, schoolQuery } from "./core/functions";
 import {
   getCurrentAcademicYearId, getInSchool, getSchoolSettings, hasPermission, linkedStudentIds, requirePermission,
-  requireSectionRead, requireStudentAccess, teacherSectionIds, enrollmentFor,
+  requireAnyPermission, requireSectionRead, requireStudentAccess, teacherSectionIds, enrollmentFor,
 } from "./core/authorization";
 import { AppError, conflict, invalid, invalidRelationship } from "./core/errors";
 import { assertIsoDate, assertNonEmpty, vAcademicYearStatus, vGender } from "./core/validators";
@@ -114,6 +114,178 @@ export const listSections = schoolQuery({
       result.push({ ...s, classTeacherName: ct ? teacherDisplayName(ct) : null, isClassTeacher: !!ctx.actor.teacherId && s.classTeacherId === ctx.actor.teacherId });
     }
     return result;
+  },
+});
+
+/**
+ * Principal's read-only overview metrics:
+ *  - Registered (all-time in school), active, transferred (TC-issued), alumni (pass-outs), inactive
+ *  - Admissions over time (monthly grouping)
+ *  - Class and section totals with capacities
+ *  - Overall attendance rate
+ *  - Academic performance from published results
+ */
+export const studentCounts = schoolQuery({
+  args: { academicYearId: v.optional(v.id("academicYears")) },
+  handler: async (ctx, args) => {
+    requirePermission(ctx.actor, "students:read:all");
+
+    // All students registered in this school
+    const allStudents = await ctx.db
+      .query("students")
+      .withIndex("by_school_admission", (q) => q.eq("schoolId", ctx.actor.schoolId))
+      .collect();
+
+    const registered = allStudents.length;
+    let active = 0;
+    let tcIssued = 0; // transferred (Transfer Certificate issued)
+    let alumni = 0;   // pass-outs
+    let inactive = 0;
+
+    const admissionsMap = new Map<string, number>();
+
+    for (const s of allStudents) {
+      if (s.status === "active") active++;
+      else if (s.status === "transferred") tcIssued++;
+      else if (s.status === "alumni") alumni++;
+      else if (s.status === "inactive") inactive++;
+
+      if (s.admissionDate) {
+        const month = s.admissionDate.slice(0, 7);
+        admissionsMap.set(month, (admissionsMap.get(month) ?? 0) + 1);
+      }
+    }
+
+    const admissionsOverTime = Array.from(admissionsMap.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([period, count]) => ({ period, count }));
+
+    // Academic year resolution
+    const yearId = args.academicYearId
+      ? (await getInSchool(ctx, "academicYears", args.academicYearId))._id
+      : await getCurrentAcademicYearId(ctx, ctx.actor.schoolId);
+
+    const year = yearId ? await ctx.db.get(yearId) : null;
+
+    // Active enrollments in the target academic year
+    const enrollments = yearId
+      ? (
+          await ctx.db
+            .query("enrollments")
+            .withIndex("by_school_year", (q) =>
+              q.eq("schoolId", ctx.actor.schoolId).eq("academicYearId", yearId),
+            )
+            .collect()
+        ).filter((e) => e.status === "active")
+      : [];
+
+    const classes = await ctx.db
+      .query("classes")
+      .withIndex("by_school_level", (q) => q.eq("schoolId", ctx.actor.schoolId))
+      .collect();
+
+    const sections = await ctx.db
+      .query("sections")
+      .withIndex("by_school_year", (q) =>
+        yearId
+          ? q.eq("schoolId", ctx.actor.schoolId).eq("academicYearId", yearId)
+          : q.eq("schoolId", ctx.actor.schoolId),
+      )
+      .collect();
+
+    const classSectionTotals = classes.map((cls) => {
+      const clsSections = sections.filter((sec) => sec.classId === cls._id);
+      const secStats = clsSections.map((sec) => {
+        const secEnrollments = enrollments.filter((e) => e.sectionId === sec._id);
+        return {
+          sectionId: sec._id,
+          name: sec.displayName ?? sec.name,
+          studentCount: secEnrollments.length,
+          capacity: sec.capacity ?? 40,
+        };
+      });
+      const totalClassStudents = secStats.reduce((sum, s) => sum + s.studentCount, 0);
+      const totalClassCapacity = secStats.reduce((sum, s) => sum + s.capacity, 0);
+      return {
+        classId: cls._id,
+        className: cls.name,
+        level: cls.level,
+        studentCount: totalClassStudents,
+        capacity: totalClassCapacity,
+        sections: secStats,
+      };
+    });
+
+    // Attendance stats
+    const sessions = await ctx.db
+      .query("attendanceSessions")
+      .withIndex("by_school_date", (q) => q.eq("schoolId", ctx.actor.schoolId))
+      .order("desc")
+      .take(50);
+
+    let attendancePercentage: number | null = null;
+    let latestAttendanceDate: string | null = null;
+
+    if (sessions.length > 0) {
+      latestAttendanceDate = sessions[0].date;
+      const latestSessions = sessions.filter((s) => s.date === latestAttendanceDate);
+      let total = 0;
+      let ok = 0;
+      for (const s of latestSessions) {
+        ok += s.presentCount + s.lateCount;
+        total += s.presentCount + s.absentCount + s.lateCount + s.excusedCount;
+      }
+      if (total > 0) attendancePercentage = Math.round((ok / total) * 100);
+    }
+
+    // Academic performance from published results
+    let performanceAverage: number | null = null;
+    let resultsCount = 0;
+    if (year) {
+      const schoolExams = await ctx.db
+        .query("exams")
+        .withIndex("by_school_year", (q) =>
+          q.eq("schoolId", ctx.actor.schoolId).eq("academicYearId", year._id),
+        )
+        .collect();
+
+      const publishedExams = schoolExams.filter((e) => e.status === "published");
+      if (publishedExams.length > 0) {
+        let totalPct = 0;
+        for (const ex of publishedExams.slice(0, 5)) {
+          const examResults = await ctx.db
+            .query("results")
+            .withIndex("by_exam_section", (q) => q.eq("examId", ex._id))
+            .take(100);
+          for (const r of examResults) {
+            totalPct += r.percentage;
+            resultsCount += 1;
+          }
+        }
+        if (resultsCount > 0) {
+          performanceAverage = Math.round((totalPct / resultsCount) * 10) / 10;
+        }
+      }
+    }
+
+    return {
+      registered,
+      active,
+      tcIssued,
+      alumni,
+      inactive,
+      currentAcademicYear: year ? { id: year._id, name: year.name } : null,
+      admissionsOverTime,
+      classSectionTotals,
+      attendance: {
+        percentage: attendancePercentage,
+        latestDate: latestAttendanceDate,
+      },
+      academicPerformance: {
+        averageScore: performanceAverage,
+        resultsCount,
+      },
+    };
   },
 });
 

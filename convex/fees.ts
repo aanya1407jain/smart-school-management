@@ -246,26 +246,34 @@ export const recordPayment = schoolMutation({
     const year = await currentYear(ctx, ctx.actor.schoolId);
     if (!year) throw invalid("No active academic year configured for receipt allocation");
 
-    // Fetch active obligations for this student in this academic year
-    const obligations = (
-      await ctx.db
-        .query("studentFees")
-        .withIndex("by_student_year", (q) => q.eq("studentId", student._id).eq("academicYearId", year._id))
-        .collect()
-    )
-      .filter((o) => o.schoolId === ctx.actor.schoolId && o.status === "active")
-      .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
-
-    if (obligations.length === 0) {
+    // Fetch fee ledger for this student in current academic year
+    const ledger = await feeLedger(ctx, student, year);
+    if (ledger.obligations.length === 0) {
       throw invalid("No active fee obligations found for this student in current academic year");
+    }
+
+    if (args.amountMinor > ledger.totals.outstandingMinor) {
+      throw invalid(
+        `Payment amount (${args.amountMinor}) exceeds student's total outstanding balance (${ledger.totals.outstandingMinor})`
+      );
     }
 
     // Determine allocations
     const finalAllocations: { studentFeeId: Id<"studentFees">; amountMinor: number }[] = [];
     if (args.allocations && args.allocations.length > 0) {
       let sum = 0;
+      const obligationMap = new Map(ledger.obligations.map((o) => [o.obligationId, o]));
       for (const a of args.allocations) {
         assertAmountMinor(a.amountMinor, "allocation amount");
+        const ob = obligationMap.get(a.studentFeeId);
+        if (!ob) {
+          throw invalid(`Obligation ${a.studentFeeId} does not exist or does not belong to student`);
+        }
+        if (a.amountMinor > ob.outstandingMinor) {
+          throw invalid(
+            `Allocation amount (${a.amountMinor}) exceeds obligation outstanding balance (${ob.outstandingMinor}) for ${ob.label}`
+          );
+        }
         sum += a.amountMinor;
         finalAllocations.push({ studentFeeId: a.studentFeeId, amountMinor: a.amountMinor });
       }
@@ -273,43 +281,18 @@ export const recordPayment = schoolMutation({
         throw invalid(`Allocation sum (${sum}) does not match payment amount (${args.amountMinor})`);
       }
     } else {
-      // Auto-allocate against obligations in due-date order
-      const allPayments = (
-        await ctx.db
-          .query("feePayments")
-          .withIndex("by_student_paid", (q) => q.eq("studentId", student._id))
-          .collect()
-      ).filter((p) => p.schoolId === ctx.actor.schoolId && p.academicYearId === year._id);
-
-      const reversed = new Set(allPayments.map((p) => p.reversalOfPaymentId).filter(Boolean));
-      const activePayments = allPayments.filter((p) => p.status === "completed" && !p.reversalOfPaymentId && !reversed.has(p._id));
-
-      const alreadyPaid = new Map<Id<"studentFees">, number>();
-      for (const p of activePayments) {
-        for (const al of p.allocations) {
-          alreadyPaid.set(al.studentFeeId, (alreadyPaid.get(al.studentFeeId) ?? 0) + al.amountMinor);
-        }
-      }
-
+      // Auto-allocate against obligations in due-date order (FIFO)
       let remaining = args.amountMinor;
-      for (const ob of obligations) {
+      for (const ob of ledger.obligations) {
         if (remaining <= 0) break;
-        const paidSoFar = alreadyPaid.get(ob._id) ?? 0;
-        const due = Math.max(0, ob.amountMinor - paidSoFar);
-        if (due > 0) {
-          const take = Math.min(due, remaining);
-          finalAllocations.push({ studentFeeId: ob._id, amountMinor: take });
+        if (ob.outstandingMinor > 0) {
+          const take = Math.min(ob.outstandingMinor, remaining);
+          finalAllocations.push({ studentFeeId: ob.obligationId, amountMinor: take });
           remaining -= take;
         }
       }
-      if (remaining > 0 && obligations.length > 0) {
-        const lastOb = obligations[obligations.length - 1];
-        const existingAlloc = finalAllocations.find((a) => a.studentFeeId === lastOb._id);
-        if (existingAlloc) {
-          existingAlloc.amountMinor += remaining;
-        } else {
-          finalAllocations.push({ studentFeeId: lastOb._id, amountMinor: remaining });
-        }
+      if (remaining > 0) {
+        throw invalid("Payment amount exceeds student's total outstanding balance");
       }
     }
 

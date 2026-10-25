@@ -10,7 +10,7 @@
 import { Component, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Bell, CalendarCheck2, CheckCheck, GraduationCap, Hash, IdCard, Lock, School, UserRound, UsersRound } from "lucide-react";
+import { Bell, CalendarCheck2, CheckCheck, FileText, GraduationCap, Hash, IdCard, Lock, School, UserRound, UsersRound } from "lucide-react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { useSchoolMutation, useSchoolQuery } from "@/lib/convex/membership";
@@ -21,7 +21,7 @@ import { CategoryIcon } from "@/features/notifications/category-icon";
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, LoadingState, PageHeader, ProgressRing, StatCard, StatusBadge, useToast } from "@/components/ui";
 import { ROLE_LABELS } from "@/lib/permissions";
 import { formatDate, formatDateTime, relativeTime, todayISO } from "@/lib/utils/dates";
-import { LiveFeesPanel, LiveHomeworkList, LiveNoticesList, LiveResultsList, LiveTimetableGrid } from "./live-records";
+import { LiveCertificatesList, LiveFeesPanel, LiveHomeworkList, LiveNoticesList, LiveResultsList, LiveTimetableGrid } from "./live-records";
 import { cn } from "@/lib/utils/cn";
 import type { NotificationCategory } from "@/types/domain";
 
@@ -245,8 +245,23 @@ function StudentRecord({ p }: { p: OkProfile }) {
           )}
         </CardBody>
       </Card>
+      <div id="certificates" className="mt-4">
+        <Card>
+          <CardHeader title="Official Certificates & Documents" icon={<FileText className="h-4 w-4" />} />
+          <CardBody>
+            <StudentCertificatesSection studentId={p.student.studentId} />
+          </CardBody>
+        </Card>
+      </div>
     </>
   );
+}
+
+function StudentCertificatesSection({ studentId }: { studentId: Id<"students"> }) {
+  const data = useSchoolQuery(api.studentPortal.myCertificates, { studentId });
+  if (data === undefined) return <p className="text-sm text-ink-muted">Loading documents…</p>;
+  if (data.state !== "ok") return <p className="text-sm text-ink-muted">No documents available.</p>;
+  return <LiveCertificatesList certificates={data.certificates} />;
 }
 
 // ------------------------------------------------------------------ attendance
@@ -391,3 +406,14 @@ export function LiveNotices() {
   return (<div className="mx-auto max-w-4xl"><PageHeader title="Notices" description="Announcements for the whole school, students, and your class." /><LiveNoticesList notices={n.notices} /></div>);
 }
 
+export function LiveCertificates() {
+  const c = useSchoolQuery(api.studentPortal.myCertificates, usePortalArgs());
+  if (c === undefined) return <LoadingState variant="table" label="Loading certificates" />;
+  if (c.state === "no_student_record") return <MissingRecord />;
+  return (
+    <div className="mx-auto max-w-4xl">
+      <PageHeader title="My Certificates & Documents" description="Official verified documents issued by the school office." />
+      <LiveCertificatesList certificates={c.certificates} />
+    </div>
+  );
+}

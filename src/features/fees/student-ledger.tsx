@@ -263,6 +263,14 @@ function PaymentModal({ open, onOpenChange, studentId, outstanding, suggested, o
 
   const submit = async () => {
     setError(null);
+    if (amount <= 0 || isNaN(amount)) {
+      setError("Please enter a valid payment amount greater than zero");
+      return;
+    }
+    if (amount > outstanding) {
+      setError(`Payment amount (${formatCurrency(amount)}) exceeds total outstanding balance (${formatCurrency(outstanding)})`);
+      return;
+    }
     setPending(true);
     try {
       if (live) {

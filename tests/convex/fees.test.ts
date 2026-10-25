@@ -303,4 +303,94 @@ describe("Fees, payments and receipts (AP-01)", () => {
     const classFiltered = await admin1.query(api.fees.listPayments, { classId: f1.classId });
     expect(classFiltered.length).toBe(2);
   });
+
+  test("strict overpayment restriction and FIFO allocation validation", async () => {
+    const t = makeTest();
+    const f = await createSchool(t, "school-overpayment");
+    const admin = await as(t, f.users.admin);
+    const student = await as(t, f.users.student);
+
+    // Setup 2 installments of 100000 paise (₹1,000 each) -> Total 200000 paise (₹2,000)
+    const { structureId } = await admin.mutation(api.fees.createStructure, {
+      name: "Two-Term Fee",
+      classIds: [f.classId],
+      components: [{ label: "Tuition", amountMinor: 200000 }],
+      installments: [
+        { label: "Term 1", dueDate: "2026-05-01", amountMinor: 100000 },
+        { label: "Term 2", dueDate: "2026-10-01", amountMinor: 100000 },
+      ],
+    });
+    await admin.mutation(api.fees.assignStructure, { structureId, studentId: f.studentA });
+
+    // 1. Overpayment rejection: trying to pay 250000 paise when total due is 200000 paise
+    const overpayErr = await errorCode(
+      admin.mutation(api.fees.recordPayment, {
+        studentId: f.studentA,
+        amountMinor: 250000,
+        method: "cash",
+        paidOn: "2026-05-02",
+      }),
+    );
+    expect(overpayErr).toBe("INVALID_ARGUMENT");
+
+    // 2. FIFO Auto-allocation: pay 140000 paise
+    // Should allocate 100000 to Term 1 (fully paid) and 40000 to Term 2 (60000 remaining)
+    const p1 = await admin.mutation(api.fees.recordPayment, {
+      studentId: f.studentA,
+      amountMinor: 140000,
+      method: "bank_transfer",
+      paidOn: "2026-05-05",
+      reference: "NEFT-1400",
+    });
+    expect(p1.receiptNo).toBeDefined();
+
+    const ledgerAfterP1 = await student.query(api.fees.getStudentLedger, { studentId: f.studentA });
+    expect(ledgerAfterP1.totals.paidMinor).toBe(140000);
+    expect(ledgerAfterP1.totals.outstandingMinor).toBe(60000);
+
+    const term1 = ledgerAfterP1.obligations.find((o) => o.label === "Term 1");
+    const term2 = ledgerAfterP1.obligations.find((o) => o.label === "Term 2");
+    expect(term1?.paidMinor).toBe(100000);
+    expect(term1?.outstandingMinor).toBe(0);
+    expect(term2?.paidMinor).toBe(40000);
+    expect(term2?.outstandingMinor).toBe(60000);
+
+    // 3. Second overpayment attempt: paying 70000 when only 60000 remains
+    const secondOverpayErr = await errorCode(
+      admin.mutation(api.fees.recordPayment, {
+        studentId: f.studentA,
+        amountMinor: 70000,
+        method: "cash",
+        paidOn: "2026-05-10",
+      }),
+    );
+    expect(secondOverpayErr).toBe("INVALID_ARGUMENT");
+
+    // 4. Explicit allocation overpayment: allocating 80000 to Term 2 when only 60000 is due
+    if (term2) {
+      const explicitOverpayErr = await errorCode(
+        admin.mutation(api.fees.recordPayment, {
+          studentId: f.studentA,
+          amountMinor: 60000,
+          method: "cash",
+          paidOn: "2026-05-10",
+          allocations: [{ studentFeeId: term2.obligationId, amountMinor: 80000 }],
+        }),
+      );
+      expect(explicitOverpayErr).toBe("INVALID_ARGUMENT");
+    }
+
+    // 5. Exact payment of remaining 60000 succeeds and clears all obligations
+    const p2 = await admin.mutation(api.fees.recordPayment, {
+      studentId: f.studentA,
+      amountMinor: 60000,
+      method: "cash",
+      paidOn: "2026-05-10",
+    });
+    expect(p2.receiptNo).toBeDefined();
+
+    const finalLedger = await student.query(api.fees.getStudentLedger, { studentId: f.studentA });
+    expect(finalLedger.totals.paidMinor).toBe(200000);
+    expect(finalLedger.totals.outstandingMinor).toBe(0);
+  });
 });

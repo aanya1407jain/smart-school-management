@@ -1,7 +1,24 @@
 "use client";
 import Link from "next/link";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { BookOpenCheck, CalendarCheck2, ClipboardCheck, GraduationCap, Megaphone, UserPlus, Users, Wallet, ArrowRight, CalendarClock, AlertCircle } from "lucide-react";
+import {
+  Award,
+  BookOpenCheck,
+  CalendarCheck2,
+  CalendarClock,
+  ClipboardCheck,
+  GraduationCap,
+  Layers,
+  Megaphone,
+  Sparkles,
+  UserCheck,
+  UserMinus,
+  UserPlus,
+  Users,
+  Wallet,
+  ArrowRight,
+  AlertCircle,
+} from "lucide-react";
 import { services } from "@/lib/services";
 import { useQuery, type QueryState } from "@/lib/hooks/use-query";
 import { useSchoolQuery } from "@/lib/convex/membership";
@@ -29,8 +46,9 @@ export function AdminDashboard() {
   const { user, dataSource } = useSession();
   const live = dataSource === "live";
 
-  // Live Convex query
+  // Live Convex queries
   const liveData = useSchoolQuery(api.reports.adminDashboard, live ? {} : "skip");
+  const studentCountsData = useSchoolQuery(api.academics.studentCounts, live ? {} : "skip");
 
   // Demo fallback query
   const q = useQuery(() => (live ? Promise.resolve(null as any) : services.dashboard.getAdminDashboard()), [live]);
@@ -40,7 +58,30 @@ export function AdminDashboard() {
     const today = todayISO();
     const attDate = liveData.latestAttendanceDate ?? today;
     const attPct = liveData.attendancePercentage ?? 100;
-    const sectionsCount = liveData.fees.feeByClass.length || 1;
+
+    const studentBreakdown = studentCountsData
+      ? {
+          registered: studentCountsData.registered,
+          active: studentCountsData.active,
+          tcIssued: studentCountsData.tcIssued,
+          alumni: studentCountsData.alumni,
+          inactive: studentCountsData.inactive,
+        }
+      : {
+          registered: liveData.studentCount,
+          active: liveData.studentCount,
+          tcIssued: 0,
+          alumni: 0,
+          inactive: 0,
+        };
+
+    const classSectionTotals = studentCountsData?.classSectionTotals ?? [];
+    const admissionsOverTime = studentCountsData?.admissionsOverTime ?? [];
+    const academicPerformanceAverage = studentCountsData?.academicPerformance?.averageScore ?? null;
+
+    const sectionsCount = classSectionTotals.length > 0
+      ? classSectionTotals.reduce((sum, c) => sum + c.sections.length, 0)
+      : (liveData.fees.feeByClass.length || 1);
 
     return {
       school: {
@@ -49,7 +90,7 @@ export function AdminDashboard() {
         code: liveData.school.code,
       },
       stats: {
-        students: liveData.studentCount,
+        students: studentBreakdown.active,
         sections: sectionsCount,
         teachers: liveData.teacherCount,
         teachersOnLeave: 0,
@@ -70,6 +111,10 @@ export function AdminDashboard() {
           collectionRate: liveData.fees.feeCollectionRate,
         },
       },
+      studentBreakdown,
+      admissionsOverTime,
+      classSectionTotals,
+      academicPerformanceAverage,
       attendanceTrend: [
         { date: attDate, percentage: attPct },
       ],
@@ -78,7 +123,13 @@ export function AdminDashboard() {
         collected: c.collected / 100,
         outstanding: c.outstanding / 100,
       })),
-      performance: { examName: null, rows: [] },
+      performance: {
+        examName: null,
+        rows: classSectionTotals.map((c) => ({
+          name: c.className,
+          average: academicPerformanceAverage ?? 0,
+        })),
+      },
       upcomingExams: [],
       notices: liveData.recentNotices.map((n) => ({
         id: n.id,
@@ -95,17 +146,17 @@ export function AdminDashboard() {
       })),
       tasks: { unmarkedToday: 0, pendingLeave: 0, isSchoolDay: true },
     };
-  }, [liveData]);
+  }, [liveData, studentCountsData]);
 
   const queryState = useMemo<QueryState<AdminDashboardData>>(
     () => ({
-      isLoading: live ? liveData === undefined : q.isLoading,
+      isLoading: live ? liveData === undefined || studentCountsData === undefined : q.isLoading,
       isRefreshing: false,
       data: (live ? adaptedLive : q.data) as AdminDashboardData,
       error: live ? null : q.error,
       refetch: live ? () => {} : q.refetch,
     }),
-    [live, liveData, adaptedLive, q.isLoading, q.data, q.error, q.refetch]
+    [live, liveData, studentCountsData, adaptedLive, q.isLoading, q.data, q.error, q.refetch]
   );
 
   return (
@@ -145,8 +196,57 @@ export function AdminDashboard() {
               </div>
             )}
 
+            {/* Principal's Executive Student Overview */}
+            <div>
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-base font-semibold text-ink">Principal&apos;s Overview</h2>
+                  <p className="text-xs text-ink-muted">Read-only executive summary of student body, status breakdown, and capacity</p>
+                </div>
+                {d.academicPerformanceAverage !== null && (
+                  <div className="flex items-center gap-1.5 rounded-full border border-line bg-white/80 px-3 py-1 text-xs font-semibold text-lagoon shadow-sm">
+                    <Sparkles className="h-3.5 w-3.5 text-lagoon" aria-hidden />
+                    <span>Academic average: {formatPercent(d.academicPerformanceAverage, 1)}</span>
+                  </div>
+                )}
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                <StatCard
+                  label="Registered students"
+                  value={formatNumber(d.studentBreakdown.registered)}
+                  icon={<GraduationCap className="h-5 w-5" />}
+                  tone="sapphire"
+                  hint="All-time student records"
+                  href="/admin/students"
+                />
+                <StatCard
+                  label="Active students"
+                  value={formatNumber(d.studentBreakdown.active)}
+                  icon={<UserCheck className="h-5 w-5" />}
+                  tone="teal"
+                  hint={`${d.studentBreakdown.registered ? Math.round((d.studentBreakdown.active / d.studentBreakdown.registered) * 100) : 100}% currently enrolled`}
+                  href="/admin/students"
+                />
+                <StatCard
+                  label="TC issued (Transferred)"
+                  value={formatNumber(d.studentBreakdown.tcIssued)}
+                  icon={<UserMinus className="h-5 w-5" />}
+                  tone="purple"
+                  hint="Official transfer certificates"
+                  href="/admin/students?status=transferred"
+                />
+                <StatCard
+                  label="Pass-outs (Alumni)"
+                  value={formatNumber(d.studentBreakdown.alumni)}
+                  icon={<Award className="h-5 w-5" />}
+                  tone="lavender"
+                  hint="Graduated alumni"
+                  href="/admin/students?status=alumni"
+                />
+              </div>
+            </div>
+
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatCard label="Total students" value={formatNumber(d.stats.students)} icon={<GraduationCap className="h-5 w-5" />} hint={`Across ${d.stats.sections} sections`} href="/admin/students" />
               <StatCard label="Teaching staff" value={formatNumber(d.stats.teachers)} icon={<Users className="h-5 w-5" />} tone="sapphire" hint={d.stats.teachersOnLeave ? `${d.stats.teachersOnLeave} on leave today` : "All available"} href="/admin/teachers" />
               <StatCard
                 label={att.isToday ? "Today's attendance" : `Attendance · ${formatShortDate(att.date)}`}
@@ -158,10 +258,38 @@ export function AdminDashboard() {
                 href="/admin/attendance"
               />
               <StatCard label="Pending fees" value={formatCurrency(d.stats.fees.outstanding)} icon={<Wallet className="h-5 w-5" />} tone="lavender" hint={`${formatCurrency(d.stats.fees.overdue)} overdue · ${d.stats.fees.overdueStudents} students`} href="/admin/fees" />
+              <StatCard
+                label="Class & sections"
+                value={formatNumber(d.classSectionTotals.length)}
+                icon={<Layers className="h-5 w-5" />}
+                tone="teal"
+                hint={`${d.stats.sections} active sections total`}
+                href="/admin/academics"
+              />
             </div>
 
-            <div className="grid gap-4 lg:grid-cols-3">
-              <ChartCard className="lg:col-span-2" title="Attendance overview" description="School-wide daily attendance, last 15 school days" action={<Link href="/admin/reports?tab=attendance" className="text-[13px] font-medium text-lagoon hover:underline">Full report</Link>}>
+            {/* Admissions Over Time & Attendance Overview */}
+            <div className="grid gap-4 lg:grid-cols-2">
+              <ChartCard
+                title="Admissions over time"
+                description="Monthly new student enrollment trajectory"
+              >
+                {d.admissionsOverTime.length === 0 ? (
+                  <EmptyState title="No admission timeline data" className="py-12" />
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={d.admissionsOverTime} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                      <CartesianGrid vertical={false} stroke={CHART_GRID} />
+                      <XAxis dataKey="month" {...axisProps} />
+                      <YAxis allowDecimals={false} {...axisProps} width={36} />
+                      <Tooltip content={<ChartTooltip format={(v) => `${v} students`} />} cursor={{ fill: "rgba(188,197,204,0.18)" }} />
+                      <Bar dataKey="count" name="Admissions" fill={CHART.primary} radius={[4, 4, 0, 0]} maxBarSize={36} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </ChartCard>
+
+              <ChartCard title="Attendance overview" description="School-wide daily attendance, last 15 school days" action={<Link href="/admin/reports?tab=attendance" className="text-[13px] font-medium text-lagoon hover:underline">Full report</Link>}>
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={d.attendanceTrend.map((p) => ({ ...p, label: formatShortDate(p.date) }))} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                     <defs>
@@ -178,31 +306,57 @@ export function AdminDashboard() {
                   </AreaChart>
                 </ResponsiveContainer>
               </ChartCard>
-
-              <GlassCard>
-                <CardHeader title="Examinations" description="Upcoming and in progress" icon={<CalendarClock className="h-4 w-4" />} action={<Link href="/admin/examinations" className="text-[13px] font-medium text-lagoon hover:underline">View all</Link>} />
-                <ul className="space-y-2.5 p-5">
-                  {d.upcomingExams.length === 0 && <EmptyState title="No upcoming examinations" className="py-6" />}
-                  {d.upcomingExams.map((e) => (
-                    <li key={e.id}>
-                      <Link href={`/admin/examinations/${e.id}`} className="block rounded-xl border border-line/70 bg-white/70 p-3.5 transition-colors hover:bg-white">
-                        <div className="flex items-start justify-between gap-2">
-                          <p className="text-sm font-semibold text-ink">{e.name}</p>
-                          <StatusBadge status={e.status} />
-                        </div>
-                        <p className="mt-1 text-[12.5px] text-ink-muted">{formatDate(e.startDate)} – {formatDate(e.endDate)} · {e.classCount} classes · {e.paperCount} papers</p>
-                        {e.marksProgress !== null && (
-                          <div className="mt-2.5 flex items-center gap-2">
-                            <ProgressBar value={e.marksProgress} label="Marks entry progress" />
-                            <span className="text-[12px] font-medium text-ink-soft">{Math.round(e.marksProgress)}%</span>
-                          </div>
-                        )}
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              </GlassCard>
             </div>
+
+            {/* Class & Section Enrollment & Capacity */}
+            <Card>
+              <CardHeader
+                title="Class & section student totals"
+                description="Enrollment counts vs section capacities for the active academic session"
+                icon={<Layers className="h-4 w-4" />}
+                action={<Link href="/admin/academics" className="text-[13px] font-medium text-lagoon hover:underline">Academic structure</Link>}
+              />
+              {d.classSectionTotals.length === 0 ? (
+                <EmptyState title="No active class records" className="py-8" />
+              ) : (
+                <div className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  {d.classSectionTotals.map((cls) => {
+                    const occPct = cls.capacity > 0 ? Math.round((cls.studentCount / cls.capacity) * 100) : 0;
+                    return (
+                      <div key={cls.classId} className="flex flex-col justify-between rounded-2xl border border-line/70 bg-white/70 p-4 transition-shadow hover:shadow-soft">
+                        <div>
+                          <div className="flex items-center justify-between">
+                            <h3 className="font-semibold text-ink">{cls.className}</h3>
+                            <span className="text-xs font-medium text-ink-muted">{cls.sections.length} section{cls.sections.length > 1 ? "s" : ""}</span>
+                          </div>
+                          <div className="mt-2 flex items-baseline gap-1.5">
+                            <span className="text-2xl font-bold text-sapphire">{cls.studentCount}</span>
+                            <span className="text-xs text-ink-muted">/ {cls.capacity} capacity ({occPct}%)</span>
+                          </div>
+                          <div className="mt-2">
+                            <ProgressBar value={Math.min(occPct, 100)} label={`${cls.className} capacity`} />
+                          </div>
+                        </div>
+                        <div className="mt-4 border-t border-line/50 pt-3">
+                          <div className="flex flex-wrap gap-1.5">
+                            {cls.sections.map((sec) => (
+                              <span
+                                key={sec.sectionId}
+                                className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface-muted/60 px-2 py-0.5 text-[11px] font-medium text-ink-soft"
+                              >
+                                <span>{sec.name}:</span>
+                                <strong className="text-ink">{sec.studentCount}</strong>
+                                <span className="text-ink-muted">/{sec.capacity}</span>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </Card>
 
             <div className="grid gap-4 lg:grid-cols-2">
               <ChartCard title="Fee overview" description={`${formatPercent(d.stats.fees.collectionRate, 1)} of the year's fees collected`} action={<Link href="/admin/fees" className="text-[13px] font-medium text-lagoon hover:underline">Manage fees</Link>}>

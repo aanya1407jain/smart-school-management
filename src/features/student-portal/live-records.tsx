@@ -6,7 +6,7 @@
  * convex/model/studentRecords.ts) and say so plainly when there is nothing.
  * Amounts arrive in minor units (paise).
  */
-import { Megaphone } from "lucide-react";
+import { Download, FileText, Megaphone } from "lucide-react";
 import type { FunctionReturnType } from "convex/server";
 import type { api } from "@convex/_generated/api";
 import { Badge, Card, CardHeader, EmptyState, StatusBadge } from "@/components/ui";
@@ -20,6 +20,7 @@ export type LiveFees = Omit<Ok<FunctionReturnType<typeof api.studentPortal.myFee
 export type LiveHomework = Ok<FunctionReturnType<typeof api.studentPortal.myHomework>>["homework"][number];
 export type LiveTimetable = Omit<Ok<FunctionReturnType<typeof api.studentPortal.myTimetable>>, "state" | "section">;
 export type LiveNotice = Ok<FunctionReturnType<typeof api.studentPortal.myNotices>>["notices"][number];
+export type LiveCertificate = Ok<FunctionReturnType<typeof api.studentPortal.myCertificates>>["certificates"][number];
 
 const rupees = (minor: number) => formatCurrency(minor / 100);
 const METHOD: Record<string, string> = { cash: "Cash", upi: "UPI", card: "Card", bank_transfer: "Bank transfer", cheque: "Cheque", online: "Online" };
@@ -213,6 +214,57 @@ export function LiveNoticesList({ notices }: { notices: LiveNotice[] }) {
             </div>
             <p className="mt-1 whitespace-pre-line text-[13px] text-ink-soft">{n.body}</p>
             <p className="mt-1 text-[11.5px] text-ink-muted">Published {formatDate(n.publishDate)}{n.eventDate ? ` · on ${formatDate(n.eventDate)}` : ""}</p>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
+// ------------------------------------------------------------------ certificates
+export function LiveCertificatesList({ certificates }: { certificates: LiveCertificate[] }) {
+  if (certificates.length === 0) {
+    return (
+      <Card>
+        <EmptyState
+          icon={<FileText className="h-6 w-6" />}
+          title="No certificates or official documents"
+          description="Official certificates and documents issued by the school will appear here."
+        />
+      </Card>
+    );
+  }
+  return (
+    <Card>
+      <ul className="divide-y divide-line/60" data-testid="live-certificates">
+        {certificates.map((c) => (
+          <li key={c.fileId} className="flex items-center justify-between px-5 py-4">
+            <div className="flex items-center gap-3">
+              <span className="grid h-10 w-10 place-items-center rounded-xl bg-teal-soft text-lagoon">
+                <FileText className="h-5 w-5" />
+              </span>
+              <div>
+                <p className="text-sm font-semibold text-ink">{c.fileName}</p>
+                <p className="text-[12px] text-ink-muted">
+                  {c.kind.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())} · {Math.round(c.size / 1024)} KB · Uploaded {formatDate(new Date(c.uploadedAt).toISOString().slice(0, 10))}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Badge tone="teal">Verified Document</Badge>
+              {c.url ? (
+                <a
+                  href={c.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  download={c.fileName}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-white px-2.5 py-1 text-xs font-semibold text-ink shadow-sm hover:border-teal hover:text-teal transition-colors"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  <span>Download</span>
+                </a>
+              ) : null}
+            </div>
           </li>
         ))}
       </ul>

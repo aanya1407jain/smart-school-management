@@ -21,6 +21,7 @@ import { schoolQuery } from "./core/functions";
 import type { Actor } from "./core/actor";
 import type { Permission } from "./core/permissions";
 import { getSchoolSettings, linkedStudentIds, requireGuardianStudentAccess, requirePermission } from "./core/authorization";
+import { notFound } from "./core/errors";
 import { assertIsoDate } from "./core/validators";
 import { fullName } from "./model/academics";
 import {
@@ -39,6 +40,14 @@ type Ctx = QueryCtx & { actor: Actor };
 async function resolvePortalStudent(ctx: Ctx, studentId: Id<"students"> | undefined, permission: Permission): Promise<Doc<"students"> | null> {
   requirePermission(ctx.actor, "area:student");
   requirePermission(ctx.actor, permission);
+  if (ctx.actor.studentId) {
+    if (studentId && studentId !== ctx.actor.studentId) {
+      throw notFound("Student");
+    }
+    const student = await ctx.db.get(ctx.actor.studentId);
+    if (!student || student.schoolId !== ctx.actor.schoolId) return null;
+    return student;
+  }
   if (studentId) return await requireGuardianStudentAccess(ctx, studentId);
   for (const id of await linkedStudentIds(ctx, ctx.actor)) {
     const s = await ctx.db.get(id);
@@ -81,6 +90,39 @@ export const myProfile = schoolQuery({
       // The family's own guardians, with contact details.
       guardians: (await guardiansOf(ctx, student, true)).map(({ name, relationship, phone, email, isPrimary }) => ({ name, relationship, phone, email, isPrimary })),
       lowAttendanceThreshold: settings.attendance.lowAttendanceThreshold,
+    };
+  },
+});
+
+/**
+ * Official certificates and verified documents belonging to the student.
+ * Read-only access — students cannot alter or delete official certificates.
+ */
+export const myCertificates = schoolQuery({
+  args: vPortalStudent,
+  handler: async (ctx, { studentId }) => {
+    const student = await resolvePortalStudent(ctx, studentId, "profile:read:own");
+    if (!student) return { state: "no_student_record" as const };
+    const files = await ctx.db
+      .query("files")
+      .withIndex("by_owner", (q) =>
+        q.eq("schoolId", ctx.actor.schoolId).eq("ownerType", "student").eq("ownerId", student._id),
+      )
+      .collect();
+    const certificates = await Promise.all(
+      files.map(async (f) => ({
+        fileId: f._id,
+        kind: f.kind,
+        fileName: f.fileName,
+        contentType: f.contentType,
+        size: f.size,
+        uploadedAt: f._creationTime,
+        url: await ctx.storage.getUrl(f.storageId),
+      })),
+    );
+    return {
+      state: "ok" as const,
+      certificates,
     };
   },
 });

@@ -131,6 +131,43 @@ describe("student portal: authorization", () => {
     expect((await (await as(t, A.users.admin)).query(api.users.viewer, {})).role).toBe("admin");
     expect((await (await as(t, A.users.classTeacher)).query(api.attendance.studentHistory, { studentId: A.studentA })).studentId).toBe(A.studentA);
   });
+
+  test("student can access only own certificates and cannot access another student's or edit official records", async () => {
+    const { t, A, admin, studentId } = await setup();
+    const r = await admin.action(api.accounts.create, { person: { kind: "student", studentId } });
+    const me = await firstLogin(t, await userOf(t, r.membershipId), r.temporaryPassword);
+
+    const storageId = await t.run((ctx) => ctx.storage.store(new Blob(["%PDF-1.4"], { type: "application/pdf" })));
+    const fileId = await t.run(async (ctx) => {
+      return await ctx.db.insert("files", {
+        schoolId: A.schoolId,
+        storageId,
+        kind: "student_document",
+        ownerType: "student",
+        ownerId: studentId,
+        fileName: "Birth_Certificate.pdf",
+        contentType: "application/pdf",
+        size: 204800,
+        uploadedByUserId: A.users.admin,
+      });
+    });
+
+    // Student reads own certificates
+    const certs = await me.query(api.studentPortal.myCertificates, {});
+    expect(certs.state).toBe("ok");
+    if (certs.state === "ok") {
+      expect(certs.certificates).toHaveLength(1);
+      expect(certs.certificates[0].fileName).toBe("Birth_Certificate.pdf");
+      expect(certs.certificates[0].kind).toBe("student_document");
+      expect(typeof certs.certificates[0].url).toBe("string");
+    }
+
+    // Student cannot access another student's certificates
+    expect(await errorCode(me.query(api.studentPortal.myCertificates, { studentId: A.studentA }))).toBe("NOT_FOUND");
+
+    // Student cannot delete or alter official certificate records
+    expect(await errorCode(me.mutation(api.files.remove, { fileId }))).toBe("FORBIDDEN");
+  });
 });
 
 describe("student portal: missing data is explicit", () => {
