@@ -54,6 +54,7 @@ export const STUDENT_IMPORT: ImportSpec = {
     { key: "section", label: "Section", kind: "text", required: true, aliases: ["section", "sec", "division", "div", "section name", "section label"], example: "A", max: 20 },
     { key: "academicYear", label: "Academic year", kind: "text", aliases: ["academic year", "session", "academic session"], example: "", help: "Optional. If given it must be the current academic year — students are always enrolled into the current year.", max: 20 },
     { key: "admissionNo", label: "Admission number", kind: "text", aliases: ["admission no", "admission number", "adm no", "admn no", "admission id"], example: "", help: "Leave empty to generate one.", max: 40 },
+    { key: "scholarNo", label: "Scholar number", kind: "text", aliases: ["scholar no", "scholar number", "scholar register no", "scholar register number"], example: "", help: "Optional. The school's register number; must be unique in the school.", max: 30 },
     { key: "admissionDate", label: "Admission date", kind: "date", aliases: ["admission date", "date of admission", "doa"], example: "2026-06-01" },
     { key: "gender", label: "Gender", kind: "gender", aliases: ["gender", "sex"], example: "Female", help: "Male, Female or Other (M/F accepted)." },
     { key: "dateOfBirth", label: "Date of birth", kind: "date", aliases: ["date of birth", "dob", "birth date"], example: "2011-05-14", help: "YYYY-MM-DD or DD/MM/YYYY." },

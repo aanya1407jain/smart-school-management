@@ -11,6 +11,7 @@
 import type * as academics from "../academics.js";
 import type * as account from "../account.js";
 import type * as accounts from "../accounts.js";
+import type * as admissionRegister from "../admissionRegister.js";
 import type * as attendance from "../attendance.js";
 import type * as audit from "../audit.js";
 import type * as auth from "../auth.js";
@@ -82,6 +83,7 @@ declare const fullApi: ApiFromModules<{
   academics: typeof academics;
   account: typeof account;
   accounts: typeof accounts;
+  admissionRegister: typeof admissionRegister;
   attendance: typeof attendance;
   audit: typeof audit;
   auth: typeof auth;

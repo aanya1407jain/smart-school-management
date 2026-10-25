@@ -774,6 +774,35 @@ export const enrollmentHistory = studentsQuery({
 });
 
 /**
+ * Every roll number a student has been given (newest first, at most 200):
+ * section, year, from → to and why. Complements `enrollmentHistory`, which
+ * shows only each enrollment's last number. Same access rule.
+ */
+export const rollNumberHistory = studentsQuery({
+  args: { studentId: v.id("students") },
+  handler: async (ctx, { studentId }) => {
+    const student = await requireStudentAccess(ctx, studentId, { all: "students:read:all", own: "profile:read:own" });
+    const rows = await ctx.db.query("rollNumberHistory").withIndex("by_school_student", (q) => q.eq("schoolId", ctx.actor.schoolId).eq("studentId", student._id)).order("desc").take(200);
+    const names = new Map<string, string>();
+    const nameOf = async (id: Id<"sections"> | Id<"academicYears">) => {
+      if (!names.has(id)) {
+        const doc = await ctx.db.get(id);
+        names.set(id, doc ? ("displayName" in doc ? doc.displayName : doc.name) : "");
+      }
+      return names.get(id)!;
+    };
+    const out = [];
+    for (const r of rows) {
+      out.push({
+        enrollmentId: r.enrollmentId, academicYear: await nameOf(r.academicYearId), section: await nameOf(r.sectionId),
+        fromRollNo: r.fromRollNo ?? null, toRollNo: r.toRollNo, changedAt: r.changedAt, reason: r.reason,
+      });
+    }
+    return out;
+  },
+});
+
+/**
  * Student totals for the Students page (students:read:all), using THE shared
  * counting rule (model/studentCounts.ts) — the same number as the admin
  * dashboard. Independent of the list's pagination and search, so loading more

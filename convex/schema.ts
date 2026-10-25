@@ -334,6 +334,39 @@ export default defineSchema({
     .index("by_school_scholar", ["schoolId", "scholarNoKey"]),
 
   /**
+   * Admission register (CSR / scholar register) — SCHOOL-DEFINED extra columns.
+   * The standard columns (admission/scholar no., name, dates, parent, class
+   * admitted to, leaving/TC) are derived from students, enrollments, parent
+   * contacts and transfer certificates (convex/admissionRegister.ts); only the
+   * columns a school adds live here, so the register can follow each school's
+   * format without schema changes. Fields are deactivated, never deleted, and a
+   * field's `type` is fixed once created (values stay valid).
+   */
+  admissionRegisterFields: defineTable({
+    schoolId: v.id("schools"),
+    /** Stable identifier used as the key in `admissionRegisterValues.values` (a-z, 0-9, _). */
+    key: v.string(),
+    label: v.string(),
+    type: v.union(v.literal("text"), v.literal("number"), v.literal("date"), v.literal("select"), v.literal("boolean")),
+    /** Choices for `select`. */
+    options: v.optional(v.array(v.string())),
+    required: v.boolean(),
+    order: v.number(),
+    active: v.boolean(),
+    updatedAt: v.number(),
+    updatedByUserId: v.id("users"),
+  }).index("by_school_key", ["schoolId", "key"]),
+
+  /** One row per student holding the values of the school-defined register columns. */
+  admissionRegisterValues: defineTable({
+    schoolId: v.id("schools"),
+    studentId: v.id("students"),
+    values: v.record(v.string(), v.union(v.string(), v.number(), v.boolean())),
+    updatedAt: v.number(),
+    updatedByUserId: v.id("users"),
+  }).index("by_school_student", ["schoolId", "studentId"]),
+
+  /**
    * Transfer certificates (TC) issued when a student leaves the school
    * (convex/studentLifecycle.ts). Historical record: never deleted; a
    * cancelled TC keeps its row and number. `snapshot` freezes what the
@@ -416,6 +449,29 @@ export default defineSchema({
     .index("by_student_year", ["studentId", "academicYearId"])
     .index("by_section_status", ["sectionId", "status"])
     .index("by_school_year", ["schoolId", "academicYearId"]),
+
+  /**
+   * Every roll-number assignment or change (append-only). The current number
+   * lives on the enrollment; this keeps the numbers a student HAD during the
+   * year when the roster was renumbered (admissions, transfers, withdrawals,
+   * name corrections, operator reconciliation). See model/rollNumbers.ts.
+   */
+  rollNumberHistory: defineTable({
+    schoolId: v.id("schools"),
+    academicYearId: v.id("academicYears"),
+    sectionId: v.id("sections"),
+    enrollmentId: v.id("enrollments"),
+    studentId: v.id("students"),
+    /** Absent for the first number the enrollment received. */
+    fromRollNo: v.optional(v.number()),
+    toRollNo: v.number(),
+    changedAt: v.number(),
+    /** The signed-in member whose action renumbered the roster; absent for operator tools. */
+    changedByUserId: v.optional(v.id("users")),
+    reason: v.union(v.literal("roster_change"), v.literal("reconciliation")),
+  })
+    .index("by_school_student", ["schoolId", "studentId"])
+    .index("by_enrollment", ["enrollmentId"]),
 
   /**
    * Who teaches what to whom. SUBJECT ASSIGNMENT != ATTENDANCE OWNERSHIP:

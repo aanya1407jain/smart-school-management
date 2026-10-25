@@ -14,6 +14,8 @@
  *             whitespace-normalised — then student _id, then enrollment _id
  *             (deterministic tie-breakers; database order is never relied on)
  *   numbers = 1..n, consecutive, no duplicates or gaps
+ *   history = every assignment/change is appended to `rollNumberHistory`
+ *             (applyRollNo), so earlier numbers in the year are kept too
  *
  * Call it in the SAME mutation that changes a roster (import, enrollment,
  * transfer, withdrawal). A Convex mutation is one serializable transaction:
@@ -107,22 +109,41 @@ export async function planSectionRoster(ctx: QueryCtx, section: Doc<"sections">)
  * Renumber one section's active roster 1..n. Only rows whose number changes
  * are written. Returns the roster size and how many enrollments changed.
  */
-export async function renumberSection(ctx: MutationCtx, sectionId: Id<"sections">): Promise<{ size: number; changed: number }> {
+export async function renumberSection(ctx: RenumberCtx, sectionId: Id<"sections">): Promise<{ size: number; changed: number }> {
   const section = await ctx.db.get(sectionId);
   if (!section) return { size: 0, changed: 0 };
   const { rows } = await planSectionRoster(ctx, section);
   let changed = 0;
   for (const row of rows) {
     if (row.currentRollNo !== row.proposedRollNo) {
-      await ctx.db.patch(row.enrollment._id, { rollNo: row.proposedRollNo });
+      await applyRollNo(ctx, row, "roster_change");
       changed++;
     }
   }
   return { size: rows.length, changed };
 }
 
+/** Mutation context of a signed-in member (`ctx.actor`) or an operator tool (no actor). */
+type RenumberCtx = MutationCtx & { actor?: { userId: Id<"users"> } };
+
+/**
+ * Write a row's proposed roll number AND append the change to
+ * `rollNumberHistory` in the same transaction, so the number a student had is
+ * never lost when the roster is renumbered.
+ */
+export async function applyRollNo(ctx: RenumberCtx, row: RosterPlanRow, reason: Doc<"rollNumberHistory">["reason"]) {
+  const e = row.enrollment;
+  await ctx.db.patch(e._id, { rollNo: row.proposedRollNo });
+  await ctx.db.insert("rollNumberHistory", {
+    schoolId: e.schoolId, academicYearId: e.academicYearId, sectionId: e.sectionId, enrollmentId: e._id, studentId: e.studentId,
+    ...(row.currentRollNo !== null ? { fromRollNo: row.currentRollNo } : {}),
+    toRollNo: row.proposedRollNo, changedAt: Date.now(), reason,
+    ...(ctx.actor ? { changedByUserId: ctx.actor.userId } : {}),
+  });
+}
+
 /** Renumber several sections (each independently), e.g. every section an import touched. */
-export async function renumberSections(ctx: MutationCtx, sectionIds: Iterable<Id<"sections">>) {
+export async function renumberSections(ctx: RenumberCtx, sectionIds: Iterable<Id<"sections">>) {
   const done = new Set<string>();
   for (const id of sectionIds) {
     if (done.has(id)) continue;
