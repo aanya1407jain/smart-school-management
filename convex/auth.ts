@@ -72,7 +72,7 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
       }
       const loginId = canonicalLoginId(args.profile.loginId);
       if (!loginId) throw new AppError("FORBIDDEN", "Accounts are created by your school.");
-      return await activatePendingAccount(ctx, { loginId, mustChangePassword: args.profile.mustChangePassword === true });
+      return await activatePendingAccount(ctx, { loginId, mustChangePassword: args.profile.mustChangePassword === true, defaultPassword: args.profile.defaultPassword === true });
     },
 
     /**

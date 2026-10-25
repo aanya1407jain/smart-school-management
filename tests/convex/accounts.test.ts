@@ -9,6 +9,7 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { as, createSchool, errorCode, makeTest, type T } from "./fixtures";
 import { canonicalLoginId, formatLoginId, parseGeneratedLoginId } from "../../convex/model/loginIds";
+import { STUDENT_DEFAULT_PASSWORD } from "../../convex/model/accounts";
 
 async function setup() {
   const t = makeTest();
@@ -45,16 +46,22 @@ describe("Login IDs", () => {
 });
 
 describe("accounts.create", () => {
-  test("admin creates a student account linked to the student record", async () => {
+  test("admin creates a student account linked to the student record: Login ID = scholar number, default password", async () => {
     const { t, A } = await setup();
     const admin = await as(t, A.users.admin);
     const r = await admin.action(api.accounts.create, { person: { kind: "student", studentId: A.studentB } });
-    expect(r.loginId).toMatch(/^STU-\d{4}-00001$/);
-    expect(r.temporaryPassword).toMatch(/^[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}$/);
+    expect(r.loginId).toBe("ALPHABALA"); // the fixture student's scholar number
+    expect(r.temporaryPassword).toBe(STUDENT_DEFAULT_PASSWORD);
     const { m, user, account } = await memberFor(t, r.membershipId);
     expect(m).toMatchObject({ schoolId: A.schoolId, role: "student", status: "active", studentId: A.studentB, loginId: r.loginId });
     expect(m.teacherId).toBeUndefined();
-    expect(user).toMatchObject({ loginId: r.loginId, mustChangePassword: true });
+    // Must change it at first sign-in; the student default never expires.
+    expect(user).toMatchObject({ loginId: r.loginId, mustChangePassword: true, defaultPassword: true });
+    // A student without a scholar number cannot get an account; a typed Login ID is refused.
+    const other = await t.run((ctx) => ctx.db.insert("students", { schoolId: A.schoolId, admissionNo: "X-1", firstName: "No", lastName: "Scholar", status: "active" }));
+    expect(await errorCode(admin.action(api.accounts.create, { person: { kind: "student", studentId: other } }))).toBe("INVALID_ARGUMENT");
+    await t.run((ctx) => ctx.db.patch(other, { scholarNo: "X-1", scholarNoKey: "X-1" }));
+    expect(await errorCode(admin.action(api.accounts.create, { person: { kind: "student", studentId: other }, loginId: "MY-OWN-ID" }))).toBe("INVALID_ARGUMENT");
     // Only a hash is stored, never the password itself.
     expect(account?.secret).toBeDefined();
     expect(account?.secret).not.toContain(r.temporaryPassword);
@@ -88,9 +95,9 @@ describe("accounts.create", () => {
   test("duplicate Login ID and a second account for the same person are rejected", async () => {
     const { t, A } = await setup();
     const admin = await as(t, A.users.admin);
-    await admin.action(api.accounts.create, { person: { kind: "student", studentId: A.studentB }, loginId: "STU-X-1" });
+    await admin.action(api.accounts.create, { person: { kind: "student", studentId: A.studentB } }); // Login ID ALPHABALA
     const t2 = await t.run((ctx) => ctx.db.insert("teachers", { schoolId: A.schoolId, employeeId: "E-11", firstName: "Ravi", lastName: "K", specializationSubjectIds: [], status: "active" }));
-    expect(await errorCode(admin.action(api.accounts.create, { person: { kind: "teacher", teacherId: t2 }, loginId: "stu-x-1" }))).toBe("CONFLICT");
+    expect(await errorCode(admin.action(api.accounts.create, { person: { kind: "teacher", teacherId: t2 }, loginId: "alphabala" }))).toBe("CONFLICT");
     expect(await errorCode(admin.action(api.accounts.create, { person: { kind: "student", studentId: A.studentB } }))).toBe("CONFLICT");
     expect(await errorCode(admin.action(api.accounts.create, { person: { kind: "teacher", teacherId: t2 }, loginId: "bad id!" }))).toBe("INVALID_ARGUMENT");
   });

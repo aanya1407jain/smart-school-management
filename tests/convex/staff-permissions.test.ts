@@ -5,7 +5,7 @@
 import { describe, expect, test } from "vitest";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { CAPABILITIES, GRANT_PRESETS, OFFICE_BASE, grantProblems, permissionsFromGrants } from "../../convex/core/grants";
+import { ACCOUNTANT_ACCESS, CAPABILITIES, GRANT_PRESETS, OFFICE_BASE, grantProblems, isAccountantGrants, permissionsFromGrants } from "../../convex/core/grants";
 import { ROLE_PERMISSIONS, resolvePermissions } from "../../convex/core/permissions";
 import { as, createSchool, errorCode, makeTest, pastMonday } from "./fixtures";
 
@@ -193,13 +193,24 @@ describe("memberships.setPermissions (server)", () => {
     expect(list.some((r) => r.role === ("student" as string))).toBe(false);
   });
 
-  test("a legacy accountant permission-set change clears grants (one access model at a time)", async () => {
+  test("the 'accountant only' toggle stores the Accountant grants preset; 'full admin' clears grants", async () => {
     const { t, A, office } = await setup();
     const principal = await as(t, A.users.admin);
     await principal.mutation(api.memberships.setPermissions, { targetMembershipId: office.membershipId, grants: [{ module: "administration", actions: ["view"] }] });
     await principal.mutation(api.memberships.updateAccess, { targetMembershipId: office.membershipId, permissionSets: ["accountant"] });
-    const m = await t.run((ctx) => ctx.db.get(office.membershipId as Id<"schoolMemberships">));
+    let m = await t.run((ctx) => ctx.db.get(office.membershipId as Id<"schoolMemberships">));
+    expect(m).toMatchObject({ permissionSets: [], grants: ACCOUNTANT_ACCESS.grants, accessProfile: "Accountant" });
+    expect(isAccountantGrants(m?.grants)).toBe(true);
+    await principal.mutation(api.memberships.updateAccess, { targetMembershipId: office.membershipId, permissionSets: [] });
+    m = await t.run((ctx) => ctx.db.get(office.membershipId as Id<"schoolMemberships">));
     expect(m?.grants).toBeUndefined();
-    expect(m?.permissionSets).toEqual(["accountant"]);
+    expect(m?.permissionSets).toEqual([]);
+  });
+
+  test("new 'accountant only' logins have the same server access as the legacy accountant set, plus the office base", () => {
+    const preset = resolvePermissions("admin", [], { grants: ACCOUNTANT_ACCESS.grants });
+    const legacy = resolvePermissions("admin", ["accountant"]);
+    for (const p of legacy) expect(preset.has(p), p).toBe(true);
+    expect([...preset].filter((p) => !legacy.has(p)).sort()).toEqual(["files:upload", "notices:read"]);
   });
 });

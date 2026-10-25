@@ -4,11 +4,14 @@
  *  - roll-number history (every in-year renumbering is kept) and persistence across years;
  *  - Students → Export grant (students:export) backing the admission register download;
  *  - admission register (CSR): derived standard columns + pluggable school-defined columns;
- *  - tenant isolation and module entitlement on all of the above.
+ *  - tenant isolation and module entitlement on all of the above;
+ *  - automatic scholar numbers (<prefix>0001 …) and the operator backfill;
+ *  - changing the current academic year leaves every earlier record untouched.
  */
 import { describe, expect, test } from "vitest";
 import { api, internal } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
+import schema from "../../convex/schema";
 import { grantProblems, permissionsFromGrants } from "../../convex/core/grants";
 import { resolvePermissions } from "../../convex/core/permissions";
 import { as, createSchool, errorCode, makeTest, type SchoolFixture, type T } from "./fixtures";
@@ -83,7 +86,7 @@ describe("import: scholar numbers and duplicate children", () => {
       createAccounts: false, today: TODAY,
     });
     const status = (n: number) => results.find((r) => r.rowNumber === n)!.status;
-    expect(results.find((r) => r.rowNumber === 2)!.errors[0].message).toMatch(/already exists \(admission no\./);
+    expect(results.find((r) => r.rowNumber === 2)!.errors[0].message).toMatch(/already exists \(scholar no\. ALPHAASHA\)/);
     expect(status(2)).toBe("invalid");
     expect(status(3)).not.toBe("invalid");
     expect(results.find((r) => r.rowNumber === 4)!.errors[0].message).toMatch(/repeated \(first on row 3\)/);
@@ -265,5 +268,111 @@ describe("admission register (CSR)", () => {
     expect(await errorCode(admin.query(api.academics.rollNumberHistory, { studentId: A.studentA }))).toBe("MODULE_DISABLED");
     await t.mutation(internal.schoolModules.setSchoolModules, { schoolSlug: "alpha", enabled: ["students", "academics", "attendance", "finance", "administration"], updatedBy: "test", reason: "P2 test" });
     expect((await admin.query(api.admissionRegister.studentEntry, { studentId: A.studentA })).custom).toEqual({ house: "Red" });
+  });
+});
+
+// ---------------------------------------------------------------- automatic scholar numbers
+const admitArgs = (A: SchoolFixture, firstName: string, over: Record<string, unknown> = {}) => ({
+  firstName, lastName: "Nair", dateOfBirth: "2014-03-03", admissionDate: "2026-06-01", address: "3 Lane",
+  classId: A.classId, sectionId: A.sectionA, parentContact: { name: `P ${firstName}`, relation: "Mother", phone: "+91 98765 00001" }, ...over,
+});
+
+describe("automatic scholar numbers (<prefix>NNNN)", () => {
+  test("new admissions get the next number; typed numbers are respected and move the sequence on", async () => {
+    const t = makeTest();
+    const A = await createSchool(t, "alpha");
+    const B = await createSchool(t, "beta");
+    const admin = await as(t, A.users.admin);
+    expect(await t.mutation(internal.scholarNumberMaintenance.configure, { schoolSlug: "alpha", prefix: "0246cbse" })).toMatchObject({ prefix: "0246CBSE", next: "0246CBSE0001" });
+
+    expect((await admin.mutation(api.academics.createStudentWithEnrollment, admitArgs(A, "Anu"))).scholarNo).toBe("0246CBSE0001");
+    expect((await admin.mutation(api.academics.createStudentWithEnrollment, admitArgs(A, "Bina"))).scholarNo).toBe("0246CBSE0002");
+    // A typed number in the school's format: kept, and automatic numbers continue after it.
+    expect((await admin.mutation(api.academics.createStudentWithEnrollment, admitArgs(A, "Chitra", { scholarNo: "0246CBSE0010" }))).scholarNo).toBe("0246CBSE0010");
+    expect((await admin.mutation(api.academics.createStudentWithEnrollment, admitArgs(A, "Devi"))).scholarNo).toBe("0246CBSE0011");
+    // A number already taken outside the sequence is skipped, never duplicated.
+    await t.run((ctx) => ctx.db.patch(A.studentB, { scholarNo: "0246CBSE0012", scholarNoKey: "0246CBSE0012" }));
+    expect((await admin.mutation(api.academics.createStudentWithEnrollment, admitArgs(A, "Esha"))).scholarNo).toBe("0246CBSE0013");
+    // Typing a taken number is still refused.
+    expect(await errorCode(admin.mutation(api.academics.createStudentWithEnrollment, admitArgs(A, "Farah", { scholarNo: "0246cbse 0013" })))).toBe("CONFLICT");
+    // Another school without a prefix: no automatic numbers.
+    expect((await (await as(t, B.users.admin)).mutation(api.academics.createStudentWithEnrollment, admitArgs(B, "Anu"))).scholarNo).toBeNull();
+  });
+
+  test("imports: rows without a number get one; a typed number later in the file is never taken by an earlier row", async () => {
+    const t = makeTest();
+    const A = await createSchool(t, "alpha");
+    const admin = await as(t, A.users.admin);
+    await t.mutation(internal.scholarNumberMaintenance.configure, { schoolSlug: "alpha", prefix: "0246CBSE" });
+    const res = await admin.mutation(api.imports.commitStudentRows, {
+      rows: [studentRow(2), studentRow(3, { scholarNo: "0246CBSE0002" }), studentRow(4)], createAccounts: false, today: TODAY,
+    });
+    const numbers = await t.run(async (ctx) => Promise.all(res.created.map(async (c) => (await ctx.db.get(c.studentId))!.scholarNo)));
+    expect(numbers).toEqual(["0246CBSE0003", "0246CBSE0002", "0246CBSE0004"]);
+  });
+
+  test("backfill: dry run writes nothing; apply numbers existing students in admission order once; validation", async () => {
+    const t = makeTest();
+    const A = await createSchool(t, "alpha");
+    expect(await errorCode(t.mutation(internal.scholarNumberMaintenance.backfill, { schoolSlug: "alpha" }))).toBe("CONFLICT"); // no prefix yet
+    expect(await errorCode(t.mutation(internal.scholarNumberMaintenance.configure, { schoolSlug: "alpha", prefix: "02-46" }))).toBe("INVALID_ARGUMENT");
+    await t.mutation(internal.scholarNumberMaintenance.configure, { schoolSlug: "alpha", prefix: "0246CBSE" });
+    // Existing students without scholar numbers (the fixture gives them one).
+    const students = await t.run(async (ctx) => {
+      const rows = await ctx.db.query("students").withIndex("by_school_admission", (q) => q.eq("schoolId", A.schoolId)).collect();
+      for (const s of rows) await ctx.db.patch(s._id, { scholarNo: undefined, scholarNoKey: undefined });
+      return rows;
+    });
+
+    const dry = await t.mutation(internal.scholarNumberMaintenance.backfill, { schoolSlug: "alpha", dryRun: true });
+    expect(dry).toMatchObject({ dryRun: true, count: students.length, first: "0246CBSE0001", remaining: 0 });
+    expect(dry.sample.map((s) => s.admissionNo)).toEqual(students.map((s) => s.admissionNo));
+    expect((await t.run((ctx) => ctx.db.get(students[0]._id)))?.scholarNo).toBeUndefined();
+
+    const applied = await t.mutation(internal.scholarNumberMaintenance.backfill, { schoolSlug: "alpha" });
+    expect(applied.sample).toEqual(dry.sample);
+    const after = await t.run(async (ctx) => Promise.all(students.map(async (s) => (await ctx.db.get(s._id))!.scholarNo)));
+    expect(after).toEqual(students.map((_, i) => `0246CBSE${String(i + 1).padStart(4, "0")}`));
+    // Re-running changes nothing; the next admission continues the sequence.
+    expect(await t.mutation(internal.scholarNumberMaintenance.backfill, { schoolSlug: "alpha" })).toMatchObject({ count: 0 });
+    const next = await (await as(t, A.users.admin)).mutation(api.academics.createStudentWithEnrollment, admitArgs(A, "Gita"));
+    expect(next.scholarNo).toBe(`0246CBSE${String(students.length + 1).padStart(4, "0")}`);
+    const audit = await t.run((ctx) => ctx.db.query("auditLogs").withIndex("by_school_action", (q) => q.eq("schoolId", A.schoolId).eq("action", "student.scholar_numbers_assigned")).collect());
+    expect(audit).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------- academic year switch invariant
+describe("changing the current academic year", () => {
+  test("leaves every record of earlier years untouched (only the setting and the new year's status change)", async () => {
+    const t = makeTest();
+    const A = await createSchool(t, "alpha");
+    const admin = await as(t, A.users.admin);
+    // Records from several modules in the current (2026-27) year.
+    const { structureId } = await admin.mutation(api.fees.createStructure, { name: "Tuition", classIds: [A.classId], components: [{ label: "Tuition", amountMinor: 1000 }], installments: [{ label: "T1", dueDate: "2026-06-01", amountMinor: 1000 }], activate: true });
+    await admin.mutation(api.fees.assignStructure, { structureId, target: { kind: "students", studentIds: [A.studentA] } });
+    await admin.mutation(api.fees.recordPayment, { studentId: A.studentA, amountMinor: 500, method: "cash", paidOn: "2026-06-01", clientRequestId: "year-switch-0001" });
+    await admin.mutation(api.academics.createStudentWithEnrollment, admitArgs(A, "Hema"));
+    const next = await admin.mutation(api.academics.createAcademicYear, { name: "2027-28", startDate: "2027-04-01", endDate: "2028-03-31", status: "planned" });
+
+    const IGNORED = new Set(["academicYears", "schoolSettings", "auditLogs"]);
+    const snapshot = () => t.run(async (ctx) => {
+      const out: Record<string, unknown[]> = {};
+      for (const table of Object.keys(schema.tables).filter((x) => !IGNORED.has(x))) out[table] = await ctx.db.query(table as never).collect();
+      return out;
+    });
+    const before = await snapshot();
+    const oldYear = await t.run((ctx) => ctx.db.get(A.yearId));
+    const history = await admin.query(api.academics.enrollmentHistory, { studentId: A.studentA });
+
+    await admin.mutation(api.academics.setCurrentAcademicYear, { academicYearId: next });
+    expect(await snapshot()).toEqual(before);
+    expect(await t.run((ctx) => ctx.db.get(A.yearId))).toEqual(oldYear); // the previous year itself is unchanged too
+    expect(await t.run((ctx) => ctx.db.get(next))).toMatchObject({ status: "active" });
+    expect(await admin.query(api.academics.enrollmentHistory, { studentId: A.studentA })).toEqual(history);
+
+    // Switching back is just as harmless.
+    await admin.mutation(api.academics.setCurrentAcademicYear, { academicYearId: A.yearId });
+    expect(await snapshot()).toEqual(before);
   });
 });

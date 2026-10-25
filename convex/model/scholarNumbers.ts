@@ -12,11 +12,68 @@
  * "SR104" and "Sr 104" are the same scholar number; the display value keeps the
  * office's spelling (trimmed, single spaces).
  */
-import type { QueryCtx } from "../_generated/server";
+import type { MutationCtx, QueryCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
 import { conflict, invalid } from "../core/errors";
+import { allocateNumber, counterKeys, ensureCounterAtLeast } from "./counters";
 
 export const MAX_SCHOLAR_NO_LENGTH = 30;
+
+// ---------------------------------------------------------------- automatic numbering
+/**
+ * AUTOMATIC SCHOLAR NUMBERS. A school with `schoolSettings.scholarNumberPrefix`
+ * (e.g. "0246CBSE") gives every new student `<prefix><n>`, n from the school's
+ * `scholar` counter, at least 4 digits: 0246CBSE0001, 0246CBSE0002 …
+ * Allocation runs inside the mutation that creates the student (counters.ts:
+ * serializable, never handed out twice). A number already taken — e.g. typed
+ * by hand — is skipped. A hand-typed number in the school's format moves the
+ * counter past it, so the sequence continues after it.
+ */
+export const SCHOLAR_PREFIX_PATTERN = /^[A-Z0-9]{1,20}$/;
+export const SCHOLAR_DIGITS = 4;
+
+export function formatScholarNo(prefix: string, n: number): string {
+  return `${prefix}${String(n).padStart(SCHOLAR_DIGITS, "0")}`;
+}
+
+export async function scholarPrefixOf(ctx: QueryCtx, schoolId: Id<"schools">): Promise<string | null> {
+  const settings = await ctx.db.query("schoolSettings").withIndex("by_school", (q) => q.eq("schoolId", schoolId)).unique();
+  return settings?.scholarNumberPrefix ?? null;
+}
+
+/** The next free automatic scholar number, or null when the school has no prefix (numbers are entered by hand). */
+export async function nextScholarNumber(ctx: MutationCtx, schoolId: Id<"schools">): Promise<{ scholarNo: string; scholarNoKey: string } | null> {
+  const prefix = await scholarPrefixOf(ctx, schoolId);
+  if (!prefix) return null;
+  for (let attempt = 0; attempt < 1000; attempt++) {
+    const scholarNo = formatScholarNo(prefix, await allocateNumber(ctx, schoolId, counterKeys.scholar()));
+    const key = scholarNoKey(scholarNo);
+    if (!(await studentByScholarNo(ctx, schoolId, key))) return { scholarNo, scholarNoKey: key };
+  }
+  throw conflict("Could not find a free scholar number. Enter one by hand.");
+}
+
+/** After a hand-typed number like <prefix>0412, continue the automatic sequence after it. */
+export async function syncScholarCounter(ctx: MutationCtx, schoolId: Id<"schools">, key: string): Promise<void> {
+  const prefix = await scholarPrefixOf(ctx, schoolId);
+  if (!prefix || !key.startsWith(prefix)) return;
+  const digits = key.slice(prefix.length);
+  if (/^\d{1,9}$/.test(digits)) await ensureCounterAtLeast(ctx, schoolId, counterKeys.scholar(), Number(digits));
+}
+
+/**
+ * The scholar number for a new student: the hand-typed one (validated, must be
+ * free, syncs the counter) or, when none is given, the next automatic number
+ * (null if the school has no automatic numbering).
+ */
+export async function scholarForNewStudent(ctx: MutationCtx, schoolId: Id<"schools">, typed: { scholarNo: string; scholarNoKey: string } | null | undefined) {
+  if (typed) {
+    await assertScholarNoAvailable(ctx, schoolId, typed.scholarNoKey);
+    await syncScholarCounter(ctx, schoolId, typed.scholarNoKey);
+    return typed;
+  }
+  return await nextScholarNumber(ctx, schoolId);
+}
 
 export function scholarNoKey(value: string): string {
   return value.normalize("NFKC").toUpperCase().replace(/\s+/g, "");

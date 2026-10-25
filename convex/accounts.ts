@@ -24,9 +24,10 @@ import { requireActor, type Actor } from "./core/actor";
 import { getCurrentAcademicYearId, getInSchool, hasPermission, requirePermission } from "./core/authorization";
 import { AppError, forbidden, invalid } from "./core/errors";
 import { assertNonEmpty } from "./core/validators";
-import { describeAccess } from "./core/grants";
+import { ACCOUNTANT_ACCESS, describeAccess, isAccountantGrants } from "./core/grants";
 import { fullName, teacherDisplayName } from "./model/academics";
-import { generateTemporaryPassword, PASSWORD_PROVIDER, provisionAccount, reserveAccount, temporaryPasswordFields } from "./model/accounts";
+import { initialPasswordFor, PASSWORD_PROVIDER, provisionAccount, renameLoginId, reserveAccount, studentLoginId, temporaryPasswordFields } from "./model/accounts";
+import type { Role } from "./core/permissions";
 import { accountTarget, writeAudit } from "./model/audit";
 import { MAX_SECTION_ROSTER } from "./model/rollNumbers";
 import { paginateSorted, sortKeyOf } from "./model/sortedPagination";
@@ -37,7 +38,8 @@ const vPersonRef = v.union(
   /**
    * Office staff with an ADMIN-portal login that is not linked to a teacher
    * record (e.g. a second administrator, or the accountant). `accountantOnly`
-   * restricts it to the finance permission set (core/permissions.ts).
+   * creates a restricted office login with the Accountant grants preset
+   * (core/grants.ts GRANT_PRESETS) — the Principal can adjust it on Staff & Permissions.
    */
   v.object({ kind: v.literal("staff"), displayName: v.string(), email: v.optional(v.string()), accountantOnly: v.boolean() }),
 );
@@ -75,7 +77,7 @@ export const reserveForPerson = internalMutation({
     } else {
       displayName = assertNonEmpty(person.displayName, "displayName", 120);
       const email = person.email?.trim() ? assertNonEmpty(person.email, "email", 200) : undefined;
-      reserved = await reserveAccount(ctx, { ...base, role: "admin", kind: "admin", displayName, email, permissionSets: person.accountantOnly ? ["accountant"] : [] });
+      reserved = await reserveAccount(ctx, { ...base, role: "admin", kind: "admin", displayName, email, ...(person.accountantOnly ? ACCOUNTANT_ACCESS : {}) });
     }
     return { ...reserved, displayName };
   },
@@ -92,22 +94,28 @@ export const targetForCredentials = internalMutation({
     if (target.guardianId) throw invalid("This sign-in type no longer exists; accounts are for administrators, teachers and students only.");
     if (target.status === "suspended") throw invalid("Enable this account before issuing new credentials.");
     if (!target.loginId) throw invalid("This account has no Login ID.");
-    return { loginId: target.loginId, userId: target.userId ?? null, displayName: target.displayName };
+    // A student account still on an old Login ID moves to the scholar number when its password is (re)issued.
+    let loginId = target.loginId;
+    if (target.role === "student" && target.studentId) {
+      loginId = await studentLoginId(ctx, actor.schoolId, target.studentId);
+      await renameLoginId(ctx, target, loginId);
+    }
+    return { loginId, userId: target.userId ?? null, displayName: target.displayName, role: target.role };
   },
 });
 
 export const recordCredentialsIssued = internalMutation({
-  args: { callerMembershipId: v.optional(v.id("schoolMemberships")), targetMembershipId: v.id("schoolMemberships"), userId: v.optional(v.id("users")) },
-  handler: async (ctx, { callerMembershipId, targetMembershipId, userId }) => {
+  args: { callerMembershipId: v.optional(v.id("schoolMemberships")), targetMembershipId: v.id("schoolMemberships"), userId: v.optional(v.id("users")), defaultPassword: v.optional(v.boolean()) },
+  handler: async (ctx, { callerMembershipId, targetMembershipId, userId, defaultPassword }) => {
     const actor = await requireActor(ctx, callerMembershipId);
     requirePermission(actor, "users:manage");
     const target = await getInSchool({ ...ctx, actor }, "schoolMemberships", targetMembershipId, "Account");
-    if (userId) await ctx.db.patch(userId, temporaryPasswordFields(Date.now()));
+    if (userId) await ctx.db.patch(userId, temporaryPasswordFields(Date.now(), defaultPassword === true));
     await writeAudit(ctx, {
       schoolId: actor.schoolId, actor, action: "account.credentials_issued",
       entity: { table: "schoolMemberships", id: target._id },
-      summary: `Issued a temporary password for ${target.loginId} (${target.displayName})`,
-      metadata: accountTarget(target),
+      summary: defaultPassword ? `Set the default student password for ${target.loginId} (${target.displayName})` : `Issued a temporary password for ${target.loginId} (${target.displayName})`,
+      metadata: { ...accountTarget(target), defaultPassword: defaultPassword === true },
     });
   },
 });
@@ -153,16 +161,19 @@ type IssuedCredentials = { membershipId: Id<"schoolMemberships">; loginId: strin
 /**
  * Create the sign-in account for a student or teacher record, or an office
  * (admin-portal) login. Admin, teacher and student are the only account roles.
- * Returns the Login ID and a one-time temporary password.
+ * Returns the Login ID and the first password: for STUDENTS the Login ID is the
+ * scholar number and the password the school default (model/accounts.ts
+ * STUDENT_DEFAULT_PASSWORD); others get a random one-time password. Either way
+ * it must be changed at first sign-in.
  */
 export const create = schoolAction({
   args: { person: vPersonRef, loginId: v.optional(v.string()) },
   handler: async (ctx, { person, loginId }): Promise<IssuedCredentials> => {
     const reserved: { membershipId: Id<"schoolMemberships">; loginId: string; displayName: string } =
       await ctx.runMutation(internal.accounts.reserveForPerson, { callerMembershipId: ctx.membershipId, person, loginId });
-    const temporaryPassword = generateTemporaryPassword();
-    await provisionAccount(ctx, { loginId: reserved.loginId, password: temporaryPassword, mustChangePassword: true });
-    return { ...reserved, temporaryPassword };
+    const { password, defaultPassword } = initialPasswordFor(person.kind === "student" ? "student" : person.kind === "teacher" ? "teacher" : "admin");
+    await provisionAccount(ctx, { loginId: reserved.loginId, password, mustChangePassword: true, defaultPassword });
+    return { ...reserved, temporaryPassword: password };
   },
 });
 
@@ -201,18 +212,19 @@ async function issueFor(
   callerMembershipId: Id<"schoolMemberships"> | undefined,
   targetMembershipId: Id<"schoolMemberships">,
 ): Promise<IssuedCredentials> {
-  const target: { loginId: string; userId: Id<"users"> | null; displayName: string } =
+  const target: { loginId: string; userId: Id<"users"> | null; displayName: string; role: Role } =
     await ctx.runMutation(internal.accounts.targetForCredentials, { callerMembershipId, targetMembershipId });
-  const temporaryPassword = generateTemporaryPassword();
+  // Students: back to the school default password; others: a new random one-time password.
+  const { password: temporaryPassword, defaultPassword } = initialPasswordFor(target.role);
   if (target.userId) {
     // Flag first: if a later step fails, the account is still forced to change
     // its password rather than holding a new password that is not temporary.
-    await ctx.runMutation(internal.accounts.recordCredentialsIssued, { callerMembershipId, targetMembershipId, userId: target.userId });
+    await ctx.runMutation(internal.accounts.recordCredentialsIssued, { callerMembershipId, targetMembershipId, userId: target.userId, defaultPassword });
     await modifyAccountCredentials(ctx, { provider: PASSWORD_PROVIDER, account: { id: target.loginId, secret: temporaryPassword } });
     await invalidateSessions(ctx, { userId: target.userId });
   } else {
-    await provisionAccount(ctx, { loginId: target.loginId, password: temporaryPassword, mustChangePassword: true });
-    await ctx.runMutation(internal.accounts.recordCredentialsIssued, { callerMembershipId, targetMembershipId });
+    await provisionAccount(ctx, { loginId: target.loginId, password: temporaryPassword, mustChangePassword: true, defaultPassword });
+    await ctx.runMutation(internal.accounts.recordCredentialsIssued, { callerMembershipId, targetMembershipId, defaultPassword });
   }
   return { membershipId: targetMembershipId, loginId: target.loginId, displayName: target.displayName, temporaryPassword };
 }
@@ -238,6 +250,9 @@ async function accountFor(ctx: QueryCtx, actor: Actor, field: "studentId" | "tea
   const m = rows.find((r) => r.schoolId === actor.schoolId && r.role === (field === "studentId" ? "student" : "teacher"));
   return m ? { membershipId: m._id, loginId: m.loginId ?? null, state: accountState(m) } : null;
 }
+
+/** A student's identifier in lists: the scholar number (legacy admission numbers are no longer shown). */
+const studentNumber = (s: Doc<"students">) => s.scholarNo ?? "No scholar no.";
 
 /** Largest active-student list sorted for the all-students view (one bounded read; filter by section above this). */
 export const MAX_SCHOOL_STUDENT_LIST = 5000;
@@ -290,7 +305,7 @@ export const listPeople = schoolQuery({
         const page = [];
         for (const { s, e } of result.page) {
           page.push({
-            personId: s._id as string, name: fullName(s), number: s.admissionNo, detail: `Class ${section.displayName}`,
+            personId: s._id as string, name: fullName(s), number: studentNumber(s), detail: `Class ${section.displayName}`,
             rollNo: e.rollNo ?? null,
             account: withAccounts ? await accountFor(ctx, actor, "studentId", s._id) : null,
           });
@@ -308,7 +323,7 @@ export const listPeople = schoolQuery({
         const enr = (await ctx.db.query("enrollments").withIndex("by_student_year", (q) => q.eq("studentId", s._id).eq("academicYearId", yearId)).collect()).find((e) => e.status === "active");
         const section = enr ? await ctx.db.get(enr.sectionId) : null;
         page.push({
-          personId: s._id as string, name: fullName(s), number: s.admissionNo, detail: section ? `Class ${section.displayName}` : "Not enrolled",
+          personId: s._id as string, name: fullName(s), number: studentNumber(s), detail: section ? `Class ${section.displayName}` : "Not enrolled",
           rollNo: enr?.rollNo ?? null,
           account: withAccounts ? await accountFor(ctx, actor, "studentId", s._id) : null,
         });
@@ -344,9 +359,11 @@ export const listStaffAccounts = schoolQuery({
     return rows
       .map((m) => ({
         membershipId: m._id, loginId: m.loginId ?? null, displayName: m.displayName, email: m.email ?? null,
-        state: accountState(m), accountantOnly: m.grants === undefined && m.permissionSets.includes("accountant"), isSelf: m._id === ctx.actor.membershipId,
+        state: accountState(m), isSelf: m._id === ctx.actor.membershipId,
+        // Accountant preset grants (or the legacy accountant set) → "Accountant only".
+        accountantOnly: (m.grants === undefined && m.permissionSets.includes("accountant")) || isAccountantGrants(m.grants),
         /** Set by the Principal on Staff & Permissions (module × action grants); manage it there. */
-        customAccess: m.grants !== undefined ? describeAccess(m.role, m.grants, m.permissionSets) : null,
+        customAccess: m.grants !== undefined && !isAccountantGrants(m.grants) ? describeAccess(m.role, m.grants, m.permissionSets) : null,
       }))
       .sort((a, b) => a.displayName.localeCompare(b.displayName));
   },
