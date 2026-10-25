@@ -26,8 +26,9 @@ import type { Doc, Id } from "../_generated/dataModel";
 import { AppError, conflict, temporaryPasswordExpired } from "../core/errors";
 import { normalizeLoginId } from "../core/validators";
 import type { PermissionSetName, Role } from "../core/permissions";
+import type { Grant } from "../core/grants";
 import { allocateNumber, ensureCounterAtLeast } from "./counters";
-import { formatLoginId, loginIdCounterKey, parseGeneratedLoginId, type LoginIdKind } from "./loginIds";
+import { canonicalLoginId, formatLoginId, loginIdCounterKey, parseGeneratedLoginId, type LoginIdKind } from "./loginIds";
 import { assertMembershipShape, hasActiveAccess } from "./memberships";
 import { accountTarget, roleInSchool, writeAudit } from "./audit";
 
@@ -44,14 +45,25 @@ export const PASSWORD_PROVIDER = "password";
  */
 export const TEMPORARY_PASSWORD_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
-/** When the user's temporary password stops working, or null if they have none. */
-export function temporaryPasswordExpiresAt(user: Pick<Doc<"users">, "mustChangePassword" | "temporaryPasswordIssuedAt" | "_creationTime">): number | null {
-  if (!user.mustChangePassword) return null;
+/**
+ * STUDENT accounts: the Login ID is the student's scholar number and the first
+ * password is this school default (hashed by Convex Auth like any password).
+ * It must be changed at first sign-in (mustChangePassword) and, by the
+ * school's decision, does NOT expire (`users.defaultPassword`). Teachers and
+ * office logins keep random one-time passwords that expire.
+ */
+export const STUDENT_DEFAULT_PASSWORD = "Aster@123";
+
+type UserPasswordState = Pick<Doc<"users">, "mustChangePassword" | "temporaryPasswordIssuedAt" | "_creationTime" | "defaultPassword">;
+
+/** When the user's temporary password stops working, or null if they have none (or it is the non-expiring student default). */
+export function temporaryPasswordExpiresAt(user: UserPasswordState): number | null {
+  if (!user.mustChangePassword || user.defaultPassword) return null;
   // Accounts flagged before the timestamp existed count from their creation.
   return (user.temporaryPasswordIssuedAt ?? user._creationTime) + TEMPORARY_PASSWORD_TTL_MS;
 }
 
-export function isTemporaryPasswordExpired(user: Pick<Doc<"users">, "mustChangePassword" | "temporaryPasswordIssuedAt" | "_creationTime">, now: number): boolean {
+export function isTemporaryPasswordExpired(user: UserPasswordState, now: number): boolean {
   const expiresAt = temporaryPasswordExpiresAt(user);
   return expiresAt !== null && now >= expiresAt;
 }
@@ -69,9 +81,45 @@ export async function assertSessionAllowed(ctx: QueryCtx, userId: Id<"users">, n
   if (user && isTemporaryPasswordExpired(user, now)) throw temporaryPasswordExpired();
 }
 
-/** Fields that mark a password as temporary (set on every issue/reset). */
-export function temporaryPasswordFields(now: number) {
-  return { mustChangePassword: true as const, temporaryPasswordIssuedAt: now };
+/** Fields that mark a password as temporary (set on every issue/reset). `defaultPassword`: the non-expiring student default. */
+export function temporaryPasswordFields(now: number, defaultPassword = false) {
+  return { mustChangePassword: true as const, temporaryPasswordIssuedAt: now, defaultPassword: defaultPassword ? (true as const) : undefined };
+}
+
+/** The first password for a new account of this role: the student default, or a random one-time password. Actions only. */
+export function initialPasswordFor(role: Role): { password: string; defaultPassword: boolean } {
+  return role === "student" ? { password: STUDENT_DEFAULT_PASSWORD, defaultPassword: true } : { password: generateTemporaryPassword(), defaultPassword: false };
+}
+
+/** A student's Login ID: their scholar number (canonical). Throws when they have none or it cannot be a Login ID. */
+export async function studentLoginId(ctx: QueryCtx, schoolId: Id<"schools">, studentId: Id<"students">): Promise<string> {
+  const student = await ctx.db.get(studentId);
+  if (!student || student.schoolId !== schoolId) throw new AppError("NOT_FOUND", "Student not found.");
+  if (!student.scholarNoKey) throw new AppError("INVALID_ARGUMENT", `${student.firstName} ${student.lastName} has no scholar number yet. Students sign in with their scholar number — add one first.`, { scholarNo: "Required for a sign-in account" });
+  const id = canonicalLoginId(student.scholarNoKey);
+  if (!id) throw new AppError("INVALID_ARGUMENT", `Scholar number ${student.scholarNo} cannot be used to sign in (only letters, digits, dot, dash and underscore). Change it first.`, { scholarNo: "Not usable as a Login ID" });
+  return id;
+}
+
+/**
+ * Rename an account's Login ID everywhere it is stored (membership, identity
+ * and the Convex Auth password account) in one transaction. The password hash
+ * and sessions are unaffected. Used when a student's scholar number changes.
+ */
+export async function renameLoginId(ctx: MutationCtx, membership: Doc<"schoolMemberships">, newLoginId: string): Promise<void> {
+  const old = membership.loginId;
+  if (!old || old === newLoginId) return;
+  if (await isLoginIdTaken(ctx, newLoginId)) throw conflict(`Login ID ${newLoginId} is already in use.`);
+  for (const m of await ctx.db.query("schoolMemberships").withIndex("by_login_id", (q) => q.eq("loginId", old)).collect()) {
+    await ctx.db.patch(m._id, { loginId: newLoginId });
+  }
+  if (membership.userId) {
+    const user = await ctx.db.get(membership.userId);
+    if (user?.loginId === old) await ctx.db.patch(user._id, { loginId: newLoginId });
+  }
+  // Only this member's own password account moves; an auth account held by anyone else is never touched.
+  const account = await ctx.db.query("authAccounts").withIndex("providerAndAccountId", (q) => q.eq("provider", PASSWORD_PROVIDER).eq("providerAccountId", old)).first();
+  if (account && membership.userId && account.userId === membership.userId) await ctx.db.patch(account._id, { providerAccountId: newLoginId });
 }
 
 /** A Login ID is taken if any identity, reservation or auth account uses it. */
@@ -115,7 +163,12 @@ export type ReserveAccountInput = {
   teacherId?: Id<"teachers">;
   studentId?: Id<"students">;
   permissionSets?: PermissionSetName[];
+  /** Admin only: a restricted office login with exactly these grants (core/grants.ts), e.g. the Accountant preset. */
+  grants?: Grant[];
+  accessProfile?: string;
   createdByUserId?: Id<"users">;
+  /** Demo seed ONLY: keep the explicit `loginId` for a seeded demo student instead of the scholar number. */
+  seedStudentLoginId?: true;
 };
 
 /** The membership (any status) that already gives this person this kind of access, if any. */
@@ -133,7 +186,7 @@ export async function existingAccountFor(
 /** Step 1: reserve a membership + Login ID. Caller must already be authorized. */
 export async function reserveAccount(ctx: MutationCtx, input: ReserveAccountInput): Promise<{ membershipId: Id<"schoolMemberships">; loginId: string }> {
   assertMembershipShape(input);
-  if (input.role !== "admin" && input.permissionSets?.length) {
+  if (input.role !== "admin" && (input.permissionSets?.length || input.grants)) {
     throw new AppError("INVALID_ARGUMENT", "Permission sets can only be added to administrative accounts.");
   }
   if (input.teacherId || input.studentId) {
@@ -145,7 +198,14 @@ export async function reserveAccount(ctx: MutationCtx, input: ReserveAccountInpu
     }
   }
   let loginId: string;
-  if (input.loginId !== undefined && input.loginId.trim() !== "") {
+  if (input.role === "student" && !input.seedStudentLoginId) {
+    // Students always sign in with their scholar number — never a generated or typed ID.
+    loginId = await studentLoginId(ctx, input.schoolId, input.studentId!);
+    if (input.loginId?.trim() && canonicalLoginId(input.loginId) !== loginId) {
+      throw new AppError("INVALID_ARGUMENT", `Students sign in with their scholar number (${loginId}); a different Login ID cannot be chosen.`, { loginId: "Students use their scholar number" });
+    }
+    if (await isLoginIdTaken(ctx, loginId)) throw new AppError("CONFLICT", `Login ID ${loginId} (the scholar number) is already in use by another account.`, { loginId: "Already in use" });
+  } else if (input.loginId !== undefined && input.loginId.trim() !== "") {
     loginId = normalizeLoginId(input.loginId);
     if (await isLoginIdTaken(ctx, loginId)) throw new AppError("CONFLICT", `Login ID ${loginId} is already in use.`, { loginId: "Already in use" });
     await syncLoginIdCounter(ctx, input.schoolId, loginId);
@@ -159,6 +219,8 @@ export async function reserveAccount(ctx: MutationCtx, input: ReserveAccountInpu
     role: input.role,
     status: "invited",
     permissionSets: input.permissionSets ?? [],
+    ...(input.grants ? { grants: input.grants } : {}),
+    ...(input.accessProfile ? { accessProfile: input.accessProfile } : {}),
     ...(input.email ? { email: input.email } : {}),
     ...(input.teacherId ? { teacherId: input.teacherId } : {}),
     ...(input.studentId ? { studentId: input.studentId } : {}),
@@ -172,7 +234,7 @@ export async function reserveAccount(ctx: MutationCtx, input: ReserveAccountInpu
  * password account is created server-side (step 2). Creates the identity and
  * activates every reserved membership for that Login ID.
  */
-export async function activatePendingAccount(ctx: MutationCtx, args: { loginId: string; mustChangePassword: boolean }): Promise<Id<"users">> {
+export async function activatePendingAccount(ctx: MutationCtx, args: { loginId: string; mustChangePassword: boolean; defaultPassword?: boolean }): Promise<Id<"users">> {
   const pending = (await ctx.db.query("schoolMemberships").withIndex("by_login_id", (q) => q.eq("loginId", args.loginId)).collect())
     .filter((m) => m.status === "invited" && !m.userId && !m.guardianId); // legacy guardian sign-ins are never activated
   if (pending.length === 0) throw new AppError("FORBIDDEN", "Accounts are created by your school.");
@@ -185,7 +247,7 @@ export async function activatePendingAccount(ctx: MutationCtx, args: { loginId: 
     loginId: args.loginId,
     name: first.displayName,
     ...(first.email ? { email: first.email } : {}),
-    ...(args.mustChangePassword ? temporaryPasswordFields(now) : {}),
+    ...(args.mustChangePassword ? { mustChangePassword: true, temporaryPasswordIssuedAt: now, ...(args.defaultPassword ? { defaultPassword: true } : {}) } : {}),
   });
   for (const m of pending) {
     await ctx.db.patch(m._id, { userId, status: "active", activatedAt: now });
@@ -227,10 +289,10 @@ export function generateTemporaryPassword(): string {
  * Step 2: create the Convex Auth password account for a reserved Login ID.
  * The secret is hashed by the provider (Scrypt); only the hash is stored.
  */
-export async function provisionAccount(ctx: ActionCtx, args: { loginId: string; password: string; mustChangePassword: boolean }) {
+export async function provisionAccount(ctx: ActionCtx, args: { loginId: string; password: string; mustChangePassword: boolean; defaultPassword?: boolean }) {
   return await createAccount(ctx, {
     provider: PASSWORD_PROVIDER,
     account: { id: args.loginId, secret: args.password },
-    profile: { loginId: args.loginId, ...(args.mustChangePassword ? { mustChangePassword: true } : {}) },
+    profile: { loginId: args.loginId, ...(args.mustChangePassword ? { mustChangePassword: true } : {}), ...(args.defaultPassword ? { defaultPassword: true } : {}) },
   });
 }

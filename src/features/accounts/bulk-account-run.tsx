@@ -146,8 +146,9 @@ export function BulkAccountRun({ jobId, onClose, autoPrepare }: { jobId: JobId; 
 
   const download = () => {
     downloadCsv(`student-accounts-${new Date().toISOString().slice(0, 10)}`, [
-      ["Student name", "Admission number", "Class", "Login ID", "Temporary password", "Note"],
-      ...credentials.map((c) => [c.displayName, c.admissionNo, c.section, c.loginId, c.temporaryPassword, "Must be changed at first sign-in; expires after 7 days"]),
+      ["Student name", "Scholar No.", "Class", "Login ID", "Default password", "Note"],
+      // `admissionNo` carries the scholar number (convex/bulkAccounts.ts); the Login ID is the same number.
+      ...credentials.map((c) => [c.displayName, c.admissionNo, c.section, c.loginId, c.temporaryPassword, "Must be changed at first sign-in"]),
     ]);
     setDownloaded(true);
   };
@@ -212,7 +213,7 @@ export function BulkAccountRun({ jobId, onClose, autoPrepare }: { jobId: JobId; 
           <p className="flex items-start gap-2.5 rounded-xl border border-lagoon/25 bg-teal-soft px-4 py-3 text-[13px] text-lagoon">
             <KeyRound className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
             <span>
-              Each new account gets a Login ID and a one-time temporary password. Students must change it at first sign-in, and it expires after 7 days.
+              Each student signs in with their scholar number as the Login ID and the school&apos;s default password. Students must change it at first sign-in.
               Passwords are shown only during this run — download the CSV before closing.
             </span>
           </p>

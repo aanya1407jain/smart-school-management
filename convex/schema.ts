@@ -57,6 +57,12 @@ export default defineSchema({
     mustChangePassword: v.optional(v.boolean()),
     /** Server time the current temporary password was issued (expiry: model/accounts.ts). */
     temporaryPasswordIssuedAt: v.optional(v.number()),
+    /**
+     * The current password is the school's student default (STUDENT_DEFAULT_PASSWORD).
+     * It must still be changed at first sign-in, but it does not expire. Cleared
+     * together with mustChangePassword.
+     */
+    defaultPassword: v.optional(v.boolean()),
   })
     .index("email", ["email"])
     .index("phone", ["phone"])
@@ -89,6 +95,13 @@ export default defineSchema({
     currentAcademicYearId: v.optional(v.id("academicYears")),
     /** ISO weekday numbers (0 = Sunday) on which school is in session. */
     workingDays: v.array(v.number()),
+    /**
+     * When set, students get scholar numbers automatically: this prefix + a
+     * 4-digit running number (e.g. "0246CBSE" → 0246CBSE0001). Set by the
+     * operator (internal scholarNumberMaintenance.configure). Absent = numbers
+     * are only entered by hand.
+     */
+    scholarNumberPrefix: v.optional(v.string()),
     attendance: v.object({
       lateCountsAsPresent: v.boolean(),
       lowAttendanceThreshold: v.number(), // percent

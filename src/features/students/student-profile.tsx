@@ -107,6 +107,7 @@ function normalizeProfile(raw: ServerProfile) {
     lastName: s.lastName,
     status: s.status as string | undefined,
     admissionNo: s.admissionNo,
+    scholarNo: s.scholarNo ?? undefined,
     admissionDate: s.admissionDate ?? undefined,
     dateOfBirth: s.dateOfBirth ?? undefined,
     gender: s.gender ?? undefined,
@@ -225,8 +226,8 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
                 {s.status && <StatusBadge status={s.status} />}
               </div>
               <p className="mt-1 text-sm text-ink-muted">
-                {s.admissionNo && <span className="font-mono">{s.admissionNo}</span>}
-                {p.classLabel && <>{s.admissionNo ? " · " : ""}Class {p.classLabel}</>}
+                {s.scholarNo && <span data-testid="profile-scholar-no">Scholar No: <span className="font-mono">{s.scholarNo}</span></span>}
+                {p.classLabel && <>{s.scholarNo ? " · " : ""}Class {p.classLabel}</>}
                 {p.enrollment?.rollNo != null && ` · Roll ${p.enrollment.rollNo}`}
               </p>
               <p className="mt-0.5 text-sm text-ink-muted">

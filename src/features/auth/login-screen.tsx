@@ -73,8 +73,8 @@ export function LoginScreen() {
 
           <form onSubmit={handleSubmit(onSubmit)} noValidate className="mt-7 space-y-5">
 
-            <FormField label="Login ID" required error={errors.loginId?.message}>
-              <Input type="text" autoComplete="username" autoCapitalize="characters" spellCheck={false} placeholder="e.g. TCH-00124" {...register("loginId")} />
+            <FormField label="Login ID" hint="Students: your scholar number." required error={errors.loginId?.message}>
+              <Input type="text" autoComplete="username" autoCapitalize="characters" spellCheck={false} placeholder="e.g. 0246CBSE0001 or TCH-00124" {...register("loginId")} />
             </FormField>
 
             <FormField label="Password" required error={errors.password?.message}>

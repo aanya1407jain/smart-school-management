@@ -34,8 +34,8 @@ export const clearMustChangePassword = internalMutation({
   args: { userId: v.id("users") },
   handler: async (ctx, { userId }) => {
     const user = await ctx.db.get(userId);
-    if (user?.mustChangePassword || user?.temporaryPasswordIssuedAt !== undefined) {
-      await ctx.db.patch(userId, { mustChangePassword: undefined, temporaryPasswordIssuedAt: undefined });
+    if (user?.mustChangePassword || user?.temporaryPasswordIssuedAt !== undefined || user?.defaultPassword) {
+      await ctx.db.patch(userId, { mustChangePassword: undefined, temporaryPasswordIssuedAt: undefined, defaultPassword: undefined });
     }
   },
 });

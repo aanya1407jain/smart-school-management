@@ -53,7 +53,9 @@ export async function createSchool(t: T, slug: string): Promise<SchoolFixture> {
     await ctx.db.insert("teacherAssignments", { schoolId, academicYearId: yearId, teacherId: subjectTeacher, subjectId, classId, sectionId: sectionA });
     await ctx.db.insert("teacherAssignments", { schoolId, academicYearId: yearId, teacherId: classTeacher, subjectId, classId, sectionId: sectionB });
     const student = async (first: string, sectionId: Id<"sections">) => {
-      const id = await ctx.db.insert("students", { schoolId, admissionNo: `${slug}-${first}`, firstName: first, lastName: "S", status: "active" });
+      // Scholar numbers are the students' Login IDs, which are unique across schools: prefix with the school.
+      const scholarNo = `${slug}${first}`.toUpperCase();
+      const id = await ctx.db.insert("students", { schoolId, admissionNo: `${slug}-${first}`, firstName: first, lastName: "S", status: "active", scholarNo, scholarNoKey: scholarNo });
       await ctx.db.insert("enrollments", { schoolId, studentId: id, academicYearId: yearId, classId, sectionId, rollNo: 1, status: "active", startDate: "2026-04-01" });
       return id;
     };

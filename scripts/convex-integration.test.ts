@@ -254,7 +254,7 @@ async function main() {
   await expectCode("Import with an invalid row imports nothing", () => admin.mutation(api.imports.commitStudentRows, { rows: [row, { rowNumber: 3, values: { fullName: "Bad Section", className: "10", section: "Z" } }], createAccounts: false, today: TODAY }), "INVALID_ARGUMENT");
   const imported = await admin.mutation(api.imports.commitStudentRows, { rows: [row], createAccounts: true, today: TODAY });
   const newStudent = imported.created[0];
-  check("Import creates the student with a pending account", imported.created.length === 1 && !!newStudent.membershipId && /^STU-\d{4}-\d{5}$/.test(newStudent.loginId ?? ""), newStudent.loginId);
+  check("Import creates the student with a pending account; Login ID = the scholar number", imported.created.length === 1 && !!newStudent.membershipId && /^[A-Z0-9][A-Z0-9._-]+$/.test(newStudent.loginId ?? "") && !/^STU-/.test(newStudent.loginId ?? ""), newStudent.loginId);
   await expectCode("Importing the same child again is refused (duplicate name + date of birth)", () => admin.mutation(api.imports.commitStudentRows, { rows: [row], createAccounts: false, today: TODAY }), "INVALID_ARGUMENT");
   check("Pending account cannot sign in yet", (await signInFails(newStudent.loginId!, "anything-123")) !== null);
   try {
@@ -264,7 +264,7 @@ async function main() {
     check("Public sign-up cannot claim a pending (reserved) Login ID", true, codeOf(e));
   }
   const [issued] = await admin.action(api.accounts.issuePendingCredentials, { targetMembershipIds: [newStudent.membershipId!] });
-  check("Admin issues a temporary password", issued.ok && issued.loginId === newStudent.loginId);
+  check("Admin issues the default student password", issued.ok && issued.loginId === newStudent.loginId && issued.temporaryPassword === "Aster@123");
   const temp = issued.ok ? issued.temporaryPassword : "";
   const ishita = await signIn(newStudent.loginId!.toLowerCase(), temp);
   const sIshita = await ishita.query(api.users.session, {});

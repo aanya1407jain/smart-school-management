@@ -17,7 +17,7 @@ async function setup() {
   const students = await t.run(async (ctx) => {
     const ids: Id<"students">[] = [];
     for (const first of ["Kabir", "Lina", "Omar"]) {
-      const id = await ctx.db.insert("students", { schoolId: A.schoolId, admissionNo: `AR-${first}`, firstName: first, lastName: "Rao", status: "active", admissionDate: "2026-04-01" });
+      const id = await ctx.db.insert("students", { schoolId: A.schoolId, admissionNo: `AR-${first}`, scholarNo: `AR-${first}`.toUpperCase(), scholarNoKey: `AR-${first}`.toUpperCase(), firstName: first, lastName: "Rao", status: "active", admissionDate: "2026-04-01" });
       await ctx.db.insert("enrollments", { schoolId: A.schoolId, studentId: id, academicYearId: A.yearId, classId: A.classId, sectionId: A.sectionA, status: "active", startDate: "2026-04-01" });
       ids.push(id);
     }

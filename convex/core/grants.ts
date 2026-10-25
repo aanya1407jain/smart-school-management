@@ -126,6 +126,20 @@ export const GRANT_PRESETS: { key: string; label: string; grants: Grant[] }[] = 
   { key: "office_viewer", label: "Office (view only)", grants: [{ module: "students", actions: ["view"] }, { module: "attendance", actions: ["view"] }, { module: "administration", actions: ["view"] }] },
 ];
 
+/**
+ * "Accountant only" office logins (Accounts & Import, memberships.updateAccess):
+ * the Accountant preset as grants, replacing the legacy `permissionSets: ["accountant"]`.
+ */
+export const ACCOUNTANT_ACCESS: { grants: Grant[]; accessProfile: string } = {
+  grants: GRANT_PRESETS.find((p) => p.key === "accountant")!.grants,
+  accessProfile: "Accountant",
+};
+
+/** True when stored grants are exactly the Accountant preset (shown as "Accountant only"). */
+export function isAccountantGrants(grants: readonly { module: string; actions: readonly string[] }[] | undefined): boolean {
+  return grants !== undefined && JSON.stringify(normalizeGrants(grants)) === JSON.stringify(normalizeGrants(ACCOUNTANT_ACCESS.grants));
+}
+
 export function isAction(value: unknown): value is Action {
   return typeof value === "string" && (ACTIONS as readonly string[]).includes(value);
 }
