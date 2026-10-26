@@ -92,7 +92,7 @@ function SectionWeek({ sectionId, classId, workingDays }: { sectionId: Id<"secti
 
     const tgtPeriod = byId.get(target.periodKey);
     if (!tgtPeriod || tgtPeriod.isBreak) {
-      toast({ title: "Cannot drop into break period", tone: "danger" });
+      toast({ title: "Cannot drop into break period", tone: "error" });
       return;
     }
 
@@ -109,7 +109,7 @@ function SectionWeek({ sectionId, classId, workingDays }: { sectionId: Id<"secti
       await removeEntry({ entryId: srcLesson.entryId });
       toast({ title: `Moved ${srcLesson.subject} to ${WEEKDAYS[target.day]} (${tgtPeriod.label})` });
     } catch (e) {
-      toast({ title: "Cannot move lesson", description: errText(e), tone: "danger" });
+      toast({ title: "Cannot move lesson", description: errText(e), tone: "error" });
     }
   };
 
