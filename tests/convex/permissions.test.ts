@@ -33,7 +33,8 @@ describe("source guard", () => {
   // Public functions defined with the raw builders bypass tenancy. Only these may.
   //  - users.ts:me / users.ts:session report "signed out" instead of throwing (session resolves the actor itself via requireActor)
   //  - account.ts:changePassword is an action (no db) that authenticates with getAuthUserId and Convex Auth's own credential check
-  const ALLOWED_RAW = new Set(["auth.ts", "users.ts:me", "users.ts:session", "account.ts:changePassword", "schools.ts:publicProfile"]);
+  //  - tcVerification.ts:verifyTransferCertificate is the public QR check on a printed TC (random code; certificate facts only)
+  const ALLOWED_RAW = new Set(["auth.ts", "users.ts:me", "users.ts:session", "account.ts:changePassword", "schools.ts:publicProfile", "tcVerification.ts:verifyTransferCertificate"]);
   const dir = join(__dirname, "../../convex");
   const files = readdirSync(dir).filter((f) => f.endsWith(".ts") && !["schema.ts", "auth.config.ts", "http.ts"].includes(f));
 

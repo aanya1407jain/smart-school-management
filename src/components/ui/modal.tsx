@@ -19,7 +19,7 @@ export function Modal({ open, onOpenChange, title, description, children, footer
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-sapphire/25 backdrop-blur-[3px] data-[state=open]:animate-[fade-up_.2s_ease-out]" />
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-sapphire/25 backdrop-blur-md data-[state=open]:animate-[fade-up_.2s_ease-out]" />
         <Dialog.Content
           className={cn(
             "glass-strong fixed left-1/2 top-1/2 z-50 flex max-h-[92vh] w-[calc(100vw-1.5rem)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-3xl",

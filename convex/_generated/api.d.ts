@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as academicYearMaintenance from "../academicYearMaintenance.js";
 import type * as academics from "../academics.js";
 import type * as account from "../account.js";
 import type * as accounts from "../accounts.js";
@@ -47,6 +48,7 @@ import type * as model_grading from "../model/grading.js";
 import type * as model_homeworkAccess from "../model/homeworkAccess.js";
 import type * as model_importSpecs from "../model/importSpecs.js";
 import type * as model_importers from "../model/importers.js";
+import type * as model_lifecycle from "../model/lifecycle.js";
 import type * as model_loginIds from "../model/loginIds.js";
 import type * as model_memberships from "../model/memberships.js";
 import type * as model_modules from "../model/modules.js";
@@ -72,6 +74,7 @@ import type * as staff from "../staff.js";
 import type * as studentLifecycle from "../studentLifecycle.js";
 import type * as studentLoginMigration from "../studentLoginMigration.js";
 import type * as studentPortal from "../studentPortal.js";
+import type * as tcVerification from "../tcVerification.js";
 import type * as timetable from "../timetable.js";
 import type * as timetableMaintenance from "../timetableMaintenance.js";
 import type * as users from "../users.js";
@@ -83,6 +86,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  academicYearMaintenance: typeof academicYearMaintenance;
   academics: typeof academics;
   account: typeof account;
   accounts: typeof accounts;
@@ -122,6 +126,7 @@ declare const fullApi: ApiFromModules<{
   "model/homeworkAccess": typeof model_homeworkAccess;
   "model/importSpecs": typeof model_importSpecs;
   "model/importers": typeof model_importers;
+  "model/lifecycle": typeof model_lifecycle;
   "model/loginIds": typeof model_loginIds;
   "model/memberships": typeof model_memberships;
   "model/modules": typeof model_modules;
@@ -147,6 +152,7 @@ declare const fullApi: ApiFromModules<{
   studentLifecycle: typeof studentLifecycle;
   studentLoginMigration: typeof studentLoginMigration;
   studentPortal: typeof studentPortal;
+  tcVerification: typeof tcVerification;
   timetable: typeof timetable;
   timetableMaintenance: typeof timetableMaintenance;
   users: typeof users;
