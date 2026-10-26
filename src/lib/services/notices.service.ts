@@ -140,8 +140,10 @@ export const mockNoticeService = {
       return writeDb((db) => {
         const n = db.notices.find((x) => x.id === noticeId);
         if (!n) throw notFound("Notice");
-        n.status = "published";
-        return { ok: true };
+        if (n.status !== "archived") throw invalid("Only archived notices can be restored.");
+        // Same rule as the live backend: a restored notice goes back to draft and must be published again.
+        n.status = "draft";
+        return { ok: true, status: "draft" as const };
       });
     });
   },

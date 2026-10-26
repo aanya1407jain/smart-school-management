@@ -1,272 +1,179 @@
 /**
- * Guardian child switching, multi-child data isolation, and notification delivery tests.
- * Covers AP-05 requirements with verified Convex backend queries and mutations.
+ * Guardian sign-ins were REMOVED (account roles: admin, teacher, student only).
+ * This file used to test guardian child switching; it now proves the removal:
+ *   - a leftover guardian membership (as an old deployment may still hold) grants
+ *     no access to any portal, staff function or file — even for the student it
+ *     was linked to, and even when called directly with ids;
+ *   - such a membership cannot be activated, re-enabled or given credentials;
+ *   - students are notified on their own account only;
+ *   - migrations:removeGuardianAccounts deletes those memberships (dry run first),
+ *     deletes a sign-in that has nothing else, keeps users with other access, and
+ *     never touches parent CONTACT data on students.
+ * (Kept under its old name so the history of the file is preserved; rename with
+ * `git mv` when committing if preferred.)
  */
 import { describe, expect, test } from "vitest";
-import { api } from "../../convex/_generated/api";
-import type { Id } from "../../convex/_generated/dataModel";
-import { as, createSchool, errorCode, makeTest, pastMonday } from "./fixtures";
+import { api, internal } from "../../convex/_generated/api";
+import { as, createSchool, errorCode, makeTest, type T } from "./fixtures";
 
-describe("AP-05: Guardian child switching and notifications", () => {
-  test("guardian with multiple linked children refreshes profile, fees, timetable, attendance, and notices on switch", async () => {
-    const t = makeTest();
-    const A = await createSchool(t, "alpha");
+const TODAY = "2026-10-12";
 
-    const guardianUser = await as(t, A.users.guardian);
-    const adminUser = await as(t, A.users.admin);
+async function setup() {
+  const t = makeTest();
+  const A = await createSchool(t, "alpha");
+  const B = await createSchool(t, "beta");
+  return { t, A, B };
+}
 
-    const guardianRecord = await t.run(async (ctx) => {
-      const m = await ctx.db.get(A.memberships.guardian);
-      return m!.guardianId!;
-    });
-
-    // Link studentB to the same guardian as well
-    await t.run(async (ctx) => {
-      await ctx.db.insert("guardianLinks", {
-        schoolId: A.schoolId,
-        guardianId: guardianRecord,
-        studentId: A.studentB,
-        relationship: "Mother",
-        isPrimary: false,
-      });
-
-      // Insert timetable periods and entries for section A (Child A) and section B (Child B)
-      const periodId = await ctx.db.insert("periods", {
-        schoolId: A.schoolId,
-        index: 1,
-        label: "Period 1",
-        startTime: "09:00",
-        endTime: "09:45",
-        isBreak: false,
-      });
-
-      await ctx.db.insert("timetableEntries", {
-        schoolId: A.schoolId,
-        academicYearId: A.yearId,
-        sectionId: A.sectionA,
-        dayOfWeek: 1,
-        periodId,
-        subjectId: A.subjectId,
-        teacherId: A.subjectTeacher,
-      });
-      await ctx.db.insert("timetableEntries", {
-        schoolId: A.schoolId,
-        academicYearId: A.yearId,
-        sectionId: A.sectionB,
-        dayOfWeek: 1,
-        periodId,
-        subjectId: A.subjectId,
-        teacherId: A.classTeacher,
-      });
-
-      // Notices specific to section A and section B
-      await ctx.db.insert("notices", {
-        schoolId: A.schoolId,
-        title: "Section A Field Trip",
-        body: "Trip details for Section A students.",
-        type: "notice",
-        priority: "normal",
-        status: "published",
-        publishDate: "2026-04-01",
-        audience: { kind: "sections", sectionIds: [A.sectionA] },
-        createdByUserId: A.users.admin,
-      });
-      await ctx.db.insert("notices", {
-        schoolId: A.schoolId,
-        title: "Section B Science Fair",
-        body: "Fair details for Section B students.",
-        type: "notice",
-        priority: "normal",
-        status: "published",
-        publishDate: "2026-04-01",
-        audience: { kind: "sections", sectionIds: [A.sectionB] },
-        createdByUserId: A.users.admin,
-      });
-    });
-
-    // Create fee structures using verified backend mutation
-    const { structureId: structA } = await adminUser.mutation(api.fees.createStructure, {
-      name: "Standard 8-A",
-      classIds: [A.classId],
-      components: [{ label: "Tuition", amountMinor: 2000000 }],
-      installments: [{ label: "Term 1", dueDate: "2026-05-01", amountMinor: 2000000 }],
-    });
-    const { structureId: structB } = await adminUser.mutation(api.fees.createStructure, {
-      name: "Standard 8-B",
-      classIds: [A.classId],
-      components: [{ label: "Tuition", amountMinor: 3000000 }],
-      installments: [{ label: "Term 1", dueDate: "2026-05-01", amountMinor: 3000000 }],
-    });
-
-    // Assign fee structures to student A and student B
-    await adminUser.mutation(api.fees.assignStructure, { structureId: structA, studentId: A.studentA });
-    await adminUser.mutation(api.fees.assignStructure, { structureId: structB, studentId: A.studentB });
-
-    // 1. Query for Child A
-    const profileA = await guardianUser.query(api.studentPortal.myProfile, { studentId: A.studentA });
-    expect(profileA.state).toBe("ok");
-    if (profileA.state === "ok") {
-      expect(profileA.student.studentId).toBe(A.studentA);
-      expect(profileA.student.name).toBe("Asha S");
-      expect(profileA.enrollment?.sectionDisplayName).toBe("8-A");
-      expect(profileA.relation).toBe("guardian");
+describe("legacy guardian sign-ins grant nothing", () => {
+  test("every portal, staff and file function refuses them, for linked and unlinked students alike", async () => {
+    const { t, A, B } = await setup();
+    const g = await as(t, A.users.legacyGuardian);
+    const calls: [string, () => Promise<unknown>][] = [
+      ["session.viewer", () => g.query(api.users.viewer, {})],
+      ["myProfile", () => g.query(api.studentPortal.myProfile, {})],
+      ["myProfile(linked id)", () => g.query(api.studentPortal.myProfile, { studentId: A.studentA })],
+      ["myTimetable", () => g.query(api.studentPortal.myTimetable, { studentId: A.studentA })],
+      ["myHomework", () => g.query(api.studentPortal.myHomework, { studentId: A.studentA })],
+      ["myResults", () => g.query(api.studentPortal.myResults, { studentId: A.studentA })],
+      ["myFees", () => g.query(api.studentPortal.myFees, { studentId: A.studentA })],
+      ["myNotices", () => g.query(api.studentPortal.myNotices, { studentId: A.studentA, today: TODAY })],
+      ["attendance.studentHistory", () => g.query(api.attendance.studentHistory, { studentId: A.studentA })],
+      ["fees.studentLedger", () => g.query(api.fees.studentLedger, { studentId: A.studentA })],
+      ["academics.getStudentProfile", () => g.query(api.academics.getStudentProfile, { studentId: A.studentA })],
+      ["academics.enrollmentHistory", () => g.query(api.academics.enrollmentHistory, { studentId: A.studentA })],
+      ["files.listForOwner", () => g.query(api.files.listForOwner, { ownerType: "student", ownerId: A.studentA })],
+      ["notifications.list", () => g.query(api.notifications.list, {})],
+      ["other school student", () => g.query(api.studentPortal.myProfile, { studentId: B.studentA })],
+      ["admin mutation", () => g.mutation(api.academics.createClass, { name: "X", level: 9 })],
+      ["teacher mutation", () => g.mutation(api.attendance.mark, { sectionId: A.sectionA, date: TODAY, entries: [{ studentId: A.studentA, status: "present" }] })],
+    ];
+    for (const [name, call] of calls) {
+      expect([name, await errorCode(call())]).toEqual([name, "NO_SCHOOL_ACCESS"]);
     }
-
-    const feesA = await guardianUser.query(api.studentPortal.myFees, { studentId: A.studentA });
-    expect(feesA.state).toBe("ok");
-    if (feesA.state === "ok") {
-      expect(feesA.totals.grossMinor).toBe(2000000);
-      expect(feesA.obligations).toHaveLength(1);
-    }
-
-    const timetableA = await guardianUser.query(api.studentPortal.myTimetable, { studentId: A.studentA });
-    expect(timetableA.state).toBe("ok");
-    if (timetableA.state === "ok") {
-      expect(timetableA.section).toBe("8-A");
-      expect(timetableA.periods).toHaveLength(1);
-    }
-
-    const noticesA = await guardianUser.query(api.studentPortal.myNotices, { studentId: A.studentA, today: "2026-05-01" });
-    expect(noticesA.state).toBe("ok");
-    if (noticesA.state === "ok") {
-      const titles = noticesA.notices.map((n) => n.title);
-      expect(titles).toContain("Section A Field Trip");
-      expect(titles).not.toContain("Section B Science Fair");
-    }
-
-    // 2. Switch to Child B
-    const profileB = await guardianUser.query(api.studentPortal.myProfile, { studentId: A.studentB });
-    expect(profileB.state).toBe("ok");
-    if (profileB.state === "ok") {
-      expect(profileB.student.studentId).toBe(A.studentB);
-      expect(profileB.student.name).toBe("Bala S");
-      expect(profileB.enrollment?.sectionDisplayName).toBe("8-B");
-      expect(profileB.relation).toBe("guardian");
-    }
-
-    const feesB = await guardianUser.query(api.studentPortal.myFees, { studentId: A.studentB });
-    expect(feesB.state).toBe("ok");
-    if (feesB.state === "ok") {
-      expect(feesB.totals.grossMinor).toBe(3000000);
-      expect(feesB.obligations).toHaveLength(1);
-    }
-
-    const timetableB = await guardianUser.query(api.studentPortal.myTimetable, { studentId: A.studentB });
-    expect(timetableB.state).toBe("ok");
-    if (timetableB.state === "ok") {
-      expect(timetableB.section).toBe("8-B");
-      expect(timetableB.periods).toHaveLength(1);
-    }
-
-    const noticesB = await guardianUser.query(api.studentPortal.myNotices, { studentId: A.studentB, today: "2026-05-01" });
-    expect(noticesB.state).toBe("ok");
-    if (noticesB.state === "ok") {
-      const titles = noticesB.notices.map((n) => n.title);
-      expect(titles).toContain("Section B Science Fair");
-      expect(titles).not.toContain("Section A Field Trip");
-    }
+    const s = await g.query(api.users.session, {});
+    expect(s.status).toBe("noSchool");
   });
 
-  test("guardian cannot access unlinked students' records across any portal endpoint", async () => {
-    const t = makeTest();
-    const A = await createSchool(t, "alpha");
-    const B = await createSchool(t, "beta");
-    const guardianUser = await as(t, A.users.guardian);
-
-    // Unlinked student in same school (studentB is not linked to guardian by default in createSchool)
-    expect(await errorCode(guardianUser.query(api.studentPortal.myProfile, { studentId: A.studentB }))).toBe("NOT_FOUND");
-    expect(await errorCode(guardianUser.query(api.studentPortal.myFees, { studentId: A.studentB }))).toBe("NOT_FOUND");
-    expect(await errorCode(guardianUser.query(api.studentPortal.myTimetable, { studentId: A.studentB }))).toBe("NOT_FOUND");
-    expect(await errorCode(guardianUser.query(api.studentPortal.myHomework, { studentId: A.studentB }))).toBe("NOT_FOUND");
-    expect(await errorCode(guardianUser.query(api.studentPortal.myResults, { studentId: A.studentB }))).toBe("NOT_FOUND");
-    expect(await errorCode(guardianUser.query(api.studentPortal.myNotices, { studentId: A.studentB, today: "2026-05-01" }))).toBe("NOT_FOUND");
-    expect(await errorCode(guardianUser.query(api.attendance.studentHistory, { studentId: A.studentB }))).toBe("NOT_FOUND");
-
-    // Student from a different school (School B)
-    expect(await errorCode(guardianUser.query(api.studentPortal.myProfile, { studentId: B.studentA }))).toBe("NOT_FOUND");
-    expect(await errorCode(guardianUser.query(api.studentPortal.myFees, { studentId: B.studentA }))).toBe("NOT_FOUND");
-    expect(await errorCode(guardianUser.query(api.studentPortal.myTimetable, { studentId: B.studentA }))).toBe("NOT_FOUND");
-    expect(await errorCode(guardianUser.query(api.attendance.studentHistory, { studentId: B.studentA }))).toBe("NOT_FOUND");
-  });
-
-  test("payments, attendance, and notices trigger in-app notifications to linked guardian and student", async () => {
-    const t = makeTest();
-    const A = await createSchool(t, "alpha");
+  test("it cannot be re-enabled or given new credentials; its Login ID cannot be activated", async () => {
+    const { t, A } = await setup();
     const admin = await as(t, A.users.admin);
-    const ct = await as(t, A.users.classTeacher);
-    const guardian = await as(t, A.users.guardian);
-    const student = await as(t, A.users.student);
-
-    // Setup fee structure and assignment for studentA using verified mutations
-    const { structureId } = await admin.mutation(api.fees.createStructure, {
-      name: "Standard 8-A",
-      classIds: [A.classId],
-      components: [{ label: "Tuition", amountMinor: 1500000 }],
-      installments: [{ label: "Term 1", dueDate: "2026-05-01", amountMinor: 1500000 }],
-    });
-    await admin.mutation(api.fees.assignStructure, { structureId, studentId: A.studentA });
-
-    // 1. Record fee payment -> notifies student and guardian
-    await admin.mutation(api.fees.recordPayment, {
-      studentId: A.studentA,
-      amountMinor: 500000,
-      method: "upi",
-      reference: "UPI-TEST-1234",
-      paidOn: "2026-04-15",
-    });
-
-    const gNotesAfterFee = await guardian.query(api.notifications.list, {});
-    expect(gNotesAfterFee.some((n) => n.type === "fees" && n.title === "Fee payment received")).toBe(true);
-
-    const sNotesAfterFee = await student.query(api.notifications.list, {});
-    expect(sNotesAfterFee.some((n) => n.type === "fees" && n.title === "Fee payment received")).toBe(true);
-
-    // 2. Mark attendance with student absent -> notifies guardian and student
-    const monday = pastMonday();
-    await ct.mutation(api.attendance.mark, {
-      sectionId: A.sectionA,
-      date: monday,
-      entries: [{ studentId: A.studentA, status: "absent" }],
-    });
-
-    const gNotesAfterAtt = await guardian.query(api.notifications.list, {});
-    expect(gNotesAfterAtt.some((n) => n.type === "attendance" && n.title === "Marked absent")).toBe(true);
-
-    // 3. Publish notice targeted to section A -> notifies members in section A
-    await admin.mutation(api.notices.create, {
-      title: "Exam Preparation Session",
-      body: "Mandatory preparation session tomorrow morning.",
-      type: "notice",
-      priority: "high",
-      status: "published",
-      publishDate: "2026-04-10",
-      audience: { kind: "sections", sectionIds: [A.sectionA] },
-    });
-
-    const gNotesAfterNotice = await guardian.query(api.notifications.list, {});
-    expect(gNotesAfterNotice.some((n) => n.type === "notice" && n.title.includes("Exam Preparation Session"))).toBe(true);
-
-    // 4. Test notification management: unreadCount, markRead, markAllRead, remove, clearAll
-    const unreadBefore = await guardian.query(api.notifications.unreadCount, {});
-    expect(unreadBefore).toBeGreaterThan(0);
-
-    const firstNotice = gNotesAfterNotice[0];
-    await guardian.mutation(api.notifications.markRead, { notificationId: firstNotice._id });
-    const unreadAfterOne = await guardian.query(api.notifications.unreadCount, {});
-    expect(unreadAfterOne).toBe(unreadBefore - 1);
-
-    await guardian.mutation(api.notifications.markAllRead, {});
-    const unreadAfterAll = await guardian.query(api.notifications.unreadCount, {});
-    expect(unreadAfterAll).toBe(0);
-
-    // Delete one notification
-    await guardian.mutation(api.notifications.remove, { notificationId: firstNotice._id });
-    const listAfterDelete = await guardian.query(api.notifications.list, {});
-    expect(listAfterDelete.every((n) => n._id !== firstNotice._id)).toBe(true);
-
-    // Clear all
-    await guardian.mutation(api.notifications.clearAll, {});
-    const listAfterClear = await guardian.query(api.notifications.list, {});
-    expect(listAfterClear).toHaveLength(0);
+    await t.run((ctx) => ctx.db.patch(A.memberships.legacyGuardian, { status: "suspended", loginId: "GRD-00001" }));
+    expect(await errorCode(admin.mutation(api.memberships.updateAccess, { targetMembershipId: A.memberships.legacyGuardian, status: "active" }))).toBe("INVALID_ARGUMENT");
+    expect(await errorCode(admin.action(api.accounts.setStatus, { targetMembershipId: A.memberships.legacyGuardian, status: "active" }))).toBe("INVALID_ARGUMENT");
+    expect(await errorCode(admin.action(api.accounts.issueTemporaryPassword, { targetMembershipId: A.memberships.legacyGuardian }))).toBe("INVALID_ARGUMENT");
+    // An invited (never activated) legacy membership is not activated by creating its Login ID.
+    await t.run((ctx) => ctx.db.patch(A.memberships.legacyGuardian, { status: "invited", userId: undefined }));
+    const { activatePendingAccount } = await import("../../convex/model/accounts");
+    await expect(t.run((ctx) => activatePendingAccount(ctx, { loginId: "GRD-00001", mustChangePassword: true }))).rejects.toThrow(/created by your school/);
   });
+
+  test("only the three account roles grant access: no fourth role, no student link on a staff login", async () => {
+    const { t, A } = await setup();
+    const mk = (extra: Record<string, unknown>) => t.run(async (ctx) => {
+      const userId = await ctx.db.insert("users", { email: `odd-${Math.random()}@x.test` });
+      await ctx.db.insert("schoolMemberships", { schoolId: A.schoolId, userId, displayName: "Odd", status: "active", permissionSets: [], ...extra } as never);
+      return userId;
+    });
+    const cases: [string, Record<string, unknown>][] = [
+      ["admin role linked to a student", { role: "admin", studentId: A.studentA }],
+      ["teacher role linked to a student", { role: "teacher", teacherId: A.classTeacher, studentId: A.studentA }],
+    ];
+    for (const [name, extra] of cases) {
+      const c = await as(t, await mk(extra));
+      expect([name, await errorCode(c.query(api.users.viewer, {}))]).toEqual([name, "NO_SCHOOL_ACCESS"]);
+      expect([name, await errorCode(c.query(api.studentPortal.myProfile, { studentId: A.studentA }))]).toEqual([name, "NO_SCHOOL_ACCESS"]);
+      expect([name, (await c.query(api.users.session, {})).status]).toEqual([name, "noSchool"]);
+    }
+    // A student login without a student record (as a guardian-style login would look without its
+    // guardian link) reads no student's data, its "own" or anyone else's.
+    const unlinked = await as(t, await mk({ role: "student" }));
+    expect(await unlinked.query(api.studentPortal.myFees, {})).toEqual({ state: "no_student_record" });
+    for (const call of [
+      () => unlinked.query(api.studentPortal.myProfile, { studentId: A.studentA }),
+      () => unlinked.query(api.attendance.studentHistory, { studentId: A.studentA }),
+      () => unlinked.query(api.fees.studentLedger, { studentId: A.studentA }),
+      () => unlinked.query(api.academics.getStudentProfile, { studentId: A.studentA }),
+    ]) expect(["NOT_FOUND", "FORBIDDEN"]).toContain(await errorCode(call()));
+    // A fourth role value cannot even be stored: the schema only accepts admin / teacher / student.
+    for (const role of ["parent", "guardian"]) {
+      await expect(mk({ role, studentId: A.studentA })).rejects.toThrow(new RegExp(`Validator error.*"${role}"`));
+    }
+    // The real three keep working.
+    for (const u of [A.users.admin, A.users.classTeacher, A.users.student]) {
+      expect((await (await as(t, u)).query(api.users.session, {})).status).toBe("signedIn");
+    }
+  });
+
+  test("events reach the student's own account only", async () => {
+    const { t, A } = await setup();
+    const admin = await as(t, A.users.admin);
+    const { noticeId } = await admin.mutation(api.notices.createDraft, { title: "Trip", body: "Details", type: "notice", priority: "normal", publishDate: "2026-01-05", audience: { kind: "sections", sectionIds: [A.sectionA] } });
+    await admin.mutation(api.notices.publish, { noticeId });
+    const rows = await t.run(async (ctx) => (await ctx.db.query("notifications").collect()));
+    expect(rows.some((n) => n.userId === A.users.student)).toBe(true);
+    expect(rows.some((n) => n.userId === A.users.legacyGuardian)).toBe(false);
+  });
+});
+
+describe("migrations:removeGuardianAccounts", () => {
+  const counts = (t: T) => t.run(async (ctx) => ({
+    memberships: (await ctx.db.query("schoolMemberships").collect()).length,
+    legacy: (await ctx.db.query("schoolMemberships").collect()).filter((m) => m.guardianId).length,
+    users: (await ctx.db.query("users").collect()).length,
+    contacts: (await ctx.db.query("guardians").collect()).length,
+    links: (await ctx.db.query("guardianLinks").collect()).length,
+  }));
+
+  test("dry run reports and writes nothing; apply deletes the memberships and orphaned sign-ins, keeps contacts and other access", async () => {
+    const { t, A, B } = await setup();
+    // A teacher who ALSO had a guardian sign-in keeps their teacher access.
+    await t.run(async (ctx) => {
+      await ctx.db.insert("schoolMemberships", { schoolId: A.schoolId, userId: A.users.classTeacher, displayName: "Old", role: "student", status: "active", permissionSets: [], guardianId: A.parentContactId, loginId: "GRD-00002" });
+      // Sign-in data of the guardian-only user: a password account + a session.
+      await ctx.db.insert("authAccounts", { userId: A.users.legacyGuardian, provider: "password", providerAccountId: "GRD-00001", secret: "hash" });
+    });
+    await as(t, A.users.legacyGuardian); // creates an auth session for that user
+    await t.run(async (ctx) => {
+      // Notifications delivered before the change: the guardian-only user's go with the sign-in; the teacher's stay.
+      await ctx.db.insert("notifications", { schoolId: A.schoolId, userId: A.users.legacyGuardian, type: "notice", title: "Old", message: "x", isRead: false });
+      await ctx.db.insert("notifications", { schoolId: A.schoolId, userId: A.users.classTeacher, type: "notice", title: "Keep", message: "x", isRead: false });
+    });
+    const before = await counts(t);
+    expect(before.legacy).toBe(3); // A: fixture + teacher's extra; B: fixture
+
+    const dry = await t.mutation(internal.migrations.removeGuardianAccounts, {});
+    expect(dry).toMatchObject({ applied: false, memberships: 3, remaining: false });
+    expect(dry.report.filter((r) => r.signInDeleted)).toHaveLength(2); // the two guardian-only users
+    expect(await counts(t)).toEqual(before);
+
+    const res = await t.mutation(internal.migrations.removeGuardianAccounts, { apply: true });
+    expect(res).toMatchObject({ applied: true, memberships: 3, remaining: false });
+    const after = await counts(t);
+    expect(after.legacy).toBe(0);
+    expect(after.memberships).toBe(before.memberships - 3);
+    expect(after.users).toBe(before.users - 2);
+    expect(after.contacts).toBe(before.contacts); // parent contact data untouched
+    expect(after.links).toBe(before.links);
+    expect(await t.run((ctx) => ctx.db.get(A.users.legacyGuardian))).toBeNull();
+    expect(await t.run(async (ctx) => (await ctx.db.query("authAccounts").collect()).filter((a) => a.providerAccountId === "GRD-00001"))).toEqual([]);
+    expect(await t.run(async (ctx) => (await ctx.db.query("authSessions").collect()).filter((s) => s.userId === A.users.legacyGuardian))).toEqual([]);
+    const notes = await t.run(async (ctx) => (await ctx.db.query("notifications").collect()).map((n) => [n.userId, n.title]));
+    expect(notes).toContainEqual([A.users.classTeacher, "Keep"]);
+    expect(notes.some(([u]) => u === A.users.legacyGuardian)).toBe(false);
+    // Students, enrollments and their parent contacts are untouched.
+    expect(await t.run((ctx) => ctx.db.get(A.studentA))).not.toBeNull();
+    expect((await (await as(t, A.users.admin)).query(api.academics.getStudentProfile, { studentId: A.studentA }))?.parentContacts.map((c) => c.name)).toEqual(["Parent Contact"]);
+    // The teacher still signs in as a teacher.
+    const s = await (await as(t, A.users.classTeacher)).query(api.users.session, {});
+    expect(s.status === "signedIn" && s.viewer.role).toBe("teacher");
+    // Audited per school, no secrets.
+    const audits = await t.run(async (ctx) => (await ctx.db.query("auditLogs").collect()).filter((a) => a.action === "account.deleted"));
+    expect(audits.map((a) => a.schoolId).sort()).toEqual([A.schoolId, A.schoolId, B.schoolId].sort());
+    expect(JSON.stringify(audits)).not.toContain("hash");
+    // Idempotent.
+    expect(await t.mutation(internal.migrations.removeGuardianAccounts, { apply: true })).toMatchObject({ memberships: 0 });
+  });
+  // Internal-only visibility (not callable from a client) is enforced by Convex itself; convex-test
+  // cannot model it, so it is checked against the sandbox deployment in scripts/convex-integration.test.ts.
 });

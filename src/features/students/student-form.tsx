@@ -12,7 +12,7 @@ import { getAppError } from "@/lib/convex/errors";
 import { services, ServiceError } from "@/lib/services";
 import { useQuery } from "@/lib/hooks/use-query";
 import { useSchoolProfile } from "@/lib/hooks/use-school-profile";
-import { Button, Card, FormField, FormSection, Input, LoadingState, Modal, PageHeader, Select, ErrorState, useToast, LinkButton } from "@/components/ui";
+import { Button, Card, ConfirmDialog, FormField, FormSection, Input, LoadingState, Modal, PageHeader, Select, ErrorState, useToast, LinkButton } from "@/components/ui";
 import { FormError } from "@/features/shared/form-error";
 import { useAcademicOptions } from "@/features/shared/use-academic-options";
 import { todayISO } from "@/lib/utils/dates";
@@ -30,10 +30,12 @@ const schema = z.object({
   admissionDate: z.string().min(1, "Admission date is required"),
   classId: z.string().min(1, "Select a class"),
   sectionId: z.string().min(1, "Select a section"),
+  scholarNo: z.string().trim().max(30, "At most 30 characters"),
   status: z.enum(["active", "inactive", "transferred", "alumni"]),
-  guardian: z.object({
-    name: z.string().trim().min(2, "Guardian name is required"),
-    relation: z.enum(["Mother", "Father", "Guardian", "Grandparent"]),
+  // Parent contact: contact details only (no account is created for this person).
+  parentContact: z.object({
+    name: z.string().trim().min(2, "Parent name is required"),
+    relation: z.enum(["Mother", "Father", "Grandparent", "Other"]),
     phone,
     email: z.union([z.literal(""), z.string().trim().email("Enter a valid email")]),
     occupation: z.string(),
@@ -44,8 +46,8 @@ type Values = z.infer<typeof schema>;
 
 const EMPTY: Values = {
   firstName: "", lastName: "", gender: "female", dateOfBirth: "", bloodGroup: "O+", email: "", phone: "", address: "",
-  admissionDate: todayISO(), classId: "", sectionId: "", status: "active",
-  guardian: { name: "", relation: "Mother", phone: "", email: "", occupation: "" }, assignFees: true,
+  admissionDate: todayISO(), classId: "", sectionId: "", scholarNo: "", status: "active",
+  parentContact: { name: "", relation: "Mother", phone: "", email: "", occupation: "" }, assignFees: true,
 };
 
 export function StudentForm({ studentId }: { studentId?: string }) {
@@ -60,6 +62,8 @@ export function StudentForm({ studentId }: { studentId?: string }) {
   const liveSections = useSchoolQuery(api.academics.listSections, editing ? "skip" : {});
   const editable = useQuery(() => services.students.getEditable(studentId!), [studentId], { enabled: !!studentId });
   const [serverError, setServerError] = useState<Error | null>(null);
+  // A possible duplicate (same name + date of birth) the office must confirm is a different child.
+  const [duplicate, setDuplicate] = useState<{ message: string; values: Values } | null>(null);
   const [created, setCreated] = useState<{ studentId: Id<"students">; admissionNo: string; section: string; rollNo: number | null; classTeacher: string | null; warnings: string[] } | null>(null);
 
   const createStudentWithEnrollment = useSchoolMutation(api.academics.createStudentWithEnrollment);
@@ -72,7 +76,10 @@ export function StudentForm({ studentId }: { studentId?: string }) {
   useEffect(() => {
     if (editable.data && opts.data) {
       const sec = opts.data.sections.find((s) => s.id === editable.data!.sectionId);
-      reset({ ...editable.data, email: editable.data.email, classId: sec?.classId ?? "", assignFees: false });
+      const { guardian: contact, ...rest } = editable.data;
+      // The demo dataset may still hold a relation outside the current list; map it to "Other".
+      const relation = (["Mother", "Father", "Grandparent"] as const).find((r) => r === contact.relation) ?? "Other";
+      reset({ ...rest, email: editable.data.email, classId: sec?.classId ?? "", assignFees: false, parentContact: { ...contact, relation } });
     }
   }, [editable.data, opts.data, reset]);
 
@@ -84,11 +91,12 @@ export function StudentForm({ studentId }: { studentId?: string }) {
     ? (opts.data?.sections ?? []).filter((s) => s.classId === classId).map((s) => ({ id: s.id, name: s.name, detail: s.room }))
     : (liveSections ?? []).filter((s) => s.classId === classId).map((s) => ({ id: s._id as string, name: s.name, detail: s.classTeacherName ? `Class teacher: ${s.classTeacherName}` : "No class teacher yet" }));
 
-  const onSubmit = async (v: Values) => {
+  const onSubmit = async (v: Values, confirmNotDuplicate = false) => {
     setServerError(null);
     try {
       if (studentId) {
-        await services.students.update(studentId, { ...v, guardian: { ...v.guardian } });
+        const { parentContact, ...rest } = v;
+        await services.students.update(studentId, { ...rest, guardian: { ...parentContact } });
         toast({ title: "Student updated", description: `${v.firstName} ${v.lastName}'s details were saved.` });
         router.push(`/admin/students/${studentId}`);
       } else {
@@ -111,12 +119,14 @@ export function StudentForm({ studentId }: { studentId?: string }) {
           bloodGroup: v.bloodGroup,
           classId: cls._id,
           sectionId: section._id,
-          guardian: {
-            name: v.guardian.name,
-            relation: v.guardian.relation,
-            phone: v.guardian.phone,
-            email: v.guardian.email || undefined,
-            occupation: v.guardian.occupation || undefined,
+          ...(v.scholarNo.trim() ? { scholarNo: v.scholarNo.trim() } : {}),
+          ...(confirmNotDuplicate ? { confirmNotDuplicate: true } : {}),
+          parentContact: {
+            name: v.parentContact.name,
+            relation: v.parentContact.relation,
+            phone: v.parentContact.phone,
+            email: v.parentContact.email || undefined,
+            occupation: v.parentContact.occupation || undefined,
           },
         });
         toast({ title: "Student enrolled", description: `${v.firstName} ${v.lastName} is enrolled in ${res.section}.` });
@@ -124,6 +134,10 @@ export function StudentForm({ studentId }: { studentId?: string }) {
       }
     } catch (e: any) {
       const app = getAppError(e);
+      if (app?.code === "CONFLICT" && app.fields?.duplicateOf && !confirmNotDuplicate) {
+        setDuplicate({ message: app.message, values: v });
+        return;
+      }
       setServerError(app ? new Error(app.message) : e instanceof Error ? e : new Error(String(e)));
       const fieldErrors = app?.fields ?? (e instanceof ServiceError ? e.fieldErrors : undefined);
       if (fieldErrors) {
@@ -139,9 +153,9 @@ export function StudentForm({ studentId }: { studentId?: string }) {
     <div className="mx-auto max-w-5xl">
       <PageHeader
         title={studentId ? "Edit student" : "Add student"}
-        description={studentId ? "Update personal, enrollment and guardian details." : "Create the student record, enroll them in a section of the current academic year and link a guardian. Sign-in accounts are created separately in Accounts & Import."}
+        description={studentId ? "Update personal, enrollment and parent contact details." : "Create the student record, enroll them in a section of the current academic year and add a parent contact. Sign-in accounts are created separately in Accounts & Import."}
       />
-      <form onSubmit={handleSubmit(onSubmit)} noValidate>
+      <form onSubmit={handleSubmit((v) => onSubmit(v))} noValidate>
         <Card className="space-y-7 p-5 sm:p-7">
           <FormSection title="Personal details" description="As recorded on the birth certificate.">
             <FormField label="First name" required error={errors.firstName?.message}><Input {...register("firstName")} placeholder="e.g. Ishita" /></FormField>
@@ -171,15 +185,16 @@ export function StudentForm({ studentId }: { studentId?: string }) {
               </Select>
             </FormField>
             <FormField label="Admission date" required error={errors.admissionDate?.message}><Input type="date" {...register("admissionDate")} /></FormField>
+            {!editing && <FormField label="Scholar number" hint="Optional. The school's own register number — must be unique." error={errors.scholarNo?.message}><Input {...register("scholarNo")} maxLength={30} placeholder="e.g. SR 1042" /></FormField>}
             {editing && <FormField label="Status"><Select {...register("status")}><option value="active">Active</option><option value="inactive">Inactive</option><option value="transferred">Transferred</option><option value="alumni">Alumni</option></Select></FormField>}
           </FormSection>
 
-          <FormSection title="Guardian" description="Guardians are linked to students — one guardian can be linked to siblings.">
-            <FormField label="Guardian name" required error={errors.guardian?.name?.message}><Input {...register("guardian.name")} placeholder="e.g. Kavita Menon" /></FormField>
-            <FormField label="Relation" required><Select {...register("guardian.relation")}><option>Mother</option><option>Father</option><option>Guardian</option><option>Grandparent</option></Select></FormField>
-            <FormField label="Guardian phone" required error={errors.guardian?.phone?.message}><Input type="tel" {...register("guardian.phone")} placeholder="+91 98xxx xxxxx" /></FormField>
-            <FormField label="Guardian email" error={errors.guardian?.email?.message}><Input type="email" {...register("guardian.email")} placeholder="Optional" /></FormField>
-            <FormField label="Occupation"><Input {...register("guardian.occupation")} placeholder="Optional" /></FormField>
+          <FormSection title="Parent contact" description="Contact details only — no sign-in is created for this person. Siblings can share the same contact (matched by phone).">
+            <FormField label="Parent name" required error={errors.parentContact?.name?.message}><Input {...register("parentContact.name")} placeholder="e.g. Kavita Menon" /></FormField>
+            <FormField label="Relation" required><Select {...register("parentContact.relation")}><option>Mother</option><option>Father</option><option>Grandparent</option><option>Other</option></Select></FormField>
+            <FormField label="Parent phone" required error={errors.parentContact?.phone?.message}><Input type="tel" {...register("parentContact.phone")} placeholder="+91 98xxx xxxxx" /></FormField>
+            <FormField label="Parent email" error={errors.parentContact?.email?.message}><Input type="email" {...register("parentContact.email")} placeholder="Optional" /></FormField>
+            <FormField label="Occupation"><Input {...register("parentContact.occupation")} placeholder="Optional" /></FormField>
           </FormSection>
 
 
@@ -190,6 +205,16 @@ export function StudentForm({ studentId }: { studentId?: string }) {
           </div>
         </Card>
       </form>
+
+      <ConfirmDialog
+        open={!!duplicate}
+        onOpenChange={(o) => { if (!o) setDuplicate(null); }}
+        title="This student may already exist"
+        description={`${duplicate?.message ?? ""} Only continue if you have checked that this is a different child — the confirmation is recorded in the audit log.`}
+        confirmLabel="Admit as a different child"
+        tone="danger"
+        onConfirm={() => { const d = duplicate; setDuplicate(null); if (d) void onSubmit(d.values, true); }}
+      />
 
       <Modal
         open={!!created}
@@ -233,4 +258,4 @@ export function StudentForm({ studentId }: { studentId?: string }) {
       </Modal>
     </div>
   );
-}
+}

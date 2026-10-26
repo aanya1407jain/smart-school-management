@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { FeesWorkspace } from "@/features/fees/fees-workspace";
+import { LiveAware } from "@/features/student-portal/live-portal";
 
 export const metadata: Metadata = { title: "Fees" };
 export default function Page() {
-  return <Suspense><FeesWorkspace /></Suspense>;
+  return <Suspense><LiveAware><FeesWorkspace /></LiveAware></Suspense>;
 }

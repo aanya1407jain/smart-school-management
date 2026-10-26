@@ -6,7 +6,7 @@
  * Convex `attendance.studentHistory`) — see src/app/student/attendance/page.tsx.
  *
  * Data comes from the demo dataset through `services.attendance`, which checks
- * that the signed-in student / guardian may see the selected student. Nothing
+ * that the signed-in student may see the selected student. Nothing
  * is invented: with no records the page shows empty states.
  *
  * Layout (summary card, month-by-month chart, calendar) from d78a25d; the

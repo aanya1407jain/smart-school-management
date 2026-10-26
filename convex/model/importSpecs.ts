@@ -60,18 +60,20 @@ export const STUDENT_IMPORT: ImportSpec = {
     { key: "email", label: "Email", kind: "email", aliases: ["email", "email address", "student email"], example: "", max: 120 },
     { key: "phone", label: "Phone", kind: "phone", aliases: ["phone", "mobile", "student phone", "student mobile"], example: "" },
     { key: "address", label: "Address", kind: "text", aliases: ["address", "home address", "residential address"], example: "12, 4th Main, Jayanagar, Bengaluru", max: 300 },
-    { key: "guardianName", label: "Guardian name", kind: "name", aliases: ["guardian name", "guardian", "parent name", "parent", "father name", "mother name"], example: "Kavita Menon", max: 120 },
-    { key: "guardianPhone", label: "Guardian phone", kind: "phone", aliases: ["guardian phone", "guardian mobile", "parent phone", "parent mobile", "contact number"], example: "98450 77777" },
-    { key: "guardianRelation", label: "Guardian relation", kind: "text", aliases: ["relation", "relationship", "guardian relation", "guardian relationship", "relationship to student"], example: "Mother", max: 40 },
-    { key: "guardianEmail", label: "Guardian email", kind: "email", aliases: ["guardian email", "parent email"], example: "", max: 120 },
+    // Parent contact (contact data only — never an account). Older spreadsheets that still use
+    // "guardian …" headings are matched by the aliases so existing files keep importing.
+    { key: "parentName", label: "Parent name", kind: "name", aliases: ["parent name", "parent", "father name", "mother name", "guardian name", "guardian"], example: "Kavita Menon", max: 120 },
+    { key: "parentPhone", label: "Parent phone", kind: "phone", aliases: ["parent phone", "parent mobile", "contact number", "guardian phone", "guardian mobile"], example: "98450 77777" },
+    { key: "parentRelation", label: "Parent relation", kind: "text", aliases: ["relation", "relationship", "relationship to student", "parent relation", "guardian relation", "guardian relationship"], example: "Mother", max: 40 },
+    { key: "parentEmail", label: "Parent email", kind: "email", aliases: ["parent email", "guardian email"], example: "", max: 120 },
     { key: "loginId", label: "Login ID", kind: "loginId", aliases: ["login id", "username", "user id"], example: "", help: "Only used when creating accounts. Leave empty to generate one." },
   ],
   notImported: [
     { aliases: ["roll no", "roll number", "roll", "roll num"], reason: "System-assigned: roll numbers are assigned automatically based on the complete class roster, so this column is ignored." },
     { aliases: ["status", "student status"], reason: "Not imported: imported students are always created as active." },
     { aliases: ["blood group"], reason: "Not imported: blood group is not part of the student import yet." },
-    { aliases: ["guardian occupation", "occupation"], reason: "Not imported: guardian occupation is not part of the student import yet." },
-    { aliases: ["guardian address"], reason: "Not imported: guardian address is not part of the student import yet." },
+    { aliases: ["parent occupation", "guardian occupation", "occupation"], reason: "Not imported: parent occupation is not part of the student import yet." },
+    { aliases: ["parent address", "guardian address"], reason: "Not imported: parent address is not part of the student import yet." },
   ],
 };
 

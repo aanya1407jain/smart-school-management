@@ -51,7 +51,6 @@ without a configured backend nobody can sign in. Aster Academy is demo data only
 | Teacher | Meera Iyer — Science · class teacher 10-B | `TCH-00002` | `Welcome@123` |
 | Teacher | Sunita Rao — English 10-A/B/C · class teacher 10-C | `TCH-00003` | `Welcome@123` |
 | Student | Aarav Sharma, Class 10-A | `STU-2026-00001` | `Student@123` |
-| Student (guardian) | Priya Sharma — guardian of Aarav (10-A) and Ananya (8-B) | `GRD-00001` | `Guardian@123` |
 | Student | Amaira Desai, Class 10-B (useful for audience tests) | `STU-2026-00002` | `Welcome@123` |
 
 All ten seeded teachers have a login: `TCH-00001` … `TCH-00010` (Verma, Iyer, Rao, Khan, Nair, Mishra,
@@ -124,8 +123,8 @@ Components never import mock data. They call `services.<module>.<method>()` from
 `services.attendance.saveRegister(sectionId, date, entries)`, `services.fees.recordPayment(input)`.
 
 Each mock service behaves like a backend function: it resolves the signed-in actor, checks
-permissions **and data scope** (teacher → assigned sections only; student/guardian → linked
-students only), reads/writes the store and returns plain data. Business rules — attendance %,
+permissions **and data scope** (teacher → assigned sections only; student → own record
+only), reads/writes the store and returns plain data. Business rules — attendance %,
 FIFO fee allocation, concessions, grades, notice audiences — live in `services/derive.ts`, never in components.
 
 `useQuery` re-runs queries whenever the store changes (the same reactive model as Convex), which is
@@ -145,7 +144,7 @@ Student attendance is owned by the **class teacher** of each section (`sections.
 | Subject teacher of the section (not class teacher) | ✔ read-only | ✘ | ✘ |
 | Teacher with no link to the section | ✘ | ✘ | ✘ |
 | Admin / Principal | ✔ all sections, reports, monitoring | ✘ | ✘ |
-| Student / guardian | ✔ own / linked students | ✘ | ✘ |
+| Student | ✔ own record | ✘ | ✘ |
 
 A subject assignment, timetable slot or access to student records never grants attendance rights. The rule lives in
 `lib/permissions/attendance.ts` (`canMarkAttendance`, `canEditAttendance`) and is enforced inside
@@ -167,11 +166,14 @@ in `PERMISSION_SETS` and can be attached to an account via `permissionSets: ["ac
 > This is frontend authorization only. In Stage 2 the same rules **must** be enforced server-side
 > inside the Convex functions — the mock services show exactly where each check belongs.
 
-### Guardians
+### Account roles and parent contacts
 
-There is no parent role or parent dashboard. A guardian is a `GuardianLink` between a `Guardian`
-and one or more students. A guardian login is a student-portal account with several `studentIds`;
-the top bar shows a student switcher and every query is scoped to the selected linked student.
+The only account roles are **Admin/Principal, Teacher and Student**. There are no parent or
+guardian logins. A student record carries one or more **parent contacts** (name, relationship,
+phone, email — contact data only, shown as "Parent contact"; stored in the `guardians` /
+`guardianLinks` tables, whose names are kept from the original design). Deployments that still
+hold guardian sign-ins from before this change: those memberships grant no access and are deleted
+by the internal migration `migrations:removeGuardianAccounts` (dry run first, then `{"apply":true}`).
 
 ## Design system
 

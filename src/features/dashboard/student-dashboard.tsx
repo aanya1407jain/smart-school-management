@@ -12,7 +12,10 @@ import { cn } from "@/lib/utils/cn";
 
 export function StudentDashboard() {
   const studentId = useActiveStudentId();
-  const { user } = useSession();
+  const { user, hasModule } = useSession();
+  // Demo-persona dashboard (in-browser demo data). Panels follow the school's module entitlements from the
+  // server session, like the live dashboard; with every module enabled it looks exactly as before.
+  const A = hasModule("attendance"), AC = hasModule("academics"), F = hasModule("finance"), AD = hasModule("administration");
   const q = useQuery(() => services.dashboard.getStudentDashboard(studentId!), [studentId], { enabled: !!studentId });
 
   return (
@@ -31,11 +34,10 @@ export function StudentDashboard() {
                   <div>
                     <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-plum">{formatLongDate(todayISO())}</p>
                     <h1 className="text-[26px] font-semibold text-sapphire">
-                      {d.isGuardian ? `${greeting()}, ${user?.displayName.split(" ")[0]}` : `${greeting()}, ${d.student.firstName}`}
+                      {`${greeting()}, ${d.student.firstName}`}
                     </h1>
                     <p className="text-sm text-ink-muted">
-                      {d.isGuardian && <>Viewing <strong className="text-ink">{d.student.name}</strong> · </>}
-                      Class {d.student.grade} · Section {d.student.section} · Roll {d.student.rollNo}
+                                            Class {d.student.grade} · Section {d.student.section} · Roll {d.student.rollNo}
                     </p>
                   </div>
                 </div>
@@ -47,7 +49,7 @@ export function StudentDashboard() {
             </GlassCard>
 
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <Link href="/student/attendance" className="block rounded-2xl focus-visible:shadow-focus">
+              {A && <Link href="/student/attendance" className="block rounded-2xl focus-visible:shadow-focus">
                 <GlassCard hover className="flex h-full items-center gap-4 p-5">
                   <ProgressRing value={d.attendance.percentage} size={84} stroke={8} tone={lowAttendance ? "plum" : "teal"} />
                   <div>
@@ -56,10 +58,10 @@ export function StudentDashboard() {
                     {lowAttendance ? <Badge tone="plum" className="mt-2">Below {d.attendance.threshold}%</Badge> : <Badge tone="teal" className="mt-2">On track</Badge>}
                   </div>
                 </GlassCard>
-              </Link>
-              <SummaryTile href="/student/homework" icon={<ClipboardList className="h-5 w-5" />} label="Pending homework" value={String(d.homework.length)} hint={d.homework[0] ? `Next: ${dueLabel(d.homework[0].dueDate).toLowerCase()}` : "You're all caught up"} tone="purple" />
-              <SummaryTile href="/student/results" icon={<Award className="h-5 w-5" />} label="Latest result" value={d.latestResult?.percentage != null ? formatPercent(d.latestResult.percentage, 1) : "—"} hint={d.latestResult ? `${d.latestResult.examName} · Grade ${d.latestResult.grade}` : "No published results yet"} tone="sapphire" />
-              <SummaryTile
+              </Link>}
+              {AC && <SummaryTile href="/student/homework" icon={<ClipboardList className="h-5 w-5" />} label="Pending homework" value={String(d.homework.length)} hint={d.homework[0] ? `Next: ${dueLabel(d.homework[0].dueDate).toLowerCase()}` : "You're all caught up"} tone="purple" />}
+              {AC && <SummaryTile href="/student/results" icon={<Award className="h-5 w-5" />} label="Latest result" value={d.latestResult?.percentage != null ? formatPercent(d.latestResult.percentage, 1) : "—"} hint={d.latestResult ? `${d.latestResult.examName} · Grade ${d.latestResult.grade}` : "No published results yet"} tone="sapphire" />}
+              {F && <SummaryTile
                 href="/student/fees"
                 icon={<Wallet className="h-5 w-5" />}
                 label="Fee status"
@@ -67,10 +69,10 @@ export function StudentDashboard() {
                 hint={d.fees.nextDue ? `${d.fees.nextDue.label} · due ${formatShortDate(d.fees.nextDue.dueDate)}` : "No dues pending"}
                 tone="lavender"
                 badge={<StatusBadge status={d.fees.standing} />}
-              />
+              />}
             </div>
 
-            <div className="grid gap-4 lg:grid-cols-3">
+            {AC && <div className="grid gap-4 lg:grid-cols-3">
               <GlassCard className="lg:col-span-2">
                 <CardHeader
                   title={d.day.isToday ? "Today's timetable" : `${WEEKDAY_NAMES[d.day.weekday]}'s timetable`}
@@ -133,17 +135,17 @@ export function StudentDashboard() {
                   </ul>
                 </Card>
               </div>
-            </div>
+            </div>}
 
-            <div className="grid gap-4 lg:grid-cols-3">
-              <Card className="lg:col-span-2">
+            {(AD || AC) && <div className="grid gap-4 lg:grid-cols-3">
+              {AD && <Card className="lg:col-span-2">
                 <CardHeader title="Latest notices" icon={<Megaphone className="h-4 w-4" />} action={<Link href="/student/notices" className="text-[13px] font-medium text-lagoon hover:underline">All notices</Link>} />
                 <ul className="divide-y divide-line/60 px-5 pb-3 pt-1">
                   {d.notices.length === 0 && <EmptyState title="No notices yet" className="py-6" />}
                   {d.notices.map((n) => <NoticeListItem key={n.id} notice={n} compact />)}
                 </ul>
-              </Card>
-              <Card>
+              </Card>}
+              {AC && <Card>
                 <CardHeader title="Latest result" icon={<Award className="h-4 w-4" />} action={<Link href="/student/results" className="text-[13px] font-medium text-lagoon hover:underline">Details</Link>} />
                 <div className="p-5">
                   {d.latestResult ? (
@@ -157,8 +159,8 @@ export function StudentDashboard() {
                     </ul>
                   ) : <EmptyState title="No published results" className="py-2" />}
                 </div>
-              </Card>
-            </div>
+              </Card>}
+            </div>}
           </div>
         );
       }}

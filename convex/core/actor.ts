@@ -5,8 +5,7 @@
  *   Convex Auth session → users row → active schoolMemberships → school
  *
  * The client may pass `membershipId` only to CHOOSE between its own active
- * memberships (e.g. a teacher who is also a guardian at the same school, or a
- * parent with children at two schools). It is verified to belong to the
+ * memberships (e.g. a principal who works at two schools). It is verified to belong to the
  * signed-in user; it can never grant access.
  */
 import { getAuthSessionId, getAuthUserId } from "@convex-dev/auth/server";
@@ -14,6 +13,7 @@ import type { QueryCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
 import { noSchoolAccess, passwordChangeRequired, schoolSelectionRequired, unauthenticated } from "./errors";
 import { resolvePermissions, type Permission, type Role } from "./permissions";
+import { grantsAccess } from "../model/memberships";
 
 export type Actor = {
   userId: Id<"users">;
@@ -31,8 +31,15 @@ export type Actor = {
   teacherId?: Id<"teachers">;
   /** Set when the member IS a student. */
   studentId?: Id<"students">;
-  /** Set when the member is a guardian using the student portal. */
-  guardianId?: Id<"guardians">;
+  /**
+   * Teachers only: extra sections the Principal limited this member's
+   * Students/Attendance VIEW grants to (core/grants.ts). They widen the
+   * member's READ scope (core/authorization.ts readScopeSectionIds) and never
+   * teaching duties (marking, homework, marks entry).
+   */
+  sectionScope: readonly Id<"sections">[];
+  /** The member's grants are a restricted office login (admin membership with grants). */
+  restricted: boolean;
 };
 
 /**
@@ -57,12 +64,12 @@ export async function requireAuthenticatedUser(ctx: QueryCtx): Promise<Doc<"user
   return user;
 }
 
-/** All ACTIVE memberships of the user in ACTIVE schools. */
+/** All ACTIVE memberships of the user in ACTIVE schools (legacy guardian sign-ins never count). */
 export async function activeMembershipsOf(ctx: QueryCtx, userId: Id<"users">) {
   const rows = await ctx.db.query("schoolMemberships").withIndex("by_user", (q) => q.eq("userId", userId)).collect();
   const result: { membership: Doc<"schoolMemberships">; school: Doc<"schools"> }[] = [];
   for (const membership of rows) {
-    if (membership.status !== "active") continue;
+    if (!grantsAccess(membership)) continue;
     const school = await ctx.db.get(membership.schoolId);
     if (school && school.status === "active") result.push({ membership, school });
   }
@@ -75,14 +82,18 @@ export function actorFromMembership(user: Doc<"users">, m: Doc<"schoolMembership
     membershipId: m._id,
     schoolId: m.schoolId,
     role: m.role,
-    permissions: resolvePermissions(m.role, m.permissionSets),
+    permissions: resolvePermissions(m.role, m.permissionSets, {
+      grants: m.role === "student" ? undefined : m.grants,
+      sectionLimited: m.role === "teacher" && (m.sectionScope?.length ?? 0) > 0,
+    }),
     permissionSets: m.permissionSets,
     displayName: m.displayName,
     loginId: user.loginId ?? m.loginId ?? null,
     email: m.email ?? user.email ?? null,
     teacherId: m.teacherId,
     studentId: m.studentId,
-    guardianId: m.guardianId,
+    sectionScope: m.role === "teacher" ? (m.sectionScope ?? []) : [],
+    restricted: m.role === "admin" && (m.grants !== undefined || m.permissionSets.includes("accountant")),
   };
 }
 

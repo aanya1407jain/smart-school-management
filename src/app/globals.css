@@ -96,4 +96,6 @@
   body * { visibility: hidden !important; }
   #receipt, #receipt * { visibility: visible !important; }
   #receipt { position: fixed; inset: 0; margin: 2rem; border: none; }
+  #report-card, #report-card * { visibility: visible !important; }
+  #report-card { position: fixed; inset: 0; margin: 1.5rem; border: none; box-shadow: none; }
 }

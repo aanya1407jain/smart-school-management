@@ -63,10 +63,9 @@ export const mockSchoolService = {
         if (!sid || !actor.studentIds?.includes(sid)) throw forbidden();
         const s = db.students.find((x) => x.id === sid)!;
         const enr = currentEnrollment(db, sid);
-        const guardian = actor.guardianId ? db.guardians.find((g) => g.id === actor.guardianId) ?? null : null;
         return {
           ...base, kind: "student" as const, student: s, name: fullName(s), classLabel: sectionInfo(db, enr?.sectionId).longLabel, rollNo: enr?.rollNo ?? null,
-          guardian: primaryGuardian(db, sid), viewingAsGuardian: guardian,
+          guardian: primaryGuardian(db, sid),
         };
       }
       return { ...base, kind: "admin" as const };

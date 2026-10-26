@@ -41,7 +41,6 @@ function expectOwnRecord(p: Awaited<ReturnType<typeof myProfileOf>>, studentId: 
   expect(p.state).toBe("ok");
   if (p.state !== "ok") throw new Error("unreachable");
   expect(p.student.studentId).toBe(studentId);
-  expect(p.relation).toBe("self");
   return p;
 }
 const myProfileOf = (me: Awaited<ReturnType<typeof as>>, studentId?: Id<"students">) =>
@@ -114,13 +113,19 @@ describe("student portal: authorization", () => {
     expect(await errorCode(me.query(api.studentPortal.myProfile, { membershipId: B.memberships.student }))).not.toBe("NO_ERROR");
   });
 
-  test("guardians resolve only their linked children", async () => {
+  test("a leftover guardian sign-in (removed account type) has no portal access, even to the student it was linked to", async () => {
     const { t, A } = await setup();
-    const g = await as(t, A.users.guardian);
-    const p = await myProfileOf(g);
-    expect(p.state === "ok" && p.student.studentId === A.studentA && p.relation === "guardian").toBe(true);
-    expect((await myProfileOf(g, A.studentA)).state).toBe("ok");
-    expect(await errorCode(myProfileOf(g, A.studentB))).toBe("NOT_FOUND");
+    const g = await as(t, A.users.legacyGuardian);
+    expect(await errorCode(myProfileOf(g))).toBe("NO_SCHOOL_ACCESS");
+    expect(await errorCode(myProfileOf(g, A.studentA))).toBe("NO_SCHOOL_ACCESS");
+    expect(await errorCode(g.query(api.studentPortal.myFees, { studentId: A.studentA }))).toBe("NO_SCHOOL_ACCESS");
+  });
+
+  test("the student's parent contact is shown as contact data only", async () => {
+    const { t, A } = await setup();
+    const p = await myProfileOf(await as(t, A.users.student));
+    expect(p.state === "ok" && p.parentContacts).toEqual([{ name: "Parent Contact", relationship: "Mother", phone: `+91-alpha`, email: null, isPrimary: true }]);
+    expect(p.state === "ok" && "relation" in p).toBe(false);
   });
 
   test("staff roles are not student-portal identities", async () => {
@@ -211,7 +216,7 @@ describe("student portal: no demo binding, no duplicates", () => {
     if (s.status !== "signedIn") throw new Error("not signed in");
     const u = liveStudentPortalUser(s.viewer);
     expect(u).toMatchObject({ id: r.membershipId, role: "student", loginId: r.loginId, studentIds: [studentId] });
-    expect(u.guardianId).toBeUndefined();
+    expect("guardianId" in u).toBe(false);
     expect(u.studentIds?.every((id) => !id.startsWith("stu_"))).toBe(true); // never a demo-data id
   });
 

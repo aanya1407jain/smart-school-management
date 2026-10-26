@@ -30,7 +30,6 @@ async function run() {
 
   const SERVER_STUDENTS: Record<string, { studentId: string; name: string }[]> = {
     "student@asteracademy.edu": [{ studentId: "cvx_aarav", name: "Aarav Sharma" }],
-    "guardian@asteracademy.edu": [{ studentId: "cvx_aarav", name: "Aarav Sharma" }, { studentId: "cvx_ananya", name: "Ananya Sharma" }],
   };
   const login = (email: string, roleOrPassword: "admin" | "teacher" | "student" | string, roleArg?: "admin" | "teacher" | "student") => {
     const role = (roleArg ?? roleOrPassword) as "admin" | "teacher" | "student";
@@ -150,11 +149,11 @@ async function run() {
   const archivedNotice = readDb().notices.find((n) => n.id === draftNotice.id);
   check("Notice is archived", archivedNotice?.status === "archived");
 
-  // Restore archived notice via services.notices.restore — does not resend notifications
+  // Restore archived notice via services.notices.restore — back to DRAFT (republish required), no notifications
   const notifCountBeforeRestore = readDb().notifications.length;
   await services.notices.restore(draftNotice.id);
   const restoredNotice = readDb().notices.find((n) => n.id === draftNotice.id);
-  check("Notice is restored to published", restoredNotice?.status === "published");
+  check("Notice is restored to draft (republishing required)", restoredNotice?.status === "draft");
   const notifCountAfterRestore = readDb().notifications.length;
   check("Restoring archived notice via restore() does not resend notifications", notifCountAfterRestore === notifCountBeforeRestore);
 

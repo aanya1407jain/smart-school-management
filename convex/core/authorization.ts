@@ -107,6 +107,19 @@ export async function teacherSectionIds(ctx: QueryCtx, teacherId: Id<"teachers">
   return ids;
 }
 
+/**
+ * Sections whose data the actor may READ at the "assigned" tier in a year:
+ * their teaching sections (teacherSectionIds) plus any sections the Principal
+ * added to their Students/Attendance view grants (`actor.sectionScope`).
+ * Use only for READ checks — teaching duties (marking attendance, homework,
+ * marks entry) keep using the teacher's own assignments.
+ */
+export async function readScopeSectionIds(ctx: QueryCtx, actor: Actor, academicYearId: Id<"academicYears">): Promise<Set<Id<"sections">>> {
+  const ids = actor.teacherId ? await teacherSectionIds(ctx, actor.teacherId, academicYearId) : new Set<Id<"sections">>();
+  for (const id of actor.sectionScope) ids.add(id);
+  return ids;
+}
+
 /** Require that the actor teaches (any subject) in, or is class teacher of, the section. */
 export async function requireTeacherAssignment(ctx: Ctx, sectionId: Id<"sections">): Promise<Doc<"sections">> {
   const section = await getInSchool(ctx, "sections", sectionId, "Section");
@@ -128,26 +141,25 @@ export async function requireSectionRead(
 ): Promise<Doc<"sections">> {
   const section = await getInSchool(ctx, "sections", sectionId, "Section");
   if (hasPermission(ctx.actor, perms.all)) return section;
-  if (hasPermission(ctx.actor, perms.assigned) && ctx.actor.teacherId) {
-    const ids = await teacherSectionIds(ctx, ctx.actor.teacherId, section.academicYearId);
+  if (hasPermission(ctx.actor, perms.assigned)) {
+    const ids = await readScopeSectionIds(ctx, ctx.actor, section.academicYearId);
     if (ids.has(section._id)) return section;
   }
   throw forbidden();
 }
 
-// ---------------------------------------------------------------- students & guardians
-/** Students the actor may see in the student portal: self, or children linked to the guardian. */
-export async function linkedStudentIds(ctx: QueryCtx, actor: Actor): Promise<Id<"students">[]> {
-  if (actor.studentId) return [actor.studentId];
-  if (actor.guardianId) {
-    const links = await ctx.db.query("guardianLinks").withIndex("by_guardian", (q) => q.eq("guardianId", actor.guardianId!)).collect();
-    return links.filter((l) => l.schoolId === actor.schoolId).map((l) => l.studentId);
-  }
-  return [];
+// ---------------------------------------------------------------- students (own records)
+/**
+ * Students the actor may see in the student portal: only the student's own
+ * record (a student-role membership). Parent contacts have no accounts.
+ * Kept async/array-shaped so every caller goes through one rule.
+ */
+export async function linkedStudentIds(_ctx: QueryCtx, actor: Actor): Promise<Id<"students">[]> {
+  return actor.studentId ? [actor.studentId] : [];
 }
 
-/** Guardian/student portal check: the student must be the actor or linked to the actor's guardian record. */
-export async function requireGuardianStudentAccess(ctx: Ctx, studentId: Id<"students">): Promise<Doc<"students">> {
+/** Student-portal check: the student must be the signed-in student themself (else NOT_FOUND). */
+export async function requireOwnStudentAccess(ctx: Ctx, studentId: Id<"students">): Promise<Doc<"students">> {
   const student = await getInSchool(ctx, "students", studentId, "Student");
   const linked = await linkedStudentIds(ctx, ctx.actor);
   if (!linked.includes(student._id)) throw notFound("Student");
@@ -168,7 +180,7 @@ export async function enrollmentFor(ctx: QueryCtx, studentId: Id<"students">, ac
  * assigned: "attendance:read:assigned", own: "attendance:read:own" }.
  *   - all      → admin / permission-set holders
  *   - assigned → teacher whose scope includes the student's CURRENT section
- *   - own      → the student, or a guardian linked to the student
+ *   - own      → the student themself
  */
 export async function requireStudentAccess(
   ctx: Ctx,
@@ -179,11 +191,11 @@ export async function requireStudentAccess(
   const { actor } = ctx;
   if (perms.all && hasPermission(actor, perms.all)) return student;
 
-  if (perms.assigned && hasPermission(actor, perms.assigned) && actor.teacherId) {
+  if (perms.assigned && hasPermission(actor, perms.assigned) && (actor.teacherId || actor.sectionScope.length)) {
     const yearId = await getCurrentAcademicYearId(ctx, actor.schoolId);
     const enrollment = await enrollmentFor(ctx, student._id, yearId);
     if (enrollment && enrollment.status === "active") {
-      const scope = await teacherSectionIds(ctx, actor.teacherId, yearId);
+      const scope = await readScopeSectionIds(ctx, actor, yearId);
       if (scope.has(enrollment.sectionId)) return student;
     }
   }
@@ -194,4 +206,22 @@ export async function requireStudentAccess(
   }
   // Same response as "no such student" — do not confirm existence to outsiders.
   throw notFound("Student");
+}
+
+/**
+ * Subject-teaching gate (marks entry, homework): the actor's teacher record
+ * must hold a PERSISTED assignment for this subject in this section. Class
+ * teacher ownership alone does not qualify, and neither does teaching another
+ * subject in the section.
+ */
+export async function isSubjectTeacherOf(ctx: QueryCtx, teacherId: Id<"teachers"> | undefined, sectionId: Id<"sections">, subjectId: Id<"subjects">): Promise<boolean> {
+  if (!teacherId) return false;
+  const rows = await ctx.db.query("teacherAssignments").withIndex("by_section_subject", (q) => q.eq("sectionId", sectionId).eq("subjectId", subjectId)).collect();
+  return rows.some((a) => a.teacherId === teacherId);
+}
+
+export async function requireSubjectTeacher(ctx: Ctx, sectionId: Id<"sections">, subjectId: Id<"subjects">, message = "You do not teach this subject in this section."): Promise<Doc<"sections">> {
+  const section = await getInSchool(ctx, "sections", sectionId, "Section");
+  if (!(await isSubjectTeacherOf(ctx, ctx.actor.teacherId, section._id, subjectId))) throw forbidden(message);
+  return section;
 }

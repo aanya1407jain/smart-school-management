@@ -24,7 +24,7 @@ export interface DomainIdentity {
   displayName: string;
   /** Mock student ids, derived ONLY from the server's linked-student list. */
   studentIds: ID[];
-  /** Student-portal accounts linked to several students (guardians): the one being viewed. */
+  /** The student being viewed (a student account: its own record). */
   activeStudentId: ID | null;
 }
 

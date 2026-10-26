@@ -17,11 +17,22 @@
  *
  * `userQuery` / `userMutation` are for the few functions that operate on the
  * global identity before a school is chosen (e.g. listing my memberships).
+ *
+ * Functions that belong to a configurable MODULE (core/modules.ts) use
+ * `moduleQuery(key)` / `moduleMutation(key)` instead: the same actor
+ * resolution, then the school's entitlement check (MODULE_DISABLED), before the
+ * handler runs. The handler still does its own permission and record-scope
+ * checks — an enabled module never grants a permission.
+ *
+ *   const financeQuery = moduleQuery("finance");
+ *   export const overview = financeQuery({ args: {...}, handler: async (ctx, args) => { ... } });
  */
 import { customMutation, customQuery, customAction } from "convex-helpers/server/customFunctions";
 import { v } from "convex/values";
 import { action, mutation, query } from "../_generated/server";
 import { requireActor, requireAuthenticatedUser } from "./actor";
+import type { ModuleKey } from "./modules";
+import { requireModule } from "../model/modules";
 
 const membershipArg = { membershipId: v.optional(v.id("schoolMemberships")) };
 
@@ -40,6 +51,30 @@ export const schoolMutation = customMutation(mutation, {
     return { ctx: { actor }, args: {} };
   },
 });
+
+/** A school query that also requires the school to have `module` enabled. */
+export function moduleQuery(module: ModuleKey) {
+  return customQuery(query, {
+    args: membershipArg,
+    input: async (ctx, { membershipId }) => {
+      const actor = await requireActor(ctx, membershipId);
+      await requireModule(ctx, actor.schoolId, module);
+      return { ctx: { actor }, args: {} };
+    },
+  });
+}
+
+/** A school mutation that also requires the school to have `module` enabled. */
+export function moduleMutation(module: ModuleKey) {
+  return customMutation(mutation, {
+    args: membershipArg,
+    input: async (ctx, { membershipId }) => {
+      const actor = await requireActor(ctx, membershipId);
+      await requireModule(ctx, actor.schoolId, module);
+      return { ctx: { actor }, args: {} };
+    },
+  });
+}
 
 export const userQuery = customQuery(query, {
   args: {},

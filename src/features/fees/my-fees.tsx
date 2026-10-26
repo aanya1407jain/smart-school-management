@@ -27,16 +27,6 @@ import { FeeObligationsTable, PaymentsTable } from "./fee-tables";
 
 export function MyFees() {
   const studentId = useActiveStudentId();
-  const { user, setActiveStudent } = useSession();
-  const isGuardian = !!user?.guardianId;
-  const hasMultipleChildren = (user?.studentIds?.length ?? 0) > 1;
-
-  const linked = useQuery(
-    () => services.dashboard.getLinkedStudents(),
-    [user?.id],
-    { enabled: isGuardian && hasMultipleChildren }
-  );
-
   const q = useQuery(
     () => services.fees.getStudentLedger(studentId!),
     [studentId],
@@ -46,76 +36,18 @@ export function MyFees() {
   return (
     <div>
       <PageHeader
-        title={isGuardian ? "Student Fees" : "My Fees"}
-        description={
-          isGuardian
-            ? "Fee schedule, installments, concession records, and receipts for your linked child."
-            : "Your fee summary, installments, payment history and receipts."
-        }
+        title="My Fees"
+        description="Your fee summary, installments, payment history and receipts."
       />
       <QueryView query={q}>
         {(l) => (
           <div className="space-y-5">
-            {isGuardian && (
-              <GlassCard className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-center gap-3.5">
-                  <Avatar name={l.student.name} size="md" />
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] font-semibold uppercase tracking-wider text-plum">
-                        Guardian View
-                      </span>
-                      <Badge tone="lavender">Linked Student</Badge>
-                    </div>
-                    <p className="text-base font-semibold text-sapphire">{l.student.name}</p>
-                    <p className="text-xs text-ink-muted">
-                      <span className="font-mono">{l.student.admissionNo}</span> · {l.student.classLabel}
-                    </p>
-                  </div>
-                </div>
-
-                {hasMultipleChildren && linked.data && linked.data.length > 1 && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-medium text-ink-muted">Switch student:</span>
-                    <DropdownMenu>
-                      <DropdownTrigger asChild>
-                        <Button variant="outline" size="sm" className="gap-2" aria-label="Switch student">
-                          <UserRound className="h-3.5 w-3.5 text-lagoon" />
-                          <span>{l.student.name}</span>
-                          <ChevronDown className="h-3.5 w-3.5 text-ink-muted" />
-                        </Button>
-                      </DropdownTrigger>
-                      <DropdownContent align="end">
-                        <DropdownLabel>Linked children</DropdownLabel>
-                        {linked.data.map((c) => (
-                          <DropdownItem
-                            key={c.id}
-                            onSelect={() => setActiveStudent(c.id)}
-                            className={c.id === l.student.id ? "bg-teal-soft font-semibold text-lagoon" : undefined}
-                          >
-                            <Avatar name={c.name} size="xs" />
-                            <span className="flex-1">
-                              {c.name}
-                              <span className="block text-[11px] font-normal text-ink-muted">Class {c.classLabel}</span>
-                            </span>
-                            {c.id === l.student.id && <Check className="ml-2 h-3.5 w-3.5 text-lagoon" />}
-                          </DropdownItem>
-                        ))}
-                      </DropdownContent>
-                    </DropdownMenu>
-                  </div>
-                )}
-              </GlassCard>
-            )}
-
             {l.assignments.length === 0 ? (
               <Card className="p-8">
                 <EmptyState
                   icon={<Layers className="h-8 w-8 text-ink-muted" />}
                   title="No fee structure assigned"
-                  description={`No fee structure has been assigned for ${
-                    isGuardian ? l.student.name : "you"
-                  } for the current academic year. Please contact the school accounts office for any inquiries.`}
+                  description={`No fee structure has been assigned for $you for the current academic year. Please contact the school accounts office for any inquiries.`}
                 />
               </Card>
             ) : (

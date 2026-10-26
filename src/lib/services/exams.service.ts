@@ -142,7 +142,7 @@ export const mockExamService = {
         }
         db.exams.push({ id, academicYearId: db.school.currentAcademicYearId, name: input.name.trim(), term: input.term, type: input.type, classIds: input.classIds, startDate: input.startDate, endDate, status: "scheduled", publishedAt: null });
         db.examPapers.push(...papers);
-        // Teachers of those classes + students/guardians get the schedule.
+        // Teachers of those classes + students get the schedule.
         const sectionIds = db.sections.filter((s) => input.classIds.includes(s.classId)).map((s) => s.id);
         const teacherUserIds = db.users.filter((u) => u.teacherId && db.teacherAssignments.some((a) => a.teacherId === u.teacherId && sectionIds.includes(a.sectionId))).map((u) => u.id);
         notify(db, teacherUserIds, { category: "examination", title: `${input.name.trim()} scheduled`, message: `Date sheet published. Papers begin ${input.startDate}.`, href: "/teacher/examinations" });

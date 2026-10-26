@@ -12,6 +12,7 @@ import { services } from "@/lib/services";
 import { useQuery as useDemoQuery } from "@/lib/hooks/use-query";
 import { DemoStudentProfileBody } from "./demo-student-profile";
 import { LiveFeesPanel, LiveHomeworkList, LiveResultsList, homeworkState, type LiveFees } from "@/features/student-portal/live-records";
+import { EnrollmentActions, EnrollmentHistory, StudentDocuments } from "./student-records-live";
 import {
   Avatar, Badge, Card, CardHeader, EmptyState, GlassCard, LinkButton, ProgressRing, StatusBadge, Tabs, TabsContent, TabsList,
 } from "@/components/ui";
@@ -26,12 +27,12 @@ import { cn } from "@/lib/utils/cn";
 /* ------------------------------------------------------------------ */
 
 /**
- * Student profile for admin / teacher / family views.
+ * Student profile for admin / teacher / student views.
  *  - Demo personas viewing a record of the in-browser demo dataset (ids like
  *    "stu_aarav") get the demo view — demo data never reaches real accounts.
  *  - Everything else is a REAL record: academics.getStudentProfile decides on
  *    the server whether the caller may see it (school staff, the assigned
- *    teacher, or the student / a linked guardian).
+ *    teacher, or the student themself).
  */
 export function StudentProfileView({ studentId, backHref }: { studentId: string; backHref?: string }) {
   const { dataSource } = useSession();
@@ -80,7 +81,7 @@ function NotFound({ backHref }: { backHref?: string }) {
 
 type AttendanceRecord = { date: string; status: string };
 
-type GuardianVM = {
+type ParentContactVM = {
   id: string;
   name: string;
   relation: string;
@@ -116,8 +117,8 @@ function normalizeProfile(raw: ServerProfile) {
     documents: [] as { id?: string; name?: string; kind?: string; sizeKb?: number; uploadedAt?: string }[],
   };
   const classLabel = enrollment ? enrollment.sectionDisplayName ?? [enrollment.className, enrollment.sectionName].filter(Boolean).join(" - ") : "";
-  const guardians: GuardianVM[] = raw.guardians.map((g) => ({
-    id: g.guardianId as string,
+  const parentContacts: ParentContactVM[] = raw.parentContacts.map((g) => ({
+    id: g.contactId as string,
     name: g.name,
     relation: g.relationship,
     occupation: g.occupation ?? undefined,
@@ -137,7 +138,7 @@ function normalizeProfile(raw: ServerProfile) {
     classTeacher: enrollment?.classTeacher ?? undefined,
     room: enrollment?.room ?? undefined,
     teachers: [] as { subjectId: string; subject: string; teacher: string }[],
-    guardians,
+    parentContacts,
     account: undefined as { email?: string } | undefined,
     attendance: summarizeAttendance(records),
     homework: raw.homework,
@@ -189,25 +190,26 @@ const safeTitle = (v?: string) => (v ? titleCase(v) : dash);
 /* ------------------------------------------------------------------ */
 
 function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
-  const { can } = useSession();
+  const { can, hasModule } = useSession();
+  // Sections follow the school's module entitlements (the server already leaves their data out).
+  const A = hasModule("attendance"), AC = hasModule("academics"), F = hasModule("finance"), S = hasModule("students");
   const s = p.student;
   const name = `${s.firstName} ${s.lastName}`.trim() || "Unnamed student";
   const age = s.dateOfBirth ? Math.floor(daysBetween(s.dateOfBirth, todayISO()) / 365.25) : null;
   const isAdmin = can("students:write");
   const pct = p.attendance.stats.percentage;
   const latest = p.results[0];
-  const primaryGuardian = p.guardians[0];
+  const primaryContact = p.parentContacts[0];
   const pendingHw = p.homework.filter((h) => { const st = homeworkState(h); return st === "pending" || st === "overdue"; }).length;
 
   const tabs = [
     { value: "overview", label: "Overview" },
     { value: "academic", label: "Academic" },
-    { value: "attendance", label: "Attendance" },
-    ...(p.fees ? [{ value: "fees", label: "Fees" }] : []),
-    { value: "exams", label: "Examinations", count: p.results.length },
-    { value: "homework", label: "Homework", count: p.homework.length },
-    { value: "documents", label: "Documents", count: s.documents.length },
-    { value: "guardian", label: "Guardian" },
+    ...(A ? [{ value: "attendance", label: "Attendance" }] : []),
+    ...(p.fees && F ? [{ value: "fees", label: "Fees" }] : []),
+    ...(AC ? [{ value: "exams", label: "Examinations", count: p.results.length }, { value: "homework", label: "Homework", count: p.homework.length }] : []),
+    ...(p.access !== "assigned" && S ? [{ value: "documents", label: "Documents" }] : []),
+    { value: "parent", label: "Parent contact" },
   ];
 
   return (
@@ -234,22 +236,22 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
           </div>
           <div className="flex flex-wrap gap-2">
             {backHref && <LinkButton href={backHref} variant="ghost">Back</LinkButton>}
-            {isAdmin && s.id && <LinkButton href={`/admin/fees/${s.id}`} variant="outline"><Wallet className="h-4 w-4" /> Fee ledger</LinkButton>}
-            {isAdmin && s.id && <LinkButton href={`/admin/students/${s.id}/edit`}><Pencil className="h-4 w-4" /> Edit</LinkButton>}
+            {isAdmin && F && s.id && <LinkButton href={`/admin/fees/${s.id}`} variant="outline"><Wallet className="h-4 w-4" /> Fee ledger</LinkButton>}
+            {isAdmin && S && s.id && <LinkButton href={`/admin/students/${s.id}/edit`}><Pencil className="h-4 w-4" /> Edit</LinkButton>}
           </div>
         </div>
         <dl className="relative mt-6 grid grid-cols-2 gap-4 border-t border-white/70 pt-5 sm:grid-cols-4">
-          <Metric label="Attendance" value={pct != null ? formatPercent(pct, 1) : dash} tone={pct != null && pct < 85 ? "warn" : undefined} />
-          <Metric
+          {A && <Metric label="Attendance" value={pct != null ? formatPercent(pct, 1) : dash} tone={pct != null && pct < 85 ? "warn" : undefined} />}
+          {AC && <Metric
             label="Latest result"
             value={latest?.percentage != null ? `${formatPercent(latest.percentage, 1)}${latest.grade ? ` · ${latest.grade}` : ""}` : dash}
-          />
-          <Metric label="Pending homework" value={String(pendingHw)} />
-          <Metric
+          />}
+          {AC && <Metric label="Pending homework" value={String(pendingHw)} />}
+          {F && <Metric
             label="Fee balance"
             value={p.fees ? (p.fees.totals.outstandingMinor ? formatCurrency(p.fees.totals.outstandingMinor / 100) : p.fees.obligations.length ? "Paid" : "None assigned") : "Restricted"}
             tone={p.fees?.obligations.some((o) => o.outstandingMinor > 0 && o.dueDate < todayISO()) ? "warn" : undefined}
-          />
+          />}
         </dl>
       </GlassCard>
 
@@ -271,21 +273,21 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
               </dl>
             </Card>
             <Card>
-              <CardHeader title="Primary guardian" />
+              <CardHeader title="Parent contact" />
               <div className="p-5">
-                {primaryGuardian ? (
+                {primaryContact ? (
                   <div className="flex items-start gap-3">
-                    <Avatar name={primaryGuardian.name} />
+                    <Avatar name={primaryContact.name} />
                     <div className="text-sm">
-                      <p className="font-semibold text-ink">{primaryGuardian.name}</p>
+                      <p className="font-semibold text-ink">{primaryContact.name}</p>
                       <p className="text-ink-muted">
-                        {primaryGuardian.relation}{primaryGuardian.occupation ? ` · ${primaryGuardian.occupation}` : ""}
+                        {primaryContact.relation}{primaryContact.occupation ? ` · ${primaryContact.occupation}` : ""}
                       </p>
-                      {primaryGuardian.phone && <p className="mt-2 text-ink-soft">{primaryGuardian.phone}</p>}
-                      {primaryGuardian.email && <p className="text-ink-soft">{primaryGuardian.email}</p>}
+                      {primaryContact.phone && <p className="mt-2 text-ink-soft">{primaryContact.phone}</p>}
+                      {primaryContact.email && <p className="text-ink-soft">{primaryContact.email}</p>}
                     </div>
                   </div>
-                ) : <EmptyState title="No guardian linked" />}
+                ) : <EmptyState title="No parent contact recorded" />}
               </div>
               {p.account?.email && (
                 <p className="border-t border-line/60 px-5 py-3 text-[12.5px] text-ink-muted">
@@ -307,6 +309,9 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
               <Info icon={<UserRound />} label="Section" value={safe(p.enrollment?.sectionName)} />
               <Info icon={<UserRound />} label="Roll no." value={p.enrollment?.rollNo != null ? String(p.enrollment.rollNo) : dash} />
             </dl>
+            {isAdmin && S && s.id && p.enrollment?.status === "active" && (
+              <EnrollmentActions studentId={s.id} enrollmentId={p.enrollment.enrollmentId as string} sectionLabel={p.classLabel} studentName={name} />
+            )}
             {p.teachers.length > 0 && (
               <>
                 <CardHeader title="Subjects & teachers" />
@@ -321,6 +326,7 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
               </>
             )}
           </Card>
+          {p.access !== "assigned" && S && s.id && <div className="mt-4"><EnrollmentHistory studentId={s.id} /></div>}
         </TabsContent>
 
         <TabsContent value="attendance">
@@ -394,45 +400,18 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
           <LiveHomeworkList homework={p.homework} />
         </TabsContent>
 
-        <TabsContent value="documents">
-          <Card>
-            {s.documents.length === 0 ? (
-              <EmptyState
-                title="No documents uploaded"
-                description="Document upload will be available once file storage is connected."
-                icon={<FileText className="h-6 w-6" />}
-              />
-            ) : (
-              <ul className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
-                {s.documents.map((d: any, i: number) => (
-                  <li key={d.id ?? d._id ?? i} className="flex items-center gap-3 rounded-xl border border-line/70 bg-alabaster/50 p-3.5">
-                    <span className="grid h-10 w-10 place-items-center rounded-xl bg-white text-lagoon shadow-soft"><FileText className="h-5 w-5" aria-hidden /></span>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-ink">{d.name ?? "Document"}</p>
-                      <p className="text-[12px] text-ink-muted">
-                        {[d.kind && titleCase(d.kind), d.sizeKb != null && `${d.sizeKb} KB`, d.uploadedAt && formatShortDate(d.uploadedAt)].filter(Boolean).join(" · ")}
-                      </p>
-                    </div>
-                    <button
-                      className="rounded-lg p-2 text-ink-muted hover:bg-white hover:text-ink"
-                      aria-label={`Download ${d.name ?? "document"}`}
-                      title="File storage arrives with the backend"
-                    >
-                      <Download className="h-4 w-4" />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-        </TabsContent>
+        {p.access !== "assigned" && s.id && (
+          <TabsContent value="documents">
+            <StudentDocuments studentId={s.id} canManage={isAdmin} />
+          </TabsContent>
+        )}
 
-        <TabsContent value="guardian">
-          {p.guardians.length === 0 ? (
-            <Card><EmptyState title="No guardian linked" /></Card>
+        <TabsContent value="parent">
+          {p.parentContacts.length === 0 ? (
+            <Card><EmptyState title="No parent contact recorded" /></Card>
           ) : (
             <div className="grid gap-4 md:grid-cols-2">
-              {p.guardians.map((g) => (
+              {p.parentContacts.map((g) => (
                 <Card key={g.id} className="p-5">
                   <div className="flex items-start gap-3">
                     <Avatar name={g.name} size="lg" />
@@ -451,7 +430,7 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
                   </div>
                   {g.otherChildren.length > 0 && (
                     <div className="mt-4 rounded-xl bg-alabaster p-3 text-sm">
-                      <p className="text-[12px] font-semibold uppercase tracking-wide text-ink-muted">Also guardian of</p>
+                      <p className="text-[12px] font-semibold uppercase tracking-wide text-ink-muted">Also parent contact for</p>
                       {g.otherChildren.map((c) => (
                         <p key={c.id} className="mt-1">
                           {isAdmin

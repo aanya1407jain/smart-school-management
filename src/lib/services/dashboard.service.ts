@@ -1,4 +1,4 @@
-import type { Database, ID, Weekday } from "@/types/domain";
+import type { Database, Exam, ID, Student, StudentAchievement, Weekday } from "@/types/domain";
 import { readDb } from "@/lib/store/db";
 import { canMarkAttendance } from "@/lib/permissions";
 import { todayISO, previousSchoolDay, nextSchoolDay, dayOfWeek, isSchoolDay, addDays } from "@/lib/utils/dates";
@@ -44,6 +44,44 @@ function trend(db: Database, days: number, sectionIds?: Set<ID>) {
     }
   }
   return Object.entries(byDate).sort(([a], [b]) => a.localeCompare(b)).slice(-days).map(([date, v]) => ({ date, percentage: v.total ? (v.ok / v.total) * 100 : 0 }));
+}
+
+/** Placeholder sports / special-recognition entries for the demo school (spread across its students). */
+const DEMO_HONOURS: Omit<StudentAchievement, "id" | "studentName" | "classLabel" | "date">[] = [
+  { category: "sports", title: "National Athletics Gold", highlight: "Gold medal, 400 m — National Inter-School Athletics Meet" },
+  { category: "special", title: "Science Exhibition Winner", highlight: "1st prize, District Science Exhibition — solar water purifier" },
+  { category: "sports", title: "State Chess Champion", highlight: "1st place, Under-17 State Chess Championship" },
+  { category: "special", title: "Perfect Attendance", highlight: "100% attendance streak this term" },
+  { category: "sports", title: "Zonal Football Cup", highlight: "Captain of the winning team, Inter-School Zonal Football Cup" },
+  { category: "special", title: "Hackathon Runner-up", highlight: "2nd place, Young Innovators Hackathon" },
+  { category: "special", title: "Debate Champion", highlight: "Best Speaker, Inter-School Debate Competition" },
+];
+
+/**
+ * Demo showcase for the admin dashboard: class toppers come from the latest
+ * published exam; the other honours are placeholders assigned to demo students.
+ */
+function demoAchievements(db: Database, students: Student[], lastPublished: Exam | undefined, today: string): StudentAchievement[] {
+  const classOf = (id: ID) => sectionInfo(db, currentEnrollment(db, id)?.sectionId);
+  const out: StudentAchievement[] = [];
+  if (lastPublished) {
+    for (const c of db.classes.filter((x) => lastPublished.classIds.includes(x.id)).sort((a, b) => b.grade - a.grade)) {
+      let best: { s: Student; pct: number } | null = null;
+      for (const s of students) {
+        if (classOf(s.id).cls?.id !== c.id) continue;
+        const pct = examResultFor(db, s.id, lastPublished)?.percentage;
+        if (pct != null && (!best || pct > best.pct)) best = { s, pct };
+      }
+      if (best) out.push({ id: `ach_top_${c.id}`, studentName: fullName(best.s), classLabel: classOf(best.s.id).label, category: "academic", title: `Class ${c.grade} topper`, highlight: `${best.pct.toFixed(1)}% overall — ${lastPublished.name}`, date: lastPublished.endDate });
+    }
+  }
+  if (students.length) {
+    DEMO_HONOURS.forEach((h, i) => {
+      const s = students[(i * 7 + 3) % students.length];
+      out.push({ ...h, id: `ach_demo_${i}`, studentName: fullName(s), classLabel: classOf(s.id).label, date: addDays(today, -(i * 5 + 2)) });
+    });
+  }
+  return out.sort((a, b) => b.date.localeCompare(a.date));
 }
 
 function scheduleDay(today: string): { date: string; weekday: Weekday; isToday: boolean } {
@@ -189,6 +227,7 @@ export const mockDashboardService = {
         performance: { examName: lastPublished?.name ?? null, rows: performance },
         upcomingExams,
         notices,
+        achievements: demoAchievements(db, activeStudents, lastPublished, today),
         tasks: { unmarkedToday, pendingLeave, isSchoolDay: isSchoolDay(today) },
       };
     });
@@ -288,7 +327,6 @@ export const mockDashboardService = {
 
       return {
         student: { id: s.id, name: fullName(s), firstName: s.firstName, admissionNo: s.admissionNo, classLabel: info.label, grade: info.cls?.grade ?? null, section: info.section?.name ?? null, rollNo: enr?.rollNo ?? null, classTeacher: ct ? teacherName(ct) : null, room: info.section?.room ?? null },
-        isGuardian: !!actor.guardianId,
         attendance: { ...attendanceStats(db, studentId), threshold: db.school.settings.lowAttendanceThreshold },
         day,
         timetable,
@@ -356,7 +394,7 @@ export const mockDashboardService = {
     });
   },
 
-  /** For guardian accounts: the students linked to this login. */
+  /** The students linked to this login (a student account: its own record). */
   async getLinkedStudents() {
     return handle(() => {
       const actor = requireActor();

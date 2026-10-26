@@ -12,7 +12,8 @@
  *   TCH-00004…10   / Welcome@123   the other teachers, in the order listed below
  *   STU-2026-00001 / Student@123   Aarav Sharma, 10-A
  *   STU-2026-00002 / Welcome@123   Amaira Desai, 10-B
- *   GRD-00001      / Guardian@123  Priya Sharma — guardian of Aarav (10-A) and Ananya (8-B)
+ * Account roles are admin, teacher and student only. Priya Sharma (Aarav's and
+ * Ananya's mother) is a parent CONTACT on both students — no login.
  */
 import type { SeedDataset } from "./types";
 
@@ -101,11 +102,10 @@ export const asterAcademy: SeedDataset = {
     "8-B": { MATH: "khan", SCI: "singh", ENG: "kapoor", SST: "desai", HIN: "mishra" },
   },
   students: generatedStudents(),
-  guardians: [
+  parentContacts: [
     {
-      key: "priya", name: "Priya Sharma", phone: "+91 98450 22011", email: `guardian@${DOMAIN}`, occupation: "Architect",
+      key: "priya", name: "Priya Sharma", phone: "+91 98450 22011", email: `priya.sharma@example.com`, occupation: "Architect",
       links: [{ student: "aarav", relationship: "Mother", isPrimary: true }, { student: "ananya", relationship: "Mother", isPrimary: true }],
-      login: { loginId: "GRD-00001", password: "Guardian@123" },
     },
     { key: "nitin", name: "Nitin Desai", phone: "+91 98450 33102", email: `nitin.desai@example.com`, links: [{ student: "amaira", relationship: "Father", isPrimary: true }] },
   ],

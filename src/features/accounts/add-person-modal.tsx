@@ -14,7 +14,7 @@ import { STUDENT_IMPORT, TEACHER_IMPORT, type ImportFieldSpec } from "@convex/mo
 import { todayISO } from "@/lib/utils/dates";
 import type { IssuedCredential } from "./credentials-modal";
 
-const STUDENT_FIELDS = ["firstName", "lastName", "className", "section", "admissionNo", "admissionDate", "gender", "dateOfBirth", "guardianName", "guardianPhone", "guardianRelation", "guardianEmail", "loginId"];
+const STUDENT_FIELDS = ["firstName", "lastName", "className", "section", "admissionNo", "admissionDate", "gender", "dateOfBirth", "parentName", "parentPhone", "parentRelation", "parentEmail", "loginId"];
 const TEACHER_FIELDS = ["title", "firstName", "lastName", "employeeId", "designation", "gender", "email", "phone", "subjects", "qualification", "joiningDate", "loginId"];
 type Issue = { field: string; message: string };
 

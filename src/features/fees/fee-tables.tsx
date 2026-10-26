@@ -7,6 +7,7 @@ import { services } from "@/lib/services";
 import { useQuery, type QueryState } from "@/lib/hooks/use-query";
 import { useSchoolQuery } from "@/lib/convex/membership";
 import { api } from "@convex/_generated/api";
+import type { Id } from "@convex/_generated/dataModel";
 import { useSession } from "@/features/auth/session-provider";
 import { useMemo } from "react";
 import { Button, DataTable, EmptyState, Modal, QueryView, StatusBadge } from "@/components/ui";
@@ -63,56 +64,34 @@ export function ReceiptModal({ receiptId, onClose }: { receiptId: string | null;
   const { dataSource } = useSession();
   const live = dataSource === "live";
 
-  // Live Convex queries
-  const liveReceipt = useSchoolQuery(
-    api.fees.getReceipt,
-    live && receiptId ? { receiptId: receiptId as any } : "skip"
-  );
-  const livePaymentReceipt = useSchoolQuery(
-    api.fees.getReceipt,
-    live && receiptId && !liveReceipt ? { paymentId: receiptId as any } : "skip"
-  );
-  const resolvedLive = liveReceipt ?? livePaymentReceipt;
+  // Live: the receipt record from Convex (fee managers, or the student themself).
+  const liveReceipt = useSchoolQuery(api.fees.receipt, live && receiptId ? { receiptId: receiptId as Id<"receipts"> } : "skip");
 
-  // Demo fallback query
-  const q = useQuery(() => (live ? Promise.resolve(null as any) : services.fees.getReceipt(receiptId!)), [live, receiptId], { enabled: !!receiptId && !live });
+  // Demo data
+  const q = useQuery(() => services.fees.getReceipt(receiptId!), [live, receiptId], { enabled: !!receiptId && !live });
 
   const adaptedLive = useMemo(() => {
-    if (!resolvedLive) return undefined;
+    if (!liveReceipt) return undefined;
     return {
-      school: {
-        name: resolvedLive.school.name,
-        address: resolvedLive.school.address ?? "",
-      },
-      receipt: {
-        receiptNo: resolvedLive.receiptNo,
-      },
-      student: {
-        name: resolvedLive.studentName,
-        admissionNo: resolvedLive.admissionNo,
-      },
-      payment: {
-        paidOn: resolvedLive.paidOn,
-        method: resolvedLive.method,
-        reference: resolvedLive.reference ?? "—",
-        amount: resolvedLive.amountMinor / 100,
-      },
-      allocations: resolvedLive.allocations.map((a) => ({
-        label: a.label,
-        amount: a.amountMinor / 100,
-      })),
+      school: { name: liveReceipt.school.name, address: liveReceipt.school.address ?? "" },
+      receipt: { receiptNo: liveReceipt.receiptNo, amount: liveReceipt.payment.amountMinor / 100, issuedAt: new Date(liveReceipt.issuedAt).toISOString() },
+      student: { name: liveReceipt.student.name, admissionNo: liveReceipt.student.admissionNo, classLabel: liveReceipt.student.classLabel ?? "—" },
+      payment: { paidOn: liveReceipt.payment.paidOn, method: liveReceipt.payment.method, reference: liveReceipt.payment.reference ?? "—" },
+      recordedBy: liveReceipt.payment.recordedBy ?? "School office",
+      balanceNow: liveReceipt.balanceNowMinor === null ? null : liveReceipt.balanceNowMinor / 100,
+      reversed: liveReceipt.payment.reversed,
     };
-  }, [resolvedLive]);
+  }, [liveReceipt]);
 
   const queryState = useMemo<QueryState<any>>(
     () => ({
-      isLoading: live ? resolvedLive === undefined : q.isLoading,
+      isLoading: live ? liveReceipt === undefined : q.isLoading,
       isRefreshing: false,
       data: live ? adaptedLive : q.data,
       error: live ? null : q.error,
       refetch: live ? () => {} : q.refetch,
     }),
-    [live, resolvedLive, adaptedLive, q.isLoading, q.data, q.error, q.refetch]
+    [live, liveReceipt, adaptedLive, q.isLoading, q.data, q.error, q.refetch]
   );
 
   return (
@@ -224,8 +203,9 @@ export function ReceiptModal({ receiptId, onClose }: { receiptId: string | null;
                 <span className="text-xl font-semibold text-sapphire">{formatCurrency(r.receipt.amount)}</span>
               </div>
               <p className="mt-3 text-[12px] text-ink-muted">
-                Current outstanding balance: <span className="font-semibold text-ink">{formatCurrency(r.balanceNow)}</span> · Issued {formatDateTime(r.receipt.issuedAt)}
+                {r.balanceNow !== null && <>Current outstanding balance: <span className="font-semibold text-ink">{formatCurrency(r.balanceNow)}</span> · </>}Issued {formatDateTime(r.receipt.issuedAt)}
               </p>
+              {r.reversed && <p className="mt-2 rounded-lg bg-blush/40 px-3 py-2 text-[12.5px] font-medium text-plum">This payment has been reversed; the receipt is no longer valid.</p>}
               <div className="mt-4 hidden items-center justify-between border-t border-line/60 pt-3 text-[11px] text-ink-muted print:flex">
                 <span>Official fee receipt · {r.school.name}</span>
                 <span>Computer-generated record</span>

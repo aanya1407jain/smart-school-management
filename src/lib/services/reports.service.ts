@@ -21,7 +21,7 @@ export const mockReportService = {
       const bySection = db.sections.filter((s) => db.classes.find((c) => c.id === s.classId)?.academicYearId === yearId).map((s) => ({
         label: sectionInfo(db, s.id).label, students: studentsInSection(db, s.id).length, capacity: s.capacity,
       }));
-      return { total: enrolled.length, byClass, status, bySection, guardians: new Set(db.guardianLinks.filter((l) => enrolled.some((s) => s.id === l.studentId)).map((l) => l.guardianId)).size };
+      return { total: enrolled.length, byClass, status, bySection, parentContacts: new Set(db.guardianLinks.filter((l) => enrolled.some((s) => s.id === l.studentId)).map((l) => l.guardianId)).size };
     });
   },
 

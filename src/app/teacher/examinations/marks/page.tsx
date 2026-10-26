@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { MarksEntry } from "@/features/examinations/marks-entry";
+import { PortalPage } from "@/features/student-portal/live-portal";
+import { LiveMarksEntry } from "@/features/teacher-live/teacher-live";
 
 export const metadata: Metadata = { title: "Marks entry" };
 export default function Page() {
-  return <Suspense><MarksEntry area="teacher" /></Suspense>;
+  return <Suspense><PortalPage demo={<MarksEntry area="teacher" />} live={<LiveMarksEntry />} /></Suspense>;
 }

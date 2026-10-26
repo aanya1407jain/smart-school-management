@@ -1,15 +1,15 @@
 /**
- * Student portal — the signed-in student's (or linked guardian's) OWN school
- * record, resolved entirely on the server:
+ * Student portal — the signed-in student's OWN school record, resolved
+ * entirely on the server:
  *
  *   Convex Auth session → users → schoolMemberships (role "student")
- *     → membership.studentId (student account)  or  guardianLinks (guardian)
- *     → students → enrollments (current academic year) → sections / classes
+ *     → membership.studentId → students → enrollments (current academic year)
+ *     → sections / classes
  *
- * The browser never supplies the identity. `studentId` is OPTIONAL and only
- * CHOOSES among the students the server already links to this membership
- * (guardians with several children); anything else is NOT_FOUND, exactly like
- * every other student-data function. Roll numbers are display data only.
+ * The browser never supplies the identity. `studentId` is OPTIONAL; when given
+ * it must be the signed-in student's own id — anything else is NOT_FOUND,
+ * exactly like every other student-data function. Roll numbers are display
+ * data only. (There are no parent/guardian accounts.)
  *
  * Missing data is reported explicitly (`state` / `enrollmentState`) instead of
  * being papered over, so the UI can tell the student what to ask the office.
@@ -17,38 +17,32 @@
 import { v } from "convex/values";
 import { internalQuery, type QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
-import { schoolQuery } from "./core/functions";
+import { schoolQuery, moduleQuery } from "./core/functions";
 import type { Actor } from "./core/actor";
 import type { Permission } from "./core/permissions";
-import { getSchoolSettings, linkedStudentIds, requireGuardianStudentAccess, requirePermission } from "./core/authorization";
-import { notFound } from "./core/errors";
+import { getSchoolSettings, linkedStudentIds, requireOwnStudentAccess, requirePermission } from "./core/authorization";
 import { assertIsoDate } from "./core/validators";
 import { fullName } from "./model/academics";
 import {
-  currentYear, feeLedger, guardiansOf, homeworkFor, noticesForStudent, placement, publishedResults, studentFields, timetableFor,
+  currentYear, feeLedger, parentContactsOf, homeworkFor, noticesForStudent, placement, publishedResults, studentFields, timetableFor,
 } from "./model/studentRecords";
+
+// Module entitlements (model/modules.ts): myProfile is core; the other pages belong to their module.
+const academicsQuery = moduleQuery("academics");
+const financeQuery = moduleQuery("finance");
+const administrationQuery = moduleQuery("administration");
 
 type Ctx = QueryCtx & { actor: Actor };
 
 /**
- * The student this portal request is about. Without `studentId`: the first
- * student the server links to the membership (the student themself, or a
- * guardian's first linked child). With `studentId`: only one of those linked
- * students — anything else is NOT_FOUND. Never trusts a browser-supplied id
- * on its own.
+ * The student this portal request is about: the signed-in student themself.
+ * A `studentId` other than their own is NOT_FOUND. Never trusts a
+ * browser-supplied id on its own.
  */
 async function resolvePortalStudent(ctx: Ctx, studentId: Id<"students"> | undefined, permission: Permission): Promise<Doc<"students"> | null> {
   requirePermission(ctx.actor, "area:student");
   requirePermission(ctx.actor, permission);
-  if (ctx.actor.studentId) {
-    if (studentId && studentId !== ctx.actor.studentId) {
-      throw notFound("Student");
-    }
-    const student = await ctx.db.get(ctx.actor.studentId);
-    if (!student || student.schoolId !== ctx.actor.schoolId) return null;
-    return student;
-  }
-  if (studentId) return await requireGuardianStudentAccess(ctx, studentId);
+  if (studentId) return await requireOwnStudentAccess(ctx, studentId);
   for (const id of await linkedStudentIds(ctx, ctx.actor)) {
     const s = await ctx.db.get(id);
     if (s && s.schoolId === ctx.actor.schoolId) return s;
@@ -82,13 +76,12 @@ export const myProfile = schoolQuery({
     const settings = await getSchoolSettings(ctx, ctx.actor.schoolId);
     return {
       state: "ok" as const,
-      relation: ctx.actor.studentId === student._id ? ("self" as const) : ("guardian" as const),
       student: { ...studentFields(student), name: fullName(student) },
       academicYear: year ? { academicYearId: year._id, name: year.name, startDate: year.startDate, endDate: year.endDate, status: year.status } : null,
       enrollmentState,
       enrollment,
-      // The family's own guardians, with contact details.
-      guardians: (await guardiansOf(ctx, student, true)).map(({ name, relationship, phone, email, isPrimary }) => ({ name, relationship, phone, email, isPrimary })),
+      // The student's own parent contacts (contact data only).
+      parentContacts: (await parentContactsOf(ctx, student, true)).map(({ name, relationship, phone, email, isPrimary }) => ({ name, relationship, phone, email, isPrimary })),
       lowAttendanceThreshold: settings.attendance.lowAttendanceThreshold,
     };
   },
@@ -128,7 +121,7 @@ export const myCertificates = schoolQuery({
 });
 
 /** Weekly timetable of the student's current section. */
-export const myTimetable = schoolQuery({
+export const myTimetable = academicsQuery({
   args: vPortalStudent,
   handler: async (ctx, { studentId }) => {
     const student = await resolvePortalStudent(ctx, studentId, "timetable:read:own");
@@ -140,7 +133,7 @@ export const myTimetable = schoolQuery({
 });
 
 /** Homework set for the student's current section, with their own submission status. */
-export const myHomework = schoolQuery({
+export const myHomework = academicsQuery({
   args: vPortalStudent,
   handler: async (ctx, { studentId }) => {
     const student = await resolvePortalStudent(ctx, studentId, "homework:read:own");
@@ -152,17 +145,18 @@ export const myHomework = schoolQuery({
 });
 
 /** Published exam results of the student. */
-export const myResults = schoolQuery({
+export const myResults = academicsQuery({
   args: vPortalStudent,
   handler: async (ctx, { studentId }) => {
     const student = await resolvePortalStudent(ctx, studentId, "results:read:own");
     if (!student) return { state: "no_student_record" as const };
-    return { state: "ok" as const, results: await publishedResults(ctx, student) };
+    const school = (await ctx.db.get(ctx.actor.schoolId))!;
+    return { state: "ok" as const, school: school.name, student: { name: fullName(student), admissionNo: student.admissionNo }, results: await publishedResults(ctx, student) };
   },
 });
 
 /** The student's fee obligations, payments and receipts for the current year. */
-export const myFees = schoolQuery({
+export const myFees = financeQuery({
   args: vPortalStudent,
   handler: async (ctx, { studentId }) => {
     const student = await resolvePortalStudent(ctx, studentId, "fees:read:own");
@@ -179,7 +173,7 @@ export const myFees = schoolQuery({
  * timezone — queries must not read the clock; it only hides notices whose
  * publish date has not arrived or that have expired.
  */
-export const myNotices = schoolQuery({
+export const myNotices = administrationQuery({
   args: { ...vPortalStudent, today: v.string() },
   handler: async (ctx, { studentId, today }) => {
     assertIsoDate(today, "today");
@@ -207,7 +201,7 @@ export const diagnoseStudentAccounts = internalQuery({
     if (!school) return { found: false as const };
     const year = await currentYear(ctx, school._id);
     const memberships = (await ctx.db.query("schoolMemberships").withIndex("by_school_role", (q) => q.eq("schoolId", school._id).eq("role", "student")).collect())
-      .filter((m) => m.role === "student" && !m.guardianId);
+      .filter((m) => m.role === "student" && !m.guardianId); // legacy guardian sign-ins are not student accounts
     const problems: { loginId: string | null; membershipStatus: string; problem: string }[] = [];
     const perStudent = new Map<string, number>();
     let ok = 0;

@@ -4,6 +4,8 @@
  * IDs are plain strings so they can later map to Convex `Id<"table">`.
  */
 
+import type { ModuleKey } from "@convex/core/modules";
+
 export type ID = string;
 export type ISODate = string; // "2026-10-09"
 export type ISODateTime = string; // "2026-10-09T09:15:00.000Z"
@@ -130,7 +132,7 @@ export interface GuardianLink {
   id: ID;
   guardianId: ID;
   studentId: ID;
-  relation: "Mother" | "Father" | "Guardian" | "Grandparent";
+  relation: "Mother" | "Father" | "Grandparent" | "Other";
   isPrimary: boolean;
 }
 
@@ -342,6 +344,20 @@ export interface HomeworkSubmission {
   feedback: string | null;
 }
 
+// ---------------------------------------------------------------- Achievements
+/** Admin dashboard "Student Achievements & Honors" showcase (demo data only; not a stored record yet). */
+export type AchievementCategory = "sports" | "academic" | "special";
+export interface StudentAchievement {
+  id: ID;
+  studentName: string;
+  /** e.g. "10-A" */
+  classLabel: string;
+  category: AchievementCategory;
+  title: string;
+  highlight: string;
+  date: ISODate;
+}
+
 // ---------------------------------------------------------------- Notices
 export type NoticeType = "notice" | "event" | "holiday";
 export type NoticePriority = "low" | "normal" | "high" | "urgent";
@@ -401,13 +417,23 @@ export interface UserAccount {
   teacherId?: ID;
   /** For student-portal accounts: the student(s) this login can see. */
   studentIds?: ID[];
-  /** Set when the account belongs to a guardian rather than the student. */
-  guardianId?: ID;
   /**
    * Extra permission sets layered on the base role (e.g. a future
    * "accountant" set for administrative staff).
    */
   permissionSets?: string[];
+  /**
+   * Modules the user's SCHOOL is entitled to (from the server session,
+   * convex/core/modules.ts). Set for the signed-in user only; drives navigation.
+   */
+  modules?: ModuleKey[];
+  /**
+   * The member's EFFECTIVE permissions as the server computed them (role +
+   * permission sets + the Principal's grants, convex/core/grants.ts). Set for
+   * the signed-in user from the server session; when present the UI uses it
+   * instead of recomputing from the role. UI only — the server re-checks.
+   */
+  permissions?: string[];
 }
 
 export interface Database {

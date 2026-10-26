@@ -94,8 +94,7 @@ function LiveNotificationBell() {
         <DropdownSeparator />
         <DropdownItem
           onSelect={() => {
-            const role = user.role as string;
-            const path = role === "student" || role === "guardian" ? "/student/notifications" : `/${user.role}/notifications`;
+            const path = `/${user.role}/notifications`;
             router.push(path);
           }}
           className="mx-1.5 mb-1.5 justify-center font-medium text-lagoon"
@@ -106,7 +105,6 @@ function LiveNotificationBell() {
     </DropdownMenu>
   );
 }
-
 
 function NotificationBell() {
   const { user } = useSession();

@@ -4,12 +4,13 @@
  * (academics.getStudentProfile).
  *
  * These helpers do NOT authorize: every caller must first resolve the student
- * through an access check (requireStudentAccess / requireGuardianStudentAccess
+ * through an access check (requireStudentAccess / requireOwnStudentAccess
  * / the portal resolver) and decide which sections it may include. Every
  * helper returns explicit, minimal fields — never a spread database document.
  * Amounts are returned in minor units (paise); the UI formats them.
  */
 import type { QueryCtx } from "../_generated/server";
+import { computeLedger, effectivePayments } from "./feeMath";
 import type { Doc, Id } from "../_generated/dataModel";
 import { classTeacherOf, teacherDisplayName } from "./academics";
 
@@ -70,6 +71,7 @@ export function studentFields(s: Doc<"students">) {
     firstName: s.firstName,
     lastName: s.lastName,
     admissionNo: s.admissionNo,
+    scholarNo: s.scholarNo ?? null,
     admissionDate: s.admissionDate ?? null,
     status: s.status,
     gender: s.gender ?? null,
@@ -81,8 +83,12 @@ export function studentFields(s: Doc<"students">) {
   };
 }
 
-/** Guardians of a student. Contact details only when `withContact` (school staff with full access, or the family itself). */
-export async function guardiansOf(ctx: QueryCtx, student: Doc<"students">, withContact: boolean) {
+/**
+ * Parent contacts of a student (contact data only — never an account). Phone /
+ * email only when `withContact` (school staff with full access, or the
+ * student themself).
+ */
+export async function parentContactsOf(ctx: QueryCtx, student: Doc<"students">, withContact: boolean) {
   const links = (await ctx.db.query("guardianLinks").withIndex("by_student", (q) => q.eq("studentId", student._id)).collect())
     .filter((l) => l.schoolId === student.schoolId);
   const out = [];
@@ -90,7 +96,7 @@ export async function guardiansOf(ctx: QueryCtx, student: Doc<"students">, withC
     const g = await ctx.db.get(l.guardianId);
     if (!g || g.schoolId !== student.schoolId) continue;
     out.push({
-      guardianId: g._id,
+      contactId: g._id,
       name: g.name,
       relationship: l.relationship,
       isPrimary: l.isPrimary,
@@ -142,6 +148,7 @@ export async function publishedResults(ctx: QueryCtx, student: Doc<"students">) 
       grade: r.grade ?? null,
       rank: r.rank ?? null,
       sectionSize,
+      sectionLabel: (await ctx.db.get(r.sectionId))?.displayName ?? null,
       subjects,
     });
   }
@@ -156,57 +163,25 @@ export async function publishedResults(ctx: QueryCtx, student: Doc<"students">) 
  */
 export async function feeLedger(ctx: QueryCtx, student: Doc<"students">, year: Doc<"academicYears">) {
   const obligations = (await ctx.db.query("studentFees").withIndex("by_student_year", (q) => q.eq("studentId", student._id).eq("academicYearId", year._id)).collect())
-    .filter((o) => o.schoolId === student.schoolId && o.status === "active")
-    .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+    .filter((o) => o.schoolId === student.schoolId);
   const concessions = (await ctx.db.query("feeConcessions").withIndex("by_student_year", (q) => q.eq("studentId", student._id).eq("academicYearId", year._id)).collect())
-    .filter((c) => c.schoolId === student.schoolId && c.status === "active");
+    .filter((c) => c.schoolId === student.schoolId);
   const allPayments = (await ctx.db.query("feePayments").withIndex("by_student_paid", (q) => q.eq("studentId", student._id)).collect())
     .filter((p) => p.schoolId === student.schoolId && p.academicYearId === year._id);
-  const reversed = new Set(allPayments.map((p) => p.reversalOfPaymentId).filter((x): x is Id<"feePayments"> => !!x));
-  const payments = allPayments.filter((p) => p.status === "completed" && !p.reversalOfPaymentId && !reversed.has(p._id));
-
-  // Concessions: per-obligation ones apply to that obligation; year-wide percent ones to every
-  // obligation; year-wide fixed ones are spread over obligations in due-date order.
-  const concessionBy = new Map<Id<"studentFees">, number>();
-  for (const o of obligations) {
-    let c = 0;
-    for (const k of concessions) {
-      if (k.studentFeeId && k.studentFeeId !== o._id) continue;
-      if (k.kind === "percent") c += Math.round((o.amountMinor * k.value) / 10000);
-      else if (k.studentFeeId) c += k.value;
-    }
-    concessionBy.set(o._id, Math.min(c, o.amountMinor));
-  }
-  for (const k of concessions.filter((x) => x.kind === "fixed" && !x.studentFeeId)) {
-    let left = k.value;
-    for (const o of obligations) {
-      if (left <= 0) break;
-      const room = o.amountMinor - (concessionBy.get(o._id) ?? 0);
-      const take = Math.min(room, left);
-      concessionBy.set(o._id, (concessionBy.get(o._id) ?? 0) + take);
-      left -= take;
-    }
-  }
-  const paidBy = new Map<Id<"studentFees">, number>();
-  for (const p of payments) for (const a of p.allocations) paidBy.set(a.studentFeeId, (paidBy.get(a.studentFeeId) ?? 0) + a.amountMinor);
-
-  const rows = obligations.map((o) => {
-    const concession = concessionBy.get(o._id) ?? 0;
-    const paid = paidBy.get(o._id) ?? 0;
-    const net = o.amountMinor - concession;
-    return { obligationId: o._id, label: o.label, dueDate: o.dueDate, amountMinor: o.amountMinor, concessionMinor: concession, netMinor: net, paidMinor: paid, outstandingMinor: Math.max(0, net - paid) };
-  });
+  const payments = effectivePayments(allPayments);
+  // Shared with the school-wide fee reads (model/feeMath.ts), so totals always reconcile.
+  const { rows, totals } = computeLedger(obligations, concessions, payments);
   const paymentRows = [];
   for (const p of payments.sort((a, b) => b.paidOn.localeCompare(a.paidOn))) {
     const receipt = await ctx.db.query("receipts").withIndex("by_payment", (q) => q.eq("paymentId", p._id)).first();
-    paymentRows.push({ paymentId: p._id, paidOn: p.paidOn, amountMinor: p.amountMinor, method: p.method, receiptNo: receipt && receipt.schoolId === student.schoolId ? receipt.receiptNo : null });
+    const ok = receipt && receipt.schoolId === student.schoolId;
+    paymentRows.push({ paymentId: p._id, paidOn: p.paidOn, amountMinor: p.amountMinor, method: p.method, receiptNo: ok ? receipt.receiptNo : null, receiptId: ok ? receipt._id : null, reference: p.reference ?? null });
   }
-  const sum = (f: (r: (typeof rows)[number]) => number) => rows.reduce((a, r) => a + f(r), 0);
   return {
     academicYear: year.name,
-    obligations: rows,
+    obligations: rows.map(({ feeStructureId: _structure, ...r }) => r),
     payments: paymentRows,
-    totals: { grossMinor: sum((r) => r.amountMinor), concessionMinor: sum((r) => r.concessionMinor), paidMinor: sum((r) => r.paidMinor), outstandingMinor: sum((r) => r.outstandingMinor) },
+    totals,
   };
 }
 
@@ -227,7 +202,10 @@ export async function homeworkFor(ctx: QueryCtx, student: Doc<"students">, secti
       assignedOn: h.assignedOn,
       dueDate: h.dueDate,
       homeworkStatus: h.status,
-      submission: sub && sub.schoolId === student.schoolId ? { status: sub.status, submittedAt: sub.submittedAt, feedback: sub.feedback ?? null } : null,
+      attachmentFileIds: h.attachmentFileIds,
+      submission: sub && sub.schoolId === student.schoolId
+        ? { submissionId: sub._id, status: sub.status, submittedAt: sub.submittedAt, content: sub.content ?? null, attachmentFileIds: sub.attachmentFileIds, feedback: sub.feedback ?? null }
+        : null,
     });
   }
   return out;
@@ -249,7 +227,7 @@ export async function timetableFor(ctx: QueryCtx, section: Doc<"sections">) {
   };
   const lessons = [];
   for (const e of entries) {
-    lessons.push({ dayOfWeek: e.dayOfWeek, periodId: e.periodId, subject: await nameOf(e.subjectId, "subject"), teacher: await nameOf(e.teacherId, "teacher"), room: e.room ?? null });
+    lessons.push({ entryId: e._id, dayOfWeek: e.dayOfWeek, periodId: e.periodId, subjectId: e.subjectId, teacherId: e.teacherId, subject: await nameOf(e.subjectId, "subject"), teacher: await nameOf(e.teacherId, "teacher"), room: e.room ?? null });
   }
   return { periods, lessons };
 }

@@ -1,7 +1,6 @@
 "use client";
 /**
- * The LIVE student portal — for student and guardian accounts created by the
- * school (session `dataSource === "live"`). Every value on these screens comes
+ * The LIVE student portal — for student accounts created by the school (session `dataSource === "live"`). Every value on these screens comes
  * from Convex for the student the SERVER links to the signed-in membership
  * (convex/studentPortal.ts, attendance.studentHistory, notifications.*).
  * Nothing here reads the in-browser demo data, and nothing is invented: when a
@@ -9,21 +8,19 @@
  */
 import { Component, type ReactNode } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { Bell, CalendarCheck2, CheckCheck, FileText, GraduationCap, Hash, IdCard, Lock, School, UserRound, UsersRound } from "lucide-react";
+import { Bell, CalendarCheck2, FileText, GraduationCap, Hash, IdCard, Lock, School, UserRound, UsersRound } from "lucide-react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
-import { useSchoolMutation, useSchoolQuery } from "@/lib/convex/membership";
+import { useSchoolQuery } from "@/lib/convex/membership";
+import type { ModuleKey } from "@convex/core/modules";
 import { getAppError } from "@/lib/convex/errors";
 import { useActiveStudentId, useSession, type DataSource } from "@/features/auth/session-provider";
 import { PasswordCard } from "@/features/profile/profile-page";
-import { CategoryIcon } from "@/features/notifications/category-icon";
-import { Badge, Button, Card, CardBody, CardHeader, EmptyState, LoadingState, PageHeader, ProgressRing, StatCard, StatusBadge, useToast } from "@/components/ui";
+import { Badge, Button, Card, CardBody, CardHeader, EmptyState, LoadingState, PageHeader, ProgressRing, StatCard, StatusBadge } from "@/components/ui";
 import { ROLE_LABELS } from "@/lib/permissions";
-import { formatDate, formatDateTime, relativeTime, todayISO } from "@/lib/utils/dates";
-import { LiveCertificatesList, LiveFeesPanel, LiveHomeworkList, LiveNoticesList, LiveResultsList, LiveTimetableGrid } from "./live-records";
-import { cn } from "@/lib/utils/cn";
-import type { NotificationCategory } from "@/types/domain";
+import { formatDate, todayISO } from "@/lib/utils/dates";
+import { LiveEventsPanel } from "@/features/notices/events-live";
+import { LiveCertificatesList, LiveFeesPanel, LiveNoticesList, LiveResultsList, LiveTimetableGrid } from "./live-records";
 
 // ------------------------------------------------------------------ switch
 /** Renders the demo-data page or the live (Convex) page for the current session. */
@@ -32,8 +29,16 @@ export function PortalPage({ demo, live }: { demo: ReactNode; live: ReactNode })
   return <>{(dataSource as DataSource | null) === "live" ? <LiveBoundary>{live}</LiveBoundary> : demo}</>;
 }
 
+/**
+ * For screens that handle demo and live data themselves: in live mode, server
+ * errors become an in-page message (LiveBoundary) instead of a crashed screen.
+ */
+export function LiveAware({ children }: { children: ReactNode }) {
+  return <PortalPage demo={children} live={children} />;
+}
+
 /** Server errors from live queries become an in-page message instead of a crashed screen. */
-class LiveBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+export class LiveBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null };
   static getDerivedStateFromError(error: Error) { return { error }; }
   render() {
@@ -87,45 +92,45 @@ function EnrollmentNotice({ p }: { p: OkProfile }) {
 const classLabel = (p: OkProfile) => p.enrollment?.sectionDisplayName ?? (p.enrollment?.className ? `${p.enrollment.className}${p.enrollment.sectionName ? `-${p.enrollment.sectionName}` : ""}` : "—");
 
 /** Student-portal pages backed by the school's real records (live mode). */
-const LIVE_MODULES = [
-  { label: "My Timetable", href: "/student/timetable" },
-  { label: "My Homework", href: "/student/homework" },
-  { label: "My Results", href: "/student/results" },
-  { label: "My Fees", href: "/student/fees" },
-  { label: "Notices", href: "/student/notices" },
+const LIVE_MODULES: { label: string; href: string; module: ModuleKey }[] = [
+  { label: "My Timetable", href: "/student/timetable", module: "academics" },
+  { label: "My Homework", href: "/student/homework", module: "academics" },
+  { label: "My Results", href: "/student/results", module: "academics" },
+  { label: "My Fees", href: "/student/fees", module: "finance" },
+  { label: "Notices", href: "/student/notices", module: "administration" },
 ];
 
 // ------------------------------------------------------------------ dashboard
 export function LiveStudentDashboard() {
   const p = useMyProfile();
-  const { user } = useSession();
+  const { user, hasModule } = useSession();
+  const attendanceOn = hasModule("attendance");
   const unread = useSchoolQuery(api.notifications.unreadCount, {});
   const attendance = useSchoolQuery(
     api.attendance.studentHistory,
-    p?.state === "ok" && p.academicYear && p.enrollment ? { studentId: p.student.studentId } : "skip",
+    attendanceOn && p?.state === "ok" && p.academicYear && p.enrollment ? { studentId: p.student.studentId } : "skip",
   );
   if (p === undefined) return <LoadingState variant="page" label="Loading your dashboard" />;
   if (p.state === "no_student_record") return <MissingRecord />;
-  const self = p.relation === "self";
   return (
     <div data-testid="live-student-dashboard">
       <PageHeader
         eyebrow={p.academicYear ? `Academic year ${p.academicYear.name}` : undefined}
-        title={self ? `Welcome, ${p.student.firstName}` : p.student.name}
-        description={self ? "Your school record and attendance, straight from the school office." : `You're viewing ${p.student.firstName}'s record as ${user?.displayName ?? "a guardian"}.`}
+        title={`Welcome, ${p.student.firstName}`}
+        description="Your school record and attendance, straight from the school office."
       />
       <EnrollmentNotice p={p} />
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Class & section" value={<span data-testid="dash-class">{classLabel(p)}</span>} icon={<GraduationCap className="h-5 w-5" />} hint={p.enrollment?.classTeacher ? `Class teacher: ${p.enrollment.classTeacher}` : undefined} />
         <StatCard label="Roll number" value={<span data-testid="dash-roll">{p.enrollment?.rollNo ?? "—"}</span>} icon={<Hash className="h-5 w-5" />} tone="sapphire" hint="Assigned alphabetically by the school" />
-        <StatCard
+        {attendanceOn && <StatCard
           label="Attendance this year"
           value={attendance?.percentage != null ? `${attendance.percentage}%` : "—"}
           icon={<CalendarCheck2 className="h-5 w-5" />}
           tone="purple"
           hint={attendance ? (attendance.percentage == null ? "No attendance marked yet" : `${attendance.totals.presentCount + attendance.totals.lateCount} of ${attendance.records.filter((r) => r.status !== "excused").length} days`) : undefined}
           href="/student/attendance"
-        />
+        />}
         <StatCard label="Unread notifications" value={unread ?? "—"} icon={<Bell className="h-5 w-5" />} tone="lavender" href="/student/notifications" />
       </div>
       <div className="mt-5 grid gap-4 lg:grid-cols-3">
@@ -134,7 +139,7 @@ export function LiveStudentDashboard() {
           <CardBody>
             <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
               <Field label="Name" value={p.student.name} testId="dash-name" />
-              <Field label="Admission number" value={p.student.admissionNo} testId="dash-admission" />
+              <Field label="Scholar number" value={p.student.scholarNo ?? "—"} testId="dash-scholar" />
               <Field label="Academic year" value={p.academicYear?.name ?? "Not set"} testId="dash-year" />
               <Field label="Enrollment" value={p.enrollment ? <StatusBadge status={p.enrollment.status} label={p.enrollment.status.charAt(0).toUpperCase() + p.enrollment.status.slice(1)} /> : "Not enrolled"} />
             </dl>
@@ -144,7 +149,7 @@ export function LiveStudentDashboard() {
           <CardHeader title="My school" description="Records kept by your school office" />
           <CardBody>
             <ul className="space-y-2 text-sm">
-              {LIVE_MODULES.map((m) => <li key={m.href}><Link href={m.href} className="font-medium text-lagoon hover:underline">{m.label}</Link></li>)}
+              {LIVE_MODULES.filter((m) => hasModule(m.module)).map((m) => <li key={m.href}><Link href={m.href} className="font-medium text-lagoon hover:underline">{m.label}</Link></li>)}
             </ul>
           </CardBody>
         </Card>
@@ -177,7 +182,7 @@ export function LiveStudentProfile() {
             <dl className="grid gap-3 text-sm">
               <Field label="Signed in as" value={viewer?.displayName} />
               <Field label="Login ID" value={<span className="font-mono">{viewer?.loginId ?? "—"}</span>} testId="profile-login-id" />
-              <Field label="Access" value={user?.guardianId ? "Guardian (student portal)" : ROLE_LABELS.student} />
+              <Field label="Access" value={ROLE_LABELS.student} />
               <Field label="School" value={viewer?.school.name} />
             </dl>
           </CardBody>
@@ -194,16 +199,16 @@ function StudentRecord({ p }: { p: OkProfile }) {
   const g = s.gender ? s.gender.charAt(0).toUpperCase() + s.gender.slice(1) : null;
   return (
     <>
-      <h2 className="pt-2 text-lg font-semibold text-sapphire">{p.relation === "self" ? "My school record" : "Student record"}</h2>
+      <h2 className="pt-2 text-lg font-semibold text-sapphire">My school record</h2>
       <EnrollmentNotice p={p} />
       <div className="grid gap-5 lg:grid-cols-2">
         <Card>
-          <CardHeader title={s.name} description={`Admission no. ${s.admissionNo}`} icon={<IdCard className="h-4 w-4" />} action={<StatusBadge status={s.status} />} />
+          <CardHeader title={s.name} description={s.scholarNo ? `Scholar No: ${s.scholarNo}` : undefined} icon={<IdCard className="h-4 w-4" />} action={<StatusBadge status={s.status} />} />
           <CardBody>
             <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
               <Field label="First name" value={s.firstName} />
               <Field label="Last name" value={s.lastName} />
-              <Field label="Admission number" value={s.admissionNo} testId="profile-admission" />
+              <Field label="Scholar number" value={s.scholarNo ?? "—"} testId="profile-scholar" />
               <Field label="Admission date" value={s.admissionDate ? formatDate(s.admissionDate) : "—"} />
               <Field label="Date of birth" value={s.dateOfBirth ? formatDate(s.dateOfBirth) : "—"} />
               <Field label="Gender" value={g ?? "—"} />
@@ -221,7 +226,7 @@ function StudentRecord({ p }: { p: OkProfile }) {
               <Field label="Academic year" value={p.academicYear?.name ?? "Not set"} testId="profile-year" />
               <Field label="Class" value={p.enrollment?.className ?? "—"} testId="profile-class" />
               <Field label="Section" value={p.enrollment?.sectionName ?? "—"} testId="profile-section" />
-              <Field label="Roll number" value={p.enrollment?.rollNo ?? "—"} />
+              <Field label="Roll number" value={p.enrollment?.rollNo ?? "—"} testId="profile-roll" />
               <Field label="Class teacher" value={p.enrollment?.classTeacher ?? "—"} />
               <Field label="Room" value={p.enrollment?.room ?? "—"} />
               <Field label="Enrollment status" value={p.enrollment ? <StatusBadge status={p.enrollment.status} label={p.enrollment.status.charAt(0).toUpperCase() + p.enrollment.status.slice(1)} /> : "Not enrolled"} />
@@ -231,11 +236,11 @@ function StudentRecord({ p }: { p: OkProfile }) {
         </Card>
       </div>
       <Card>
-        <CardHeader title="Guardians" icon={<UsersRound className="h-4 w-4" />} />
+        <CardHeader title="Parent contact" icon={<UsersRound className="h-4 w-4" />} />
         <CardBody>
-          {p.guardians.length === 0 ? <p className="text-sm text-ink-muted">No guardian is recorded. The school office can add one.</p> : (
+          {p.parentContacts.length === 0 ? <p className="text-sm text-ink-muted">No parent contact is recorded. The school office can add one.</p> : (
             <ul className="divide-y divide-line/60 text-sm">
-              {p.guardians.map((x, i) => (
+              {p.parentContacts.map((x, i) => (
                 <li key={i} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
                   <span className="font-medium text-ink">{x.name} <span className="font-normal text-ink-muted">· {x.relationship}</span>{x.isPrimary && <Badge className="ml-2" tone="teal">Primary</Badge>}</span>
                   <span className="text-ink-muted">{x.phone}{x.email ? ` · ${x.email}` : ""}</span>
@@ -277,7 +282,7 @@ export function LiveMyAttendance() {
   const below = h.percentage != null && h.percentage < h.lowAttendanceThreshold;
   return (
     <div data-testid="live-attendance">
-      <PageHeader title={p.relation === "self" ? "My Attendance" : `${p.student.firstName}'s Attendance`} description={`${p.academicYear.name} · ${formatDate(h.range.from)} – ${formatDate(h.range.to)}`} />
+      <PageHeader title="My Attendance" description={`${p.academicYear.name} · ${formatDate(h.range.from)} – ${formatDate(h.range.to)}`} />
       <EnrollmentNotice p={p} />
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="flex flex-col items-center justify-center gap-2 p-6">
@@ -311,47 +316,8 @@ export function LiveMyAttendance() {
 }
 
 // ------------------------------------------------------------------ notifications
-const CATEGORY: Record<string, NotificationCategory> = {
-  attendance: "attendance", fees: "fees", homework: "homework", examination: "examination", notice: "notice", general: "general", account: "general",
-};
-
-export function LiveNotifications() {
-  const router = useRouter();
-  const { toast } = useToast();
-  const items = useSchoolQuery(api.notifications.list, { limit: 100 });
-  const markRead = useSchoolMutation(api.notifications.markRead);
-  const markAll = useSchoolMutation(api.notifications.markAllRead);
-  if (items === undefined) return <LoadingState variant="table" label="Loading notifications" />;
-  const unread = items.filter((n) => !n.isRead).length;
-  return (
-    <div className="mx-auto max-w-4xl" data-testid="live-notifications">
-      <PageHeader
-        title="Notifications"
-        description={unread ? `You have ${unread} unread notification${unread > 1 ? "s" : ""}.` : "You're all caught up."}
-        actions={unread > 0 && <Button variant="outline" onClick={async () => { await markAll({}); toast({ title: "All notifications marked as read" }); }}><CheckCheck className="h-4 w-4" /> Mark all as read</Button>}
-      />
-      {items.length === 0 ? <Card><EmptyState icon={<Bell className="h-6 w-6" />} title="No notifications" description="Updates from your school will appear here." /></Card> : (
-        <Card className="overflow-hidden">
-          <ul className="divide-y divide-line/60">
-            {items.map((n) => (
-              <li key={n._id} className={cn("flex items-start gap-3 px-4 py-3.5 sm:px-5", !n.isRead && "bg-teal-soft/30")}>
-                <CategoryIcon category={CATEGORY[n.type] ?? "general"} className="mt-0.5" />
-                <button className="min-w-0 flex-1 text-left" onClick={async () => { if (!n.isRead) await markRead({ notificationId: n._id }); if (n.href?.startsWith("/student/")) router.push(n.href); }}>
-                  <p className={cn("text-sm", n.isRead ? "font-medium text-ink-soft" : "font-semibold text-ink")}>{n.title}</p>
-                  <p className="mt-0.5 text-[13px] text-ink-muted">{n.message}</p>
-                  <p className="mt-1 text-[11.5px] text-ink-muted" title={formatDateTime(new Date(n._creationTime).toISOString())}>{relativeTime(new Date(n._creationTime).toISOString())}</p>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </Card>
-      )}
-    </div>
-  );
-}
-
 // ------------------------------------------------------------------ timetable / homework / results / fees / notices
-/** The portal query args: the server picks the linked student; guardians may choose among their linked children. */
+/** The portal query args: the signed-in student's own record (the server re-checks it). */
 function usePortalArgs() {
   const studentId = useActiveStudentId();
   return studentId ? { studentId: studentId as Id<"students"> } : {};
@@ -369,25 +335,11 @@ export function LiveTimetable() {
   return (<div><PageHeader title="My Timetable" description={`Class ${t.section} · weekly schedule`} /><LiveTimetableGrid timetable={t} /></div>);
 }
 
-export function LiveHomework() {
-  const h = useSchoolQuery(api.studentPortal.myHomework, usePortalArgs());
-  if (h === undefined) return <LoadingState variant="table" label="Loading homework" />;
-  if (h.state === "no_student_record") return <MissingRecord />;
-  if (h.state === "not_enrolled") return <NotEnrolled what="Homework" />;
-  const open = h.homework.filter((x) => !x.submission && x.homeworkStatus === "active").length;
-  return (
-    <div>
-      <PageHeader title="My Homework" description={`Class ${h.section} · ${open} open assignment${open === 1 ? "" : "s"}. Submissions are handed in to your teacher; online submission is not available yet.`} />
-      <LiveHomeworkList homework={h.homework} />
-    </div>
-  );
-}
-
 export function LiveResults() {
   const r = useSchoolQuery(api.studentPortal.myResults, usePortalArgs());
   if (r === undefined) return <LoadingState variant="cards" label="Loading results" />;
   if (r.state === "no_student_record") return <MissingRecord />;
-  return (<div><PageHeader title="My Results" description="Published examination results." /><LiveResultsList results={r.results} /></div>);
+  return (<div><PageHeader title="My Results" description="Published examination results." /><LiveResultsList results={r.results} header={{ school: r.school, student: r.student }} /></div>);
 }
 
 export function LiveFees() {
@@ -403,7 +355,7 @@ export function LiveNotices() {
   const n = useSchoolQuery(api.studentPortal.myNotices, { ...usePortalArgs(), today });
   if (n === undefined) return <LoadingState variant="table" label="Loading notices" />;
   if (n.state === "no_student_record") return <MissingRecord />;
-  return (<div className="mx-auto max-w-4xl"><PageHeader title="Notices" description="Announcements for the whole school, students, and your class." /><LiveNoticesList notices={n.notices} /></div>);
+  return (<div className="mx-auto max-w-4xl"><PageHeader title="Notices" description="Announcements for the whole school, students, and your class." /><LiveEventsPanel /><LiveNoticesList notices={n.notices} /></div>);
 }
 
 export function LiveCertificates() {

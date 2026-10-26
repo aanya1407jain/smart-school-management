@@ -1,7 +1,7 @@
 # Backend foundation — Smart School Management System
 
 Convex is the backend and database. This document is the **shared contract** for everyone building on it
-(Admin Portal, Teacher Portal, Student/Guardian Portal). If you need to change anything in the
+(Admin Portal, Teacher Portal, Student Portal). If you need to change anything in the
 "Rules" sections, talk to the backend owner first.
 
 > Aster Academy is only demo data (`convex/seedData/asterAcademy.ts`). Nothing in the backend may
@@ -22,7 +22,7 @@ convex/
 │   ├── functions.ts       schoolQuery / schoolMutation / schoolAction / userQuery / userMutation
 │   ├── actor.ts           getCurrentUser, requireAuthenticatedUser, requireActor (school + role resolution)
 │   ├── authorization.ts   requirePermission, getInSchool, requireClassTeacher, requireTeacherAssignment,
-│   │                      requireSectionRead, requireStudentAccess, requireGuardianStudentAccess, …
+│   │                      requireSectionRead, requireStudentAccess, requireOwnStudentAccess, …
 │   ├── permissions.ts     THE permission catalogue (shared with the frontend)
 │   ├── validators.ts      Enum validators + date/time/money/email checks
 │   └── errors.ts          AppError + codes
@@ -40,7 +40,7 @@ convex/
 │   ├── audit.ts           writeAudit()
 │   └── notifications.ts   notifyUsers(), userIdsForStudent()
 │
-├── users.ts               me, viewer, session, studentContext
+├── users.ts               me, viewer, session
 ├── account.ts             changePassword (own account)
 ├── accounts.ts            admin: create, issueTemporaryPassword, issuePendingCredentials, setStatus, listPeople
 ├── imports.ts             previewStudents / commitStudentRows, previewTeachers / commitTeacherRows
@@ -50,7 +50,15 @@ convex/
 ├── academics.ts           years/classes/subjects/sections, curriculum, roster, assignments, class teacher, enrollment
 ├── attendance.ts          getByDate, listBySection, studentHistory, dailyOverview, mark, update
 ├── notifications.ts       list, unreadCount, markRead, markAllRead
-├── files.ts               generateUploadUrl, register, getUrl, listForOwner, remove
+├── files.ts               generateUploadUrl, register, getUrl, listForOwner, remove (+ homework / submission attachments)
+├── fees.ts                structures, assignment, concessions, recordPayment (retry-safe), reversePayment, ledger, receipts, collection
+├── exams.ts               exams, papers, marks entry (subject-teacher scope), publish → results, section results
+├── timetable.ts           periods, lessons with clash checks, section / teacher views
+├── homework.ts            create/update/close, submissions (own work only), review
+├── notices.ts             draft → publish → archive, audience-scoped feed
+├── events.ts              school calendar (holidays affect attendance school days)
+├── staff.ts               staff attendance, leave apply / decide
+├── reports.ts             enrollment, attendance, fee and exam-performance summaries
 ├── audit.ts               list
 ├── seed.ts                demo (internal) — dataset-driven seeding
 └── seedData/              datasets (types.ts + asterAcademy.ts)
@@ -60,7 +68,18 @@ convex/
 Put a new module in `convex/<module>.ts`; put its non-public helpers in `convex/model/<module>.ts`.
 Do not create a folder with the same name as a module file (Convex paths would collide).
 
-Frontend side: `src/lib/convex/` (provider, hooks, errors, `api` re-export) and `src/proxy.ts`.
+Frontend side: `src/lib/convex/` (provider, hooks, errors, `api` re-export, `use-file-upload.ts`) and `src/proxy.ts`.
+
+**Function-by-function contracts** (arguments, who may call, rules, errors, retry guarantees):
+[`docs/BACKEND_API_CONTRACTS.md`](./BACKEND_API_CONTRACTS.md).
+
+**Live vs demo sessions (A-00).** Demo personas of the demo school bind to the in-browser demo data. Every
+other account — student, teacher or admin created by the school — gets the LIVE workspace for its
+server-derived role (`src/features/auth/live-user.ts`). Live accounts only open pages backed by Convex
+(`src/lib/permissions/navigation.ts` `isLiveRoute`: admin Accounts & Import, Attendance, Notifications, student
+admission/profile; teacher Attendance, Notifications, student profile; the whole student portal). Other pages
+show "not connected to your school's records yet" instead of demo data until their screens are wired to the
+functions above.
 
 ---
 
@@ -77,7 +96,7 @@ npm run dev                 # Next.js
 
 Demo logins (Login ID / password): `ADMIN-001 / Admin@123`, `TCH-00001 / Teacher@123` (Rahul Verma, class
 teacher 10-A), `TCH-00002 / Welcome@123` (Meera Iyer, class teacher 10-B), `TCH-00003 / Welcome@123` (Sunita Rao,
-English 10-A/B/C, class teacher 10-C), `STU-2026-00001 / Student@123` (Aarav, 10-A), `GRD-00001 / Guardian@123`
+English 10-A/B/C, class teacher 10-C), `STU-2026-00001 / Student@123` (Aarav, 10-A)
 (Priya Sharma → Aarav 10-A + Ananya 8-B). Teachers `TCH-00004`…`TCH-00010` and `STU-2026-00002` (Amaira) use
 `Welcome@123`.
 
@@ -112,14 +131,14 @@ Isolation is tested in `tests/convex/tenancy.test.ts` (two schools with identica
 
 - **Convex Auth, Password provider, keyed by Login ID.** The provider's account id is the canonical Login ID
   (`convex/model/loginIds.ts`: NFKC, trimmed, upper-case, `^[A-Z0-9][A-Z0-9._-]{2,39}$`). Email is an optional
-  contact field and never a sign-in identifier. Generated formats: `ADMIN-001`, `TCH-00001`, `STU-<year>-00001`,
-  `GRD-00001` (per-school counters; an explicit generated-shape ID advances the counter). Password policy:
+  contact field and never a sign-in identifier. Generated formats: `ADMIN-001`, `TCH-00001`, `STU-<year>-00001`
+  (per-school counters; an explicit generated-shape ID advances the counter). Password policy:
   ≥ 8 chars with a letter and a digit. Passwords are hashed by Convex Auth (Scrypt); hashes never leave the server.
 - **No self-registration.** `flow: "signUp"` always fails (`validatePasswordRequirements` throws FORBIDDEN);
   password-reset flows are not configured. Accounts exist only because an administrator (or the operator CLI)
   created them:
   1. `reserveAccount` writes an *invited* (pending) membership carrying the Login ID and the person link
-     (student / teacher / guardian record). Import with "create accounts" stops here.
+     (student / teacher record, or an office login). Import with "create accounts" stops here.
   2. `provisionAccount` (action) calls Convex Auth `createAccount` with a server-generated temporary password
      (12 chars, `crypto.getRandomValues`, rejection sampling). `createOrUpdateUser` creates the `users` row
      (`loginId`, `mustChangePassword: true`) and activates the pending membership(s).
@@ -174,16 +193,16 @@ Isolation is tested in `tests/convex/tenancy.test.ts` (two schools with identica
   left untouched (no `metadata.target*`; the summary still names the account's role). Read-only check:
   `npx convex run audit:accountCreationReport '{"schoolSlug":"…"}'` compares each `account.created` row with the
   membership's actual role and student link.
-- **Student records** (`convex/model/studentRecords.ts`): shared read models (placement, guardians, attendance,
+- **Student records** (`convex/model/studentRecords.ts`): shared read models (placement, parent contacts, attendance,
   published results, fee ledger, homework with own submission, section timetable, audience-filtered notices). They
   do not authorize; `studentPortal.my*` (own / linked children only) and `academics.getStudentProfile` (school
-  staff, assigned teacher, self/guardian; guardian contact and fees only for staff with full/fee access and the
+  staff, assigned teacher, self; parent-contact phone/email and fees only for staff with full/fee access and the
   family) authorize first and return explicit fields only.
 - **Admission form** (`academics.createStudentWithEnrollment`): class + section ids must match each other and the
-  current year (no fallback), atomic admission number, guardian re-use by phone, section renumbered in the same
+  current year (no fallback), atomic admission number, parent-contact re-use by phone, section renumbered in the same
   transaction; no account or password is created (Accounts & Import does that).
 - **Student portal** (`convex/studentPortal.ts`): `myProfile` resolves the caller's OWN student record purely
-  server-side (session → membership → `studentId` or guardian links → student → current-year enrollment). An
+  server-side (session → membership → `studentId` → student → current-year enrollment). An
   optional `studentId` only chooses among the students the server links to the caller; anything else is NOT_FOUND.
   Staff get FORBIDDEN. Missing data is explicit (`no_student_record`, enrollment `missing`/`ended`/`no_current_year`).
   `diagnoseStudentAccounts` (internal, read-only) checks every student account's links for one school.
@@ -208,14 +227,16 @@ Isolation is tested in `tests/convex/tenancy.test.ts` (two schools with identica
 ## 5. Rules: roles & permissions (RBAC)
 
 Roles are **portals**: `admin` (Admin/Principal), `teacher`, `student`.
-**Guardian is not a role** — it is a `student`-role membership with `guardianId` set; it sees exactly the
-students linked through `guardianLinks`. **Accountant is not a role** — it is an optional permission set
+These are the ONLY account roles: there are no parent or guardian logins. Parent contacts (name,
+relationship, phone, email) are contact data on the student (`guardians` / `guardianLinks` tables) and grant
+no access. A `schoolMemberships.guardianId` left from the removed guardian sign-in never grants access and is
+deleted by `migrations:removeGuardianAccounts` (internal; dry run by default). **Accountant is not a role** — it is an optional permission set
 (`permissionSets: ["accountant"]`) on an admin-portal membership.
 
 The catalogue lives in **`convex/core/permissions.ts`** and is imported by the frontend
 (`src/lib/permissions/permissions.ts` re-exports it). There is no second list.
 
-| Area | Admin | Teacher | Student / Guardian |
+| Area | Admin | Teacher | Student |
 |---|---|---|---|
 | Students | `students:read:all`, `students:write` | `students:read:assigned` | — |
 | Attendance | `attendance:read:all` (view only) | `attendance:read:assigned`, `attendance:mark:class_teacher`, `attendance:edit:class_teacher` | `attendance:read:own` |
@@ -228,6 +249,32 @@ Use `requirePermission(ctx.actor, "...")` / `requireAnyPermission` — **never**
 `*:assigned` and `*:own` permissions always need a scope check as well (sections 6–7).
 
 ---
+
+## 5b. Rules: school module entitlements
+
+Which of the five configurable modules a school may use is a property of the SCHOOL, separate from account roles and permissions. An enabled module never grants a permission; a disabled module blocks its functions for everyone in that school.
+
+| Key | Module | Requires |
+| --- | --- | --- |
+| `students` | Student Management (admission, list/totals, enrollment, student import, student documents) | — |
+| `academics` | Academics & Examinations (exams, marks, results, timetable, homework) | `students` |
+| `attendance` | Attendance & Operations (student attendance, staff attendance, leave) | `students` |
+| `finance` | Accounts & Finance (fees, payments, receipts, balances, fee reports, reminders) | `students` |
+| `administration` | Administration & Insights (notices, events, reports pages) | — |
+
+Always on (core): sign-in, accounts and staff access, school profile and settings, academic structure, teacher records, read-only student profiles, notifications, profile/school files, audit log, role dashboards (each panel gated by its module).
+
+- **Catalogue:** `convex/core/modules.ts` (shared with the frontend). **State and enforcement:** `convex/model/modules.ts`. **Table:** `schoolModules` (one row per school and module).
+- **Policy (fail-closed):** a school with no rows keeps the original five modules (`legacyDefault`); a future key must be added with `legacyDefault: false`. A configured school has a module only if its row says enabled; a missing key, conflicting duplicate rows or a missing dependency means disabled.
+- **Server:** module functions use `moduleQuery("<key>")` / `moduleMutation("<key>")` (`core/functions.ts`): actor resolution, then `MODULE_DISABLED`, then the handler's own permission and record checks. Mixed views (`reports.adminDashboard`, `dashboards.teacherOverview`, `academics.getStudentProfile`, `files.*` by file kind) gate their parts inside. Fee reminders and scheduled notice notifications skip a disabled module.
+- **Who changes it:** the deployment operator only, through internal functions (no school role can):
+  `npx convex run schoolModules:getSchoolModules '{}'` and
+  `npx convex run schoolModules:setSchoolModules '{"enabled":[...],"updatedBy":"<name>","reason":"<ref>","dryRun":true}'` (then without `dryRun`). Every change writes `school.modules_changed` with before/after. `setup:initSchool` accepts an optional `modules` list.
+- **Data:** disabling deletes nothing; enabling again restores access to the kept records.
+- **Notifications:** while a module is off it sends nothing (its functions cannot run; fee reminders skip; a scheduled notice whose publish date falls in that time is skipped and reports `skipped: "module_disabled"`). Nothing is sent retroactively when the module comes back. Notifications already in a user's inbox, and audit entries, stay visible (core records).
+- **Known cross-module read:** `model/calendar.ts` `isSchoolDay` reads holiday `events` (Administration) for Attendance; see REMAINING_WORK G16.
+- **Client:** `users.session` → `viewer.modules`; navigation (`src/lib/permissions/navigation.ts`) and the route guard (`routes.ts`, `canAccessRoute` → `module_disabled`) hide the module; pages skip its queries. The UI is a convenience only.
+- **Tests:** `tests/convex/module-entitlements.test.ts` (including a source inventory that classifies every public function).
 
 ## 6. Rules: academic structure & teacher scope
 
@@ -244,7 +291,7 @@ schools ─┬─ schoolSettings (currentAcademicYearId, workingDays, attendance
          ├─ counters (per-school document number sequences)
          ├─ students ─┬── enrollments (student × year × class × section, status, rollNo)  ← placement + history
          │            └── guardianLinks ── guardians
-         └─ schoolMemberships (user ↔ school, role, teacherId | studentId | guardianId)
+         └─ schoolMemberships (user ↔ school, role, teacherId | studentId)
 ```
 
 - A student's class/section is **never** a field on `students`; it is the enrollment for a year.
@@ -280,13 +327,12 @@ authenticated → active membership → `attendance:mark|edit:class_teacher` per
 | Teacher with no link to the section | ✘ | ✘ | ✘ |
 | Admin / Principal | ✔ all sections + overview | ✘ | ✘ |
 | Student | own records | ✘ | ✘ |
-| Guardian | linked students' records | ✘ | ✘ |
 
 Additional server rules: date must be a real `YYYY-MM-DD`, not in the future (school timezone), a working
 day and not a holiday; one register per section per date (`CONFLICT` → use `update`); entries must cover the
 section's active roster exactly once (no students from other sections). No delete exists. Mark and every
 correction are audited (`attendance.marked`, `attendance.corrected` with a per-student diff). Absences notify
-the student's and linked guardians' accounts when the school enables attendance alerts.
+the student's own account when the school enables attendance alerts.
 
 Data: `attendanceSessions` (one per section/date, with counts) + `attendanceRecords` (one per student).
 
@@ -300,12 +346,12 @@ Query contracts:
 
 ---
 
-## 8. Rules: student & guardian access
+## 8. Rules: student access
 
 `requireStudentAccess(ctx, studentId, { all, assigned, own })`:
 - `all` permission → any student in the school;
 - `assigned` → only if the student's **current active enrollment** is in the teacher's scope;
-- `own` → only the student themself, or a student linked to the caller's guardian record.
+- `own` → only the student themself.
 Anything else → `NOT_FOUND` (never confirms that a student exists).
 
 ---
@@ -422,8 +468,7 @@ await signIn("password", { email, password, flow: "signIn" });
 **Migration path (module by module, one source of truth at a time):**
 1. ✅ Auth/session (done): the login screen uses `useAuthActions().signIn("password", …)`; `SessionProvider`
    reads `api.users.session` (signedOut / noSchool / signedIn + viewer); `src/proxy.ts` redirects signed-out
-   requests for `/admin|teacher|student/*` to `/login`; guardian child switching is verified with
-   `api.users.studentContext`; password changes use `api.account.changePassword`. Until each module
+   requests for `/admin|teacher|student/*` to `/login`; password changes use `api.account.changePassword`. Until each module
    migrates, the server identity is bound in memory to its demo-data record (by Login ID; linked students
    by name, and only if linked on both sides) so the mock services know the caller — no session, role or
    password is kept in Web Storage by the app. (The Convex Auth client caches its 1-hour access JWT in
@@ -439,7 +484,7 @@ await signIn("password", { email, password, flow: "signIn" });
 | Command | What |
 |---|---|
 | `npm run test:convex` | In-process Convex tests (`convex-test` + Vitest): tenant isolation, auth resolution, accounts, imports, setup, attendance ownership, permission catalogue, source guard |
-| `npm run test:convex:integration` | Against a real seeded deployment (`CONVEX_URL=…`): real Login ID sign-in, admin account creation, import, temporary password → change, disable/enable, attendance rules, guardian switching, notifications, audit |
+| `npm run test:convex:integration` | Against a real seeded deployment (`CONVEX_URL=…`): real Login ID sign-in, admin account creation, import, temporary password → change, disable/enable, attendance rules, removed guardian sign-in refused, internal-only migration, notifications, audit |
 | `npm run test:authz` | Mock-service attendance ownership, acting as server-shaped identities (no passwords) + identity-bridge rules |
 | `npm run test:e2e` | Browser suite. Needs a seeded Convex deployment and a build with `NEXT_PUBLIC_CONVEX_URL`: real Login ID sign-in, server-side route protection, role routing, Accounts & Import flow, workflows |
 

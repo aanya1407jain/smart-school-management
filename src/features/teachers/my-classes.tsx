@@ -92,7 +92,7 @@ export function TeacherClassDetail({ sectionId }: { sectionId: string }) {
                       { key: "name", header: "Student", primary: true, cell: (s) => <div className="flex items-center gap-2.5"><Avatar name={s.name} size="sm" /><div><p className="font-semibold text-ink">{s.name}</p><p className="font-mono text-[11px] text-ink-muted">{s.admissionNo}</p></div></div> },
                       { key: "att", header: "Attendance", cell: (s) => <AttendancePill value={s.attendance} /> },
                       { key: "hw", header: "My homework due", cell: (s) => s.homeworkPending ? <Badge tone="lavender">{s.homeworkPending} pending</Badge> : <span className="text-[12.5px] text-lagoon">Up to date</span> },
-                      { key: "guardian", header: "Guardian", cell: (s) => s.guardianName ? <span className="text-[13px]">{s.guardianName}<a href={`tel:${s.guardianPhone}`} onClick={(e) => e.stopPropagation()} className="ml-1.5 inline-flex text-lagoon" aria-label={`Call ${s.guardianName}`}><Phone className="h-3.5 w-3.5" /></a></span> : "—" },
+                      { key: "guardian", header: "Parent contact", cell: (s) => s.guardianName ? <span className="text-[13px]">{s.guardianName}<a href={`tel:${s.guardianPhone}`} onClick={(e) => e.stopPropagation()} className="ml-1.5 inline-flex text-lagoon" aria-label={`Call ${s.guardianName}`}><Phone className="h-3.5 w-3.5" /></a></span> : "—" },
                     ]}
                   />
                 </Card>

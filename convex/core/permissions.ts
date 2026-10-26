@@ -7,11 +7,13 @@
  *
  * Pure TypeScript: no Convex or React imports, so it is safe on both sides.
  *
- * Roles are portal roles (which dashboard a member uses). A guardian is NOT a
- * role: a guardian is a `student`-role membership linked to a guardian record
- * and scoped to the students linked through `guardianLinks`.
- * Optional permission sets (e.g. "accountant") are layered on a membership.
+ * Roles are portal roles (which dashboard a member uses): admin, teacher and
+ * student are the ONLY account roles. A student account sees its own records.
+ * There are no parent/guardian accounts (parent contacts are data only).
+ * Optional permission sets (e.g. "accountant") are layered on a membership,
+ * and per-member module × action GRANTS (core/grants.ts) set by the Principal.
  */
+import { OFFICE_BASE, permissionsFromGrants } from "./grants";
 
 export const ROLES = ["admin", "teacher", "student"] as const;
 export type Role = (typeof ROLES)[number];
@@ -21,6 +23,8 @@ export const PERMISSIONS = [
   "area:admin", "area:teacher", "area:student",
   // Students
   "students:read:all", "students:write", "students:read:assigned",
+  // Student lifecycle: promotion, transfer certificates, pass-out (convex/studentLifecycle.ts)
+  "students:lifecycle",
   // Academics & staff
   "academics:manage", "staff:manage",
   // Attendance — VIEW is separate from MARK (create) and EDIT (correct).
@@ -97,14 +101,57 @@ export const ROLE_LABELS: Record<Role, string> = {
   student: "Student",
 };
 
-/** Resolve the effective permission set for a role + optional sets. */
-export function resolvePermissions(role: Role | null | undefined, permissionSets: readonly string[] = []): Set<Permission> {
+/** Per-member grants as stored on `schoolMemberships` (see core/grants.ts). */
+export type MembershipAccess = {
+  /** Undefined on an admin membership = full administrator (the Principal). */
+  grants?: readonly { module: string; actions: readonly string[] }[];
+  /** The member has section limits (teachers only): limitable view grants stay section-scoped. */
+  sectionLimited?: boolean;
+};
+
+/**
+ * Resolve the effective permission set for a role + optional sets + grants.
+ *
+ * RESTRICTED OFFICE LOGIN: an ADMIN membership with `grants` (even an empty
+ * list) gets EXACTLY OFFICE_BASE + its grants — never the full admin set. An
+ * admin membership without grants is a full administrator.
+ *
+ * LEGACY ACCOUNTANT: an admin membership carrying the "accountant" set (and
+ * no grants) gets exactly the accountant permissions.
+ *
+ * TEACHER: the teacher permissions + its grants (+ the admin workspace when a
+ * grant adds anything beyond teaching).
+ *
+ * STUDENT: never anything beyond the student permissions (grants ignored).
+ * Optional sets on other roles are additive (legacy; not creatable through the API).
+ */
+export function resolvePermissions(role: Role | null | undefined, permissionSets: readonly string[] = [], access: MembershipAccess = {}): Set<Permission> {
+  if (role === "admin" && access.grants !== undefined) {
+    const set = new Set<Permission>(OFFICE_BASE);
+    permissionsFromGrants(access.grants, false).forEach((p) => set.add(p));
+    return set;
+  }
+  if (role === "admin" && permissionSets.includes("accountant")) return new Set<Permission>(PERMISSION_SETS.accountant);
   const set = new Set<Permission>(role ? ROLE_PERMISSIONS[role] : []);
   for (const name of permissionSets) {
     const extra = (PERMISSION_SETS as Record<string, readonly Permission[]>)[name];
     extra?.forEach((p) => set.add(p));
   }
+  if (role === "teacher" && access.grants?.length) {
+    const extra = permissionsFromGrants(access.grants, access.sectionLimited === true);
+    let beyondTeaching = false;
+    for (const p of extra) {
+      if (!set.has(p)) beyondTeaching = true;
+      set.add(p);
+    }
+    if (beyondTeaching) set.add("area:admin");
+  }
   return set;
+}
+
+/** True when an admin membership is restricted to the accountant (finance-only) permissions. */
+export function isAccountantOnly(role: Role | null | undefined, permissionSets: readonly string[] = []): boolean {
+  return role === "admin" && permissionSets.includes("accountant");
 }
 
 export function isRole(value: unknown): value is Role {

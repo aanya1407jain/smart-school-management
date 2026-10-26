@@ -10,10 +10,11 @@ import { useSchoolMutation, useSchoolQuery } from "@/lib/convex/membership";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { useSession } from "@/features/auth/session-provider";
-import { Badge, Button, Card, EmptyState, PageHeader, QueryView, Segmented, useToast } from "@/components/ui";
+import { Badge, Button, Card, ConfirmDialog, EmptyState, PageHeader, QueryView, Segmented, useToast } from "@/components/ui";
 import { NOTIFICATION_CATEGORY_LABELS } from "@/lib/constants/labels";
 import { relativeTime, formatDateTime } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils/cn";
+import { isLiveRoute } from "@/lib/permissions/navigation";
 import { CategoryIcon } from "./category-icon";
 import { useUnreadCount } from "./use-unread-count";
 
@@ -42,6 +43,9 @@ export function NotificationCenter() {
   const markReadMutation = useSchoolMutation(api.notifications.markRead);
   const markAllReadMutation = useSchoolMutation(api.notifications.markAllRead);
   const removeMutation = useSchoolMutation(api.notifications.remove);
+  const clearAllMutation = useSchoolMutation(api.notifications.clearAll);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   // Demo fallback queries
   const allItemsQuery = useQuery(() => (live ? Promise.resolve([]) : services.notifications.list({})), [live]);
@@ -104,7 +108,10 @@ export function NotificationCenter() {
     "general",
   ];
 
+  const fail = (e: unknown) => toast({ title: "That didn't work", description: e instanceof Error ? e.message : "Please try again.", tone: "error" });
+
   const handleMarkAllRead = async () => {
+    try {
     if (live) {
       const r = await markAllReadMutation({});
       toast({
@@ -118,30 +125,50 @@ export function NotificationCenter() {
         description: `${r.count} notification${r.count === 1 ? "" : "s"} updated.`,
       });
     }
+    } catch (e) { fail(e); }
+  };
+
+  // LIVE: removes only the caller's own notification copies (server-scoped), in bounded batches.
+  const handleClearAll = async () => {
+    setClearing(true);
+    try {
+      let deleted = 0;
+      for (let i = 0; i < 50; i++) {
+        const r = await clearAllMutation({});
+        deleted += r.deleted;
+        if (!r.remaining) break;
+      }
+      toast({ title: "Notifications cleared", description: `${deleted} notification${deleted === 1 ? "" : "s"} removed.` });
+      setConfirmClear(false);
+    } catch (e) { fail(e); } finally { setClearing(false); }
   };
 
   const handleMarkRead = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (live) {
-      await markReadMutation({ notificationId: id as Id<"notifications"> });
-    } else {
-      await services.notifications.markRead(id);
-    }
-    toast({ title: "Notification marked as read" });
+    try {
+      if (live) {
+        await markReadMutation({ notificationId: id as Id<"notifications"> });
+      } else {
+        await services.notifications.markRead(id);
+      }
+      toast({ title: "Notification marked as read" });
+    } catch (err) { fail(err); }
   };
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (live) {
-      await removeMutation({ notificationId: id as Id<"notifications"> });
-    } else {
-      await services.notifications.remove(id);
-    }
-    toast({ title: "Notification removed" });
+    try {
+      if (live) {
+        await removeMutation({ notificationId: id as Id<"notifications"> });
+      } else {
+        await services.notifications.remove(id);
+      }
+      toast({ title: "Notification removed" });
+    } catch (err) { fail(err); }
   };
 
   return (
-    <div className="mx-auto max-w-4xl">
+    <div className="mx-auto max-w-4xl" data-testid={live ? "live-notifications" : undefined}>
       <PageHeader
         title="Notifications"
         description={
@@ -150,13 +177,21 @@ export function NotificationCenter() {
             : "You're all caught up with school updates."
         }
         actions={
-          unread > 0 && (
-            <Button variant="outline" onClick={handleMarkAllRead}>
-              <CheckCheck className="h-4 w-4" /> Mark all as read
-            </Button>
-          )
+          <>
+            {unread > 0 && (
+              <Button variant="outline" onClick={handleMarkAllRead}>
+                <CheckCheck className="h-4 w-4" /> Mark all as read
+              </Button>
+            )}
+            {live && (liveItems?.length ?? 0) > 0 && (
+              <Button variant="outline" onClick={() => setConfirmClear(true)}>
+                <Trash2 className="h-4 w-4" /> Clear all
+              </Button>
+            )}
+          </>
         }
       />
+      <ConfirmDialog open={confirmClear} onOpenChange={setConfirmClear} title="Clear all notifications?" description="Every notification in your list will be removed. This only affects your own list — the notices, payments and results they point to are not touched." confirmLabel="Clear all" tone="danger" loading={clearing} onConfirm={handleClearAll} />
 
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="scrollbar-thin -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1" role="tablist" aria-label="Category">
@@ -267,7 +302,8 @@ export function NotificationCenter() {
                               await services.notifications.markRead(n.id);
                             }
                           }
-                          if (n.href) router.push(n.href);
+                          // Live accounts only follow links to pages backed by real records.
+                          if (n.href && (!live || isLiveRoute(n.href))) router.push(n.href);
                         }}
                       >
                         <div className="flex flex-wrap items-center gap-2">

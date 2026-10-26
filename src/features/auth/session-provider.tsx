@@ -6,15 +6,15 @@
  *  - Authentication: Convex Auth (Login ID + password). Tokens live in httpOnly
  *    cookies managed by the Next.js proxy — never in Web Storage.
  *  - Identity: `users.session` derives the user, school, membership, role and
- *    linked teacher/student/guardian on the SERVER. The browser never
+ *    linked teacher/student on the SERVER. The browser never
  *    supplies a role; the portal opened after sign-in follows the server role.
  *  - Domain data, two sources (`dataSource`):
  *      "demo" → the demo school's persona accounts are bound (in memory) to
  *               their counterpart in the in-browser demo data — see
  *               src/lib/services/session-store.ts. Only the demo school
  *               (DEMO_SCHOOL_SLUG) can ever bind.
- *      "live" → every other student-portal account (students and guardians
- *               created by the school). The portal reads ONLY Convex
+ *      "live" → every other account created by the school (admin, teacher
+ *               or student). The portal reads ONLY Convex
  *               (convex/studentPortal.ts, attendance, notifications) for the
  *               students the server links to the membership; the demo data
  *               stays unbound, so a real account can never see a demo persona.
@@ -35,7 +35,9 @@ import { subscribeDb } from "@/lib/store/db";
 import { permissionsFor, type Permission } from "@/lib/permissions";
 import { isConvexConfigured } from "@/lib/convex/config";
 import { useMembership } from "@/lib/convex/membership";
-import { liveStudentPortalUser } from "./live-user";
+import { liveStudentPortalUser, liveWorkspaceUser } from "./live-user";
+import type { ModuleKey } from "@convex/core/modules";
+import { parseSessionModules, withServerAccess, type SessionModulesStatus } from "./session-modules";
 
 export { liveStudentPortalUser };
 
@@ -73,11 +75,22 @@ interface SessionContextValue {
   /** "demo" (persona bound to demo data) or "live" (Convex only); null unless authenticated. */
   dataSource: DataSource | null;
   can: (permission: Permission) => boolean;
+  /**
+   * Modules the user's school is entitled to (server session, reactive). UI
+   * only: pages and panels of other modules are hidden and their queries are
+   * skipped; the server refuses them anyway (MODULE_DISABLED).
+   */
+  modules: readonly ModuleKey[];
+  /**
+   * Whether `modules` is a list the server actually sent ("ok"), or the session
+   * lacked it ("missing" — a backend older than module entitlements) or it was
+   * malformed. Not "ok" → `modules` is empty (fail-closed). Null when signed out.
+   */
+  modulesStatus: SessionModulesStatus | null;
+  hasModule: (module: ModuleKey) => boolean;
   /** Resolves to the portal user, or null when the account is valid but has no portal data yet (go to /account). */
   login: (input: LoginInput) => Promise<CurrentUser | null>;
   logout: () => Promise<void>;
-  /** Guardians: switch the linked student being viewed (verified by the server). */
-  setActiveStudent: (id: string) => Promise<void>;
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);
@@ -91,10 +104,9 @@ function UnconfiguredSessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => { purgeLegacySessionStorage(); services.auth.clearIdentity(); }, []);
   const value = useMemo<SessionContextValue>(() => ({
     status: "unauthenticated", user: null, viewer: null, notice: null, mustChangePassword: false, activeStudentId: null, dataSource: null,
-    can: () => false,
+    can: () => false, modules: [], modulesStatus: null, hasModule: () => false,
     login: async () => { throw new Error("Sign-in is not available: the school backend is not configured for this deployment."); },
     logout: async () => {},
-    setActiveStudent: async () => {},
   }), []);
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }
@@ -112,8 +124,6 @@ function ConvexSessionProvider({ children }: { children: ReactNode }) {
   const [bound, setBound] = useState<{ viewer: Viewer; result: BindResult } | null>(null);
   const [tick, setTick] = useState(0);
   const [verifying, setVerifying] = useState(false);
-  /** Live portal: the linked student being viewed (guardians with several children). */
-  const [liveActiveStudentId, setLiveActiveStudentId] = useState<string | null>(null);
   const pending = useRef<PendingLogin | null>(null);
 
   useEffect(() => { purgeLegacySessionStorage(); }, []);
@@ -137,7 +147,7 @@ function ConvexSessionProvider({ children }: { children: ReactNode }) {
     return () => { a(); b(); };
   }, []);
 
-  const liveUser = useMemo(() => (viewer && viewer.role === "student" ? liveStudentPortalUser(viewer) : null), [viewer]);
+  const liveUser = useMemo(() => (viewer ? liveWorkspaceUser(viewer) : null), [viewer]);
 
   const base = useMemo(() => {
     void tick;
@@ -149,19 +159,21 @@ function ConvexSessionProvider({ children }: { children: ReactNode }) {
     if (session.status === "noSchool") return { status: "unavailable" as Status, ...none, notice: session.message };
     if (!bound || bound.viewer !== session.viewer) return { status: "loading" as Status, ...none };
     if (!bound.result.ok) {
-      // Student-portal accounts created by the school: the live (Convex) portal.
-      if (liveUser && session.viewer.role === "student") {
-        const ids = liveUser.studentIds ?? [];
-        const active = liveActiveStudentId && ids.includes(liveActiveStudentId) ? liveActiveStudentId : ids[0] ?? null;
-        return { status: "authenticated" as Status, notice: null, user: liveUser, activeStudentId: active, viewer: session.viewer, dataSource: "live" as DataSource };
+      // Accounts created by the school (no demo persona): the live (Convex) workspace for
+      // their SERVER-derived role. Never mapped onto demo personas or demo data.
+      if (liveUser) {
+        // A student account sees exactly its own record (the only account roles are admin, teacher and student).
+        const active = liveUser.studentIds?.[0] ?? null;
+        return { status: "authenticated" as Status, notice: null, user: withServerAccess(liveUser, session.viewer), activeStudentId: active, viewer: session.viewer, dataSource: "live" as DataSource };
       }
-      // Staff accounts outside the demo data: those workspaces still run on demo data only.
       return { status: "unavailable" as Status, ...none, notice: UNAVAILABLE_PREVIEW, viewer: session.viewer };
     }
     const snap = services.auth.getSessionSnapshot();
     if (!snap.user) return { status: "loading" as Status, ...none };
-    return { status: "authenticated" as Status, notice: null, user: snap.user, activeStudentId: snap.activeStudentId, viewer: session.viewer, dataSource: "demo" as DataSource };
-  }, [authLoading, isAuthenticated, session, bound, tick, liveUser, liveActiveStudentId]);
+    // Module entitlements always come from the server session, for demo personas too
+    // (parsed fail-closed: a session without a valid list grants no module).
+    return { status: "authenticated" as Status, notice: null, user: withServerAccess(snap.user, session.viewer), activeStudentId: snap.activeStudentId, viewer: session.viewer, dataSource: "demo" as DataSource };
+  }, [authLoading, isAuthenticated, session, bound, tick, liveUser]);
 
   const finishPending = useCallback(() => {
     const p = pending.current;
@@ -209,35 +221,14 @@ function ConvexSessionProvider({ children }: { children: ReactNode }) {
     await signOut();
     services.auth.clearIdentity();
     setBound(null);
-    setLiveActiveStudentId(null);
   }, [signOut]);
-
-  const setActiveStudent = useCallback(async (mockStudentId: string) => {
-    if (base.dataSource === "live") {
-      // Live portal: ids ARE Convex student ids; the server must confirm the link.
-      if (!base.user?.studentIds?.includes(mockStudentId)) throw new Error("This student is not linked to your account.");
-      await convex.query(api.users.studentContext, {
-        studentId: mockStudentId as Id<"students">,
-        ...(activeMembershipId ? { membershipId: activeMembershipId } : {}),
-      });
-      setLiveActiveStudentId(mockStudentId);
-      return;
-    }
-    if (!bound?.result.ok) throw new Error("Your session has ended. Please sign in again.");
-    const serverId = Object.entries(bound.result.studentMap).find(([, m]) => m === mockStudentId)?.[0];
-    if (!serverId) throw new Error("This student is not linked to your account.");
-    // The server decides: only the student themself or a linked guardian passes.
-    await convex.query(api.users.studentContext, {
-      studentId: serverId as Id<"students">,
-      ...(activeMembershipId ? { membershipId: activeMembershipId } : {}),
-    });
-    services.auth.setActiveStudent(mockStudentId);
-  }, [base.dataSource, base.user, bound, convex, activeMembershipId]);
 
   const value = useMemo<SessionContextValue>(() => {
     const status: Status = verifying ? "loading" : base.status;
     const user = verifying ? null : base.user;
     const perms = permissionsFor(user);
+    const modules: readonly ModuleKey[] = user?.modules ?? [];
+    const modulesStatus = user ? parseSessionModules(base.viewer?.modules).status : null;
     return {
       status,
       user,
@@ -247,11 +238,23 @@ function ConvexSessionProvider({ children }: { children: ReactNode }) {
       activeStudentId: verifying ? null : base.activeStudentId,
       dataSource: verifying ? null : base.dataSource,
       can: (p) => perms.has(p),
+      modules,
+      modulesStatus,
+      hasModule: (m) => modules.includes(m),
       login,
       logout,
-      setActiveStudent,
     };
-  }, [base, verifying, login, logout, setActiveStudent]);
+  }, [base, verifying, login, logout]);
+
+  // Say once, for developers, why every module page is hidden.
+  const warned = useRef<SessionModulesStatus | null>(null);
+  useEffect(() => {
+    const s = value.modulesStatus;
+    if (s && s !== "ok" && warned.current !== s) {
+      warned.current = s;
+      console.warn(`[session] viewer.modules is ${s}; module pages are hidden. Is the Convex deployment older than this frontend (module entitlements)?`);
+    }
+  }, [value.modulesStatus]);
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

@@ -1,307 +1,324 @@
 /**
- * In-process tests for Fees, Payments, Receipts, and Concessions.
- * Run with: npx vitest run tests/convex/fees.test.ts
+ * A-02 fees: structures, assignment, concessions, allocation, receipts,
+ * retry safety, reversals, authorization and tenant isolation.
  */
 import { describe, expect, test } from "vitest";
 import { api } from "../../convex/_generated/api";
-import { as, createSchool, errorCode, makeTest } from "./fixtures";
+import type { Id } from "../../convex/_generated/dataModel";
+import { allocate } from "../../convex/fees";
+import { as, createSchool, errorCode, makeTest, type T } from "./fixtures";
 
-describe("Fees, payments and receipts (AP-01)", () => {
-  test("admin creates fee structure, validates amounts and assigns to class", async () => {
+type School = Awaited<ReturnType<typeof createSchool>>;
+
+const plan = {
+  name: "Tuition 2026-27",
+  components: [{ label: "Tuition", amountMinor: 30000 }],
+  installments: [
+    { label: "Term 1", dueDate: "2026-05-01", amountMinor: 10000 },
+    { label: "Term 2", dueDate: "2026-09-01", amountMinor: 10000 },
+    { label: "Term 3", dueDate: "2027-01-01", amountMinor: 10000 },
+  ],
+};
+
+async function setup() {
+  const t = makeTest();
+  const A = await createSchool(t, "alpha");
+  const B = await createSchool(t, "beta");
+  const admin = await as(t, A.users.admin);
+  const { structureId } = await admin.mutation(api.fees.createStructure, { ...plan, classIds: [A.classId] });
+  await admin.mutation(api.fees.setStructureStatus, { structureId, status: "active" });
+  return { t, A, B, admin, structureId };
+}
+
+const counts = (t: T) => t.run(async (ctx) => ({
+  payments: (await ctx.db.query("feePayments").collect()).length,
+  receipts: (await ctx.db.query("receipts").collect()).length,
+  fees: (await ctx.db.query("studentFees").collect()).length,
+}));
+
+describe("allocation rule (pure)", () => {
+  test("oldest due first, partial, never beyond outstanding", () => {
+    const o = (id: string, dueDate: string, outstandingMinor: number) => ({ obligationId: id as Id<"studentFees">, dueDate, outstandingMinor });
+    expect(allocate(15000, [o("b", "2026-09-01", 10000), o("a", "2026-05-01", 10000)])).toEqual({ allocations: [{ studentFeeId: "a", amountMinor: 10000 }, { studentFeeId: "b", amountMinor: 5000 }], unallocated: 0 });
+    expect(allocate(500, [o("a", "2026-05-01", 0), o("b", "2026-09-01", 300)])).toEqual({ allocations: [{ studentFeeId: "b", amountMinor: 300 }], unallocated: 200 });
+  });
+});
+
+describe("structures and assignment", () => {
+  test("validation: totals must match, due dates inside the year, unique names", async () => {
+    const { admin, A } = await setup();
+    expect(await errorCode(admin.mutation(api.fees.createStructure, { ...plan, name: "X", classIds: [A.classId], installments: [{ label: "One", dueDate: "2026-05-01", amountMinor: 1 }] }))).toBe("INVALID_ARGUMENT");
+    expect(await errorCode(admin.mutation(api.fees.createStructure, { ...plan, name: "Y", classIds: [A.classId], installments: plan.installments.map((i, k) => (k === 0 ? { ...i, dueDate: "2030-01-01" } : i)) }))).toBe("INVALID_ARGUMENT");
+    expect(await errorCode(admin.mutation(api.fees.createStructure, { ...plan, classIds: [A.classId] }))).toBe("CONFLICT");
+    expect(await errorCode(admin.mutation(api.fees.createStructure, { ...plan, name: "Z", classIds: [A.classId], components: [{ label: "T", amountMinor: -5 }] }))).toBe("INVALID_ARGUMENT");
+  });
+
+  test("assigns one obligation per installment; re-assigning is a no-op; amounts lock once used", async () => {
+    const { t, A, admin, structureId } = await setup();
+    const r1 = await admin.mutation(api.fees.assignStructure, { structureId, target: { kind: "class", classId: A.classId } });
+    expect(r1.assigned).toBe(2); // Asha (8-A) and Bala (8-B)
+    const before = await counts(t);
+    expect(before.fees).toBe(6);
+    const r2 = await admin.mutation(api.fees.assignStructure, { structureId, target: { kind: "students", studentIds: [A.studentA] } });
+    expect(r2).toEqual({ assigned: 0, skipped: [{ studentId: A.studentA, reason: "already_assigned" }] });
+    expect((await counts(t)).fees).toBe(6);
+    expect(await errorCode(admin.mutation(api.fees.updateStructure, { structureId, components: [{ label: "Tuition", amountMinor: 1 }] }))).toBe("CONFLICT");
+  });
+
+  test("ineligible or foreign students are rejected", async () => {
+    const { A, B, admin, structureId } = await setup();
+    expect(await errorCode(admin.mutation(api.fees.assignStructure, { structureId, target: { kind: "students", studentIds: [B.studentA] } }))).toBe("NOT_FOUND");
+    expect(await errorCode(admin.mutation(api.fees.assignStructure, { structureId, target: { kind: "section", sectionId: B.sectionA } }))).toBe("NOT_FOUND");
+    void A;
+  });
+});
+
+describe("payments, concessions and receipts", () => {
+  async function assigned() {
+    const s = await setup();
+    await s.admin.mutation(api.fees.assignStructure, { structureId: s.structureId, target: { kind: "students", studentIds: [s.A.studentA] } });
+    return s;
+  }
+  const pay = (amountMinor: number, id: string, studentId: Id<"students">) => ({ studentId, amountMinor, method: "cash" as const, paidOn: "2026-06-01", clientRequestId: id });
+
+  test("partial then full payment: oldest installment first, balances reconcile, receipts sequential", async () => {
+    const { admin, A } = await assigned();
+    const p1 = await admin.mutation(api.fees.recordPayment, pay(15000, "req-0000001", A.studentA));
+    expect(p1.allocations.map((a) => a.amountMinor)).toEqual([10000, 5000]);
+    const p2 = await admin.mutation(api.fees.recordPayment, pay(15000, "req-0000002", A.studentA));
+    expect(p2.receiptNo).not.toBe(p1.receiptNo);
+    expect(Number(p2.receiptNo.split("/").pop())).toBe(Number(p1.receiptNo.split("/").pop()) + 1);
+    const ledger = await admin.query(api.fees.studentLedger, { studentId: A.studentA });
+    expect(ledger.totals).toEqual({ grossMinor: 30000, concessionMinor: 0, netMinor: 30000, paidMinor: 30000, outstandingMinor: 0, overdueMinor: 0, dueSoonMinor: 0 });
+    expect(ledger.standing).toBe("paid");
+    expect(ledger.payments).toHaveLength(2);
+    expect(await errorCode(admin.mutation(api.fees.recordPayment, pay(1, "req-0000003", A.studentA)))).toBe("CONFLICT"); // nothing outstanding
+  });
+
+  test("invalid amounts and overpayment are rejected; nothing is written", async () => {
+    const { t, admin, A } = await assigned();
+    const before = await counts(t);
+    expect(await errorCode(admin.mutation(api.fees.recordPayment, pay(0, "req-a0000001", A.studentA)))).toBe("INVALID_ARGUMENT");
+    expect(await errorCode(admin.mutation(api.fees.recordPayment, pay(10.5, "req-a0000002", A.studentA)))).toBe("INVALID_ARGUMENT");
+    expect(await errorCode(admin.mutation(api.fees.recordPayment, pay(30001, "req-a0000003", A.studentA)))).toBe("INVALID_ARGUMENT");
+    expect(await errorCode(admin.mutation(api.fees.recordPayment, { ...pay(100, "req-a0000004", A.studentA), paidOn: "2999-01-01" }))).toBe("INVALID_ARGUMENT");
+    expect(await counts(t)).toEqual(before);
+  });
+
+  test("a retried request (same clientRequestId) returns the original payment — no double charge", async () => {
+    const { t, admin, A } = await assigned();
+    const a = await admin.mutation(api.fees.recordPayment, pay(5000, "retry-123456", A.studentA));
+    const b = await admin.mutation(api.fees.recordPayment, pay(5000, "retry-123456", A.studentA));
+    expect(b).toMatchObject({ paymentId: a.paymentId, receiptNo: a.receiptNo, duplicate: true });
+    expect(await counts(t)).toMatchObject({ payments: 1, receipts: 1 });
+    expect(await errorCode(admin.mutation(api.fees.recordPayment, pay(6000, "retry-123456", A.studentA)))).toBe("CONFLICT");
+  });
+
+  test("concessions reduce what is outstanding; payments cannot exceed it", async () => {
+    const { admin, A } = await assigned();
+    await admin.mutation(api.fees.addConcession, { studentId: A.studentA, kind: "percent", value: 1000, reason: "Sibling" }); // 10%
+    let l = await admin.query(api.fees.studentLedger, { studentId: A.studentA });
+    expect(l.totals).toMatchObject({ concessionMinor: 3000, outstandingMinor: 27000 });
+    expect(await errorCode(admin.mutation(api.fees.recordPayment, pay(27001, "req-c0000001", A.studentA)))).toBe("INVALID_ARGUMENT");
+    await admin.mutation(api.fees.recordPayment, pay(27000, "req-c0000002", A.studentA));
+    l = await admin.query(api.fees.studentLedger, { studentId: A.studentA });
+    expect(l.totals.outstandingMinor).toBe(0);
+    expect(await errorCode(admin.mutation(api.fees.addConcession, { studentId: A.studentA, kind: "percent", value: 20000, reason: "x" }))).toBe("INVALID_ARGUMENT");
+  });
+
+  test("reversal is append-only: the original stops counting, the receipt shows it reversed, it cannot be reversed twice", async () => {
+    const { admin, A } = await assigned();
+    const p = await admin.mutation(api.fees.recordPayment, pay(10000, "req-r0000001", A.studentA));
+    await admin.mutation(api.fees.reversePayment, { paymentId: p.paymentId, reason: "Cheque bounced" });
+    const l = await admin.query(api.fees.studentLedger, { studentId: A.studentA });
+    expect(l.totals.paidMinor).toBe(0);
+    expect((await admin.query(api.fees.receipt, { receiptId: p.receiptId })).payment.reversed).toBe(true);
+    expect(await errorCode(admin.mutation(api.fees.reversePayment, { paymentId: p.paymentId, reason: "again" }))).toBe("CONFLICT");
+  });
+
+  test("collection summary counts each effective payment once", async () => {
+    const { admin, A } = await assigned();
+    await admin.mutation(api.fees.recordPayment, pay(4000, "req-s0000001", A.studentA));
+    const p = await admin.mutation(api.fees.recordPayment, { ...pay(6000, "req-s0000002", A.studentA), method: "upi" });
+    await admin.mutation(api.fees.reversePayment, { paymentId: p.paymentId, reason: "x" });
+    const s = await admin.query(api.fees.collectionSummary, { from: "2026-04-01", to: "2027-03-31" });
+    expect(s).toMatchObject({ totalMinor: 4000, payments: 1, reversed: 1, byMethod: { cash: 4000 } });
+  });
+});
+
+describe("authorization and isolation", () => {
+  test("teachers and students cannot write fees; students read only their own ledger; a legacy guardian sign-in reads none", async () => {
+    const { t, A, B, admin, structureId } = await setup();
+    await admin.mutation(api.fees.assignStructure, { structureId, target: { kind: "class", classId: A.classId } });
+    const teacher = await as(t, A.users.classTeacher);
+    const student = await as(t, A.users.student);
+    const legacyGuardian = await as(t, A.users.legacyGuardian);
+    expect(await errorCode(teacher.mutation(api.fees.recordPayment, { studentId: A.studentA, amountMinor: 1, method: "cash", paidOn: "2026-06-01", clientRequestId: "t-12345678" }))).toBe("FORBIDDEN");
+    expect(await errorCode(student.mutation(api.fees.addConcession, { studentId: A.studentA, kind: "fixed", value: 100, reason: "x" }))).toBe("FORBIDDEN");
+    expect((await student.query(api.fees.studentLedger, { studentId: A.studentA })).totals.grossMinor).toBe(30000);
+    expect(await errorCode(legacyGuardian.query(api.fees.studentLedger, { studentId: A.studentA }))).toBe("NO_SCHOOL_ACCESS");
+    expect(await errorCode(student.query(api.fees.studentLedger, { studentId: A.studentB }))).toBe("NOT_FOUND");
+    expect(await errorCode(teacher.query(api.fees.studentLedger, { studentId: A.studentA }))).toBe("NOT_FOUND");
+    expect(await errorCode(admin.query(api.fees.studentLedger, { studentId: B.studentA }))).toBe("NOT_FOUND");
+    expect(await errorCode(student.query(api.fees.collectionSummary, { from: "2026-04-01", to: "2026-05-01" }))).toBe("FORBIDDEN");
+  });
+
+  test("the accountant permission set can record payments without being an admin", async () => {
+    const { t, A, admin, structureId } = await setup();
+    await admin.mutation(api.fees.assignStructure, { structureId, target: { kind: "students", studentIds: [A.studentA] } });
+    await t.run((ctx) => ctx.db.patch(A.memberships.subjectTeacher, { permissionSets: ["accountant"] }));
+    const accountant = await as(t, A.users.subjectTeacher);
+    const r = await accountant.mutation(api.fees.recordPayment, { studentId: A.studentA, amountMinor: 1000, method: "cash", paidOn: "2026-06-01", clientRequestId: "acct-1234567" });
+    expect(r.receiptNo).toMatch(/\/0001$/);
+  });
+});
+
+/**
+ * PR #11 (AP-01) scenarios, adapted to the final fees API: structures are
+ * activated before assignment, assignment takes a `target`, payments carry a
+ * `clientRequestId`, the ledger is `studentLedger`, receipts are read by
+ * `receiptId`, and list queries return `{ rows }`.
+ */
+describe("AP-01 scenarios from PR #11 (final API)", () => {
+  let req = 0;
+  const rid = () => `ap01-request-${++req}`;
+
+  test("admin creates a fee structure, amounts are validated, and it is assigned to a class", async () => {
     const t = makeTest();
     const f = await createSchool(t, "school-a");
     const admin = await as(t, f.users.admin);
     const teacher = await as(t, f.users.classTeacher);
+    const base = { classIds: [f.classId], components: [{ label: "Tuition", amountMinor: 500000 }] };
 
-    // Non-admin cannot create structure
-    const teacherErr = await errorCode(
-      teacher.mutation(api.fees.createStructure, {
-        name: "Tuition 2026",
-        classIds: [f.classId],
-        components: [{ label: "Tuition", amountMinor: 500000 }],
-        installments: [{ label: "Term 1", dueDate: "2026-05-01", amountMinor: 500000 }],
-      }),
-    );
-    expect(teacherErr).toBe("FORBIDDEN");
+    expect(await errorCode(teacher.mutation(api.fees.createStructure, { ...base, name: "Tuition 2026", installments: [{ label: "Term 1", dueDate: "2026-05-01", amountMinor: 500000 }] }))).toBe("FORBIDDEN");
+    expect(await errorCode(admin.mutation(api.fees.createStructure, { ...base, name: "Tuition 2026", installments: [{ label: "Term 1", dueDate: "2026-05-01", amountMinor: 400000 }] }))).toBe("INVALID_ARGUMENT");
 
-    // Amount mismatch is rejected
-    const mismatchErr = await errorCode(
-      admin.mutation(api.fees.createStructure, {
-        name: "Tuition 2026",
-        classIds: [f.classId],
-        components: [{ label: "Tuition", amountMinor: 500000 }],
-        installments: [{ label: "Term 1", dueDate: "2026-05-01", amountMinor: 400000 }],
-      }),
-    );
-    expect(mismatchErr).toBe("INVALID_ARGUMENT");
-
-    // Admin creates valid structure
     const { structureId } = await admin.mutation(api.fees.createStructure, {
-      name: "Annual Tuition",
-      classIds: [f.classId],
-      components: [
-        { label: "Tuition", amountMinor: 600000 },
-        { label: "Activity", amountMinor: 100000 },
-      ],
-      installments: [
-        { label: "Term 1", dueDate: "2026-05-01", amountMinor: 350000 },
-        { label: "Term 2", dueDate: "2026-10-01", amountMinor: 350000 },
-      ],
+      name: "Annual Tuition", classIds: [f.classId], activate: true,
+      components: [{ label: "Tuition", amountMinor: 600000 }, { label: "Activity", amountMinor: 100000 }],
+      installments: [{ label: "Term 1", dueDate: "2026-05-01", amountMinor: 350000 }, { label: "Term 2", dueDate: "2026-10-01", amountMinor: 350000 }],
     });
-    expect(structureId).toBeDefined();
+    const first = await admin.mutation(api.fees.assignStructure, { structureId, target: { kind: "class", classId: f.classId } });
+    expect(first.assigned).toBe(2); // studentA (8-A) and studentB (8-B)
+    const obligations = await t.run(async (ctx) => (await ctx.db.query("studentFees").collect()).filter((o) => o.feeStructureId === structureId).length);
+    expect(obligations).toBe(4); // 2 students × 2 installments
 
-    // Assign to class
-    const assignResult = await admin.mutation(api.fees.assignStructure, {
-      structureId,
-      classId: f.classId,
-    });
-    // studentA and studentB are enrolled in this class
-    expect(assignResult.assignedStudents).toBe(2);
-    expect(assignResult.createdObligations).toBe(4); // 2 students * 2 installments
+    const again = await admin.mutation(api.fees.assignStructure, { structureId, target: { kind: "class", classId: f.classId } });
+    expect(again.assigned).toBe(0);
+    expect(again.skipped.every((s) => s.reason === "already_assigned")).toBe(true);
 
-    // Second assignment skips existing
-    const reassignResult = await admin.mutation(api.fees.assignStructure, {
-      structureId,
-      classId: f.classId,
-    });
-    expect(reassignResult.createdObligations).toBe(0);
-
-    // List structures
     const structures = await admin.query(api.fees.listStructures, {});
-    expect(structures.length).toBe(1);
+    expect(structures).toHaveLength(1);
     expect(structures[0].totalMinor).toBe(700000);
     expect(structures[0].classNames).toContain("Grade 8");
+    expect(structures[0].assignedCount).toBe(2);
   });
 
-  test("atomic receipt generation, payment recording, ledger update, and notification delivery", async () => {
+  test("payments issue sequential receipts, update the ledger, notify the student (only), and reverse once", async () => {
     const t = makeTest();
     const f = await createSchool(t, "school-b");
     const admin = await as(t, f.users.admin);
     const student = await as(t, f.users.student);
-
-    // 1. Setup structure and assign to studentA
     const { structureId } = await admin.mutation(api.fees.createStructure, {
-      name: "Standard Fee",
-      classIds: [f.classId],
-      components: [{ label: "Tuition", amountMinor: 400000 }],
-      installments: [
-        { label: "Installment 1", dueDate: "2026-05-01", amountMinor: 200000 },
-        { label: "Installment 2", dueDate: "2026-09-01", amountMinor: 200000 },
-      ],
+      name: "Standard Fee", classIds: [f.classId], activate: true, components: [{ label: "Tuition", amountMinor: 400000 }],
+      installments: [{ label: "Installment 1", dueDate: "2026-05-01", amountMinor: 200000 }, { label: "Installment 2", dueDate: "2026-09-01", amountMinor: 200000 }],
     });
-    await admin.mutation(api.fees.assignStructure, { structureId, studentId: f.studentA });
+    await admin.mutation(api.fees.assignStructure, { structureId, target: { kind: "students", studentIds: [f.studentA] } });
 
-    // Initial student ledger shows full outstanding
-    const initialLedger = await student.query(api.fees.getStudentLedger, { studentId: f.studentA });
-    expect(initialLedger.totals.grossMinor).toBe(400000);
-    expect(initialLedger.totals.outstandingMinor).toBe(400000);
-    expect(initialLedger.totals.paidMinor).toBe(0);
+    const initial = await student.query(api.fees.studentLedger, { studentId: f.studentA });
+    expect(initial.totals).toMatchObject({ grossMinor: 400000, outstandingMinor: 400000, paidMinor: 0 });
 
-    // 2. Record first payment of 1500.00 (150000 paise)
-    const p1 = await admin.mutation(api.fees.recordPayment, {
-      studentId: f.studentA,
-      amountMinor: 150000,
-      method: "upi",
-      paidOn: "2026-05-02",
-      reference: "UPI/123456",
-      note: "Partial installment 1",
-    });
-    expect(p1.receiptNo).toBe("SC/26-27/0001");
+    const p1 = await admin.mutation(api.fees.recordPayment, { studentId: f.studentA, amountMinor: 150000, method: "upi", paidOn: "2026-05-02", reference: "UPI/123456", note: "Partial installment 1", clientRequestId: rid() });
+    const p2 = await admin.mutation(api.fees.recordPayment, { studentId: f.studentA, amountMinor: 100000, method: "cash", paidOn: "2026-05-03", clientRequestId: rid() });
+    expect(p1.receiptNo).toMatch(/\/0001$/);
+    expect(p2.receiptNo).toMatch(/\/0002$/);
 
-    // 3. Record second payment of 1000.00 (100000 paise)
-    const p2 = await admin.mutation(api.fees.recordPayment, {
-      studentId: f.studentA,
-      amountMinor: 100000,
-      method: "cash",
-      paidOn: "2026-05-03",
-    });
-    expect(p2.receiptNo).toBe("SC/26-27/0002");
+    const ledger = await student.query(api.fees.studentLedger, { studentId: f.studentA });
+    expect(ledger.totals).toMatchObject({ paidMinor: 250000, outstandingMinor: 150000 });
+    expect(ledger.payments).toHaveLength(2);
 
-    // 4. Verify student ledger after payments
-    const updatedLedger = await student.query(api.fees.getStudentLedger, { studentId: f.studentA });
-    expect(updatedLedger.totals.paidMinor).toBe(250000);
-    expect(updatedLedger.totals.outstandingMinor).toBe(150000);
-    expect(updatedLedger.payments.length).toBe(2);
-    expect(updatedLedger.payments[0].receiptNo).toBe("SC/26-27/0002");
-    expect(updatedLedger.payments[1].receiptNo).toBe("SC/26-27/0001");
-
-    // 5. Verify printable receipt query
-    const receipt = await admin.query(api.fees.getReceipt, { paymentId: p1.paymentId });
-    expect(receipt.receiptNo).toBe("SC/26-27/0001");
-    expect(receipt.amountMinor).toBe(150000);
-    expect(receipt.method).toBe("upi");
-    expect(receipt.studentName).toBe("Asha S");
+    const receipt = await admin.query(api.fees.receipt, { receiptId: p1.receiptId });
+    expect(receipt.receiptNo).toBe(p1.receiptNo);
+    expect(receipt.payment).toMatchObject({ amountMinor: 150000, method: "upi", reversed: false });
+    expect(receipt.student.name).toBe("Asha S");
     expect(receipt.school.name).toBe("School school-b");
 
-    // 6. Verify notification was sent to student and linked guardian
-    const studentNotifs = await student.query(api.notifications.list, {});
-    const feeNotifs = studentNotifs.filter((n) => n.type === "fees");
-    expect(feeNotifs.length).toBe(2);
-    expect(feeNotifs.some((n) => n.message.includes("SC/26-27/0001"))).toBe(true);
-    expect(feeNotifs.some((n) => n.message.includes("SC/26-27/0002"))).toBe(true);
+    const studentFees = (await student.query(api.notifications.list, {})).filter((n) => n.type === "fees");
+    expect(studentFees).toHaveLength(2);
+    expect(studentFees.some((n) => n.message.includes(p1.receiptNo))).toBe(true);
+    expect(studentFees.some((n) => n.message.includes(p2.receiptNo))).toBe(true);
+    // No parent/guardian accounts: a leftover guardian sign-in gets no fee notifications.
+    expect(await t.run(async (ctx) => (await ctx.db.query("notifications").collect()).some((n) => n.userId === f.users.legacyGuardian))).toBe(false);
 
-    const guardian = await as(t, f.users.guardian);
-    const guardianNotifs = await guardian.query(api.notifications.list, {});
-    expect(guardianNotifs.some((n) => n.type === "fees")).toBe(true);
-
-    // 7. Test payment reversal
-    const rev = await admin.mutation(api.fees.reversePayment, {
-      paymentId: p2.paymentId,
-      reason: "Cheque bounce / duplicate",
-    });
-    expect(rev.ok).toBe(true);
-
-    // After reversal, outstanding balance is restored
-    const ledgerAfterReversal = await student.query(api.fees.getStudentLedger, { studentId: f.studentA });
-    expect(ledgerAfterReversal.totals.paidMinor).toBe(150000);
-    expect(ledgerAfterReversal.totals.outstandingMinor).toBe(250000);
-
-    // Cannot reverse twice
-    const doubleRevErr = await errorCode(
-      admin.mutation(api.fees.reversePayment, {
-        paymentId: p2.paymentId,
-        reason: "Try again",
-      }),
-    );
-    expect(doubleRevErr).toBe("INVALID_ARGUMENT");
+    await admin.mutation(api.fees.reversePayment, { paymentId: p2.paymentId, reason: "Cheque bounce / duplicate" });
+    const after = await student.query(api.fees.studentLedger, { studentId: f.studentA });
+    expect(after.totals).toMatchObject({ paidMinor: 150000, outstandingMinor: 250000 });
+    expect(await errorCode(admin.mutation(api.fees.reversePayment, { paymentId: p2.paymentId, reason: "Try again" }))).toBe("CONFLICT");
   });
 
-  test("fee concessions and balance listing with standing filters", async () => {
+  test("a percentage concession reduces the balance listing; nothing collected yet", async () => {
     const t = makeTest();
     const f = await createSchool(t, "school-c");
     const admin = await as(t, f.users.admin);
-
-    // Create and assign structure (500000 paise)
     const { structureId } = await admin.mutation(api.fees.createStructure, {
-      name: "Annual Fee",
-      classIds: [f.classId],
-      components: [{ label: "Tuition", amountMinor: 500000 }],
+      name: "Annual Fee", classIds: [f.classId], activate: true, components: [{ label: "Tuition", amountMinor: 500000 }],
       installments: [{ label: "Full", dueDate: "2026-04-15", amountMinor: 500000 }],
     });
-    await admin.mutation(api.fees.assignStructure, { structureId, classId: f.classId });
+    await admin.mutation(api.fees.assignStructure, { structureId, target: { kind: "class", classId: f.classId } });
+    await admin.mutation(api.fees.addConcession, { studentId: f.studentA, kind: "percent", value: 2000, reason: "Sibling scholarship" });
 
-    // Grant 20% concession (2000 basis points) to studentA
-    await admin.mutation(api.fees.createConcession, {
-      studentId: f.studentA,
-      kind: "percent",
-      value: 2000,
-      reason: "Sibling scholarship",
-    });
+    const { rows } = await admin.query(api.fees.listBalances, {});
+    const a = rows.find((r) => r.studentId === f.studentA);
+    expect(a).toMatchObject({ netMinor: 400000, outstandingMinor: 400000, standing: "overdue" });
+    const b = rows.find((r) => r.studentId === f.studentB);
+    expect(b?.outstandingMinor).toBe(500000);
+    const overdue = await admin.query(api.fees.listBalances, { standing: "overdue" });
+    expect(overdue.rows.map((r) => r.studentId).sort()).toEqual([f.studentA, f.studentB].sort());
 
-    // Check balances
-    const balances = await admin.query(api.fees.listBalances, {});
-    const aBal = balances.find((b) => b.studentId === f.studentA);
-    expect(aBal).toBeDefined();
-    expect(aBal?.netMinor).toBe(400000); // 500000 - 20% (100000)
-    expect(aBal?.outstandingMinor).toBe(400000);
-
-    // Collection summary
-    const summary = await admin.query(api.fees.collectionSummary, {});
-    expect(summary.collectedMinor).toBe(0);
-    expect(summary.netMinor).toBeGreaterThan(0);
+    const summary = await admin.query(api.fees.collectionSummary, { from: "2026-04-01", to: "2026-10-01" });
+    expect(summary).toMatchObject({ totalMinor: 0, payments: 0 });
   });
 
-  test("school-wide listPayments query with authorization, tenant isolation, and filters", async () => {
+  test("listPayments: fee managers only, school-isolated, with method / date / search / class filters", async () => {
     const t = makeTest();
     const f1 = await createSchool(t, "school-x");
     const f2 = await createSchool(t, "school-y");
-
     const admin1 = await as(t, f1.users.admin);
-    const teacher1 = await as(t, f1.users.classTeacher);
-    const student1 = await as(t, f1.users.student);
     const admin2 = await as(t, f2.users.admin);
+    expect(await errorCode((await as(t, f1.users.classTeacher)).query(api.fees.listPayments, {}))).toBe("FORBIDDEN");
+    expect(await errorCode((await as(t, f1.users.student)).query(api.fees.listPayments, {}))).toBe("FORBIDDEN");
 
-    // 1. Authorization: Non-admin users cannot access school-wide payment list
-    const teacherErr = await errorCode(teacher1.query(api.fees.listPayments, {}));
-    expect(teacherErr).toBe("FORBIDDEN");
+    const setupFee = async (admin: typeof admin1, f: School, amountMinor: number) => {
+      const { structureId } = await admin.mutation(api.fees.createStructure, {
+        name: "Standard Fee", classIds: [f.classId], activate: true, components: [{ label: "Tuition", amountMinor }],
+        installments: [{ label: "Term 1", dueDate: "2026-05-01", amountMinor }],
+      });
+      await admin.mutation(api.fees.assignStructure, { structureId, target: { kind: "class", classId: f.classId } });
+    };
+    await setupFee(admin1, f1, 500000);
+    await setupFee(admin2, f2, 300000);
+    const pay1 = await admin1.mutation(api.fees.recordPayment, { studentId: f1.studentA, amountMinor: 200000, method: "upi", paidOn: "2026-05-02", reference: "UPI/TXN/999", clientRequestId: rid() });
+    const pay2 = await admin1.mutation(api.fees.recordPayment, { studentId: f1.studentB, amountMinor: 150000, method: "cash", paidOn: "2026-05-10", reference: "CASH-RECEIPT-01", clientRequestId: rid() });
+    const payS2 = await admin2.mutation(api.fees.recordPayment, { studentId: f2.studentA, amountMinor: 300000, method: "online", paidOn: "2026-05-05", reference: "NETBANK/S2/001", clientRequestId: rid() });
 
-    const studentErr = await errorCode(student1.query(api.fees.listPayments, {}));
-    expect(studentErr).toBe("FORBIDDEN");
+    const s1 = (await admin1.query(api.fees.listPayments, {})).rows;
+    expect(s1.map((p) => p.paymentId).sort()).toEqual([pay1.paymentId, pay2.paymentId].sort());
+    const s2 = (await admin2.query(api.fees.listPayments, {})).rows;
+    expect(s2.map((p) => p.paymentId)).toEqual([payS2.paymentId]);
+    expect(s2[0].method).toBe("online");
 
-    // 2. Setup fee structure in school 1
-    const { structureId: s1 } = await admin1.mutation(api.fees.createStructure, {
-      name: "Standard Fee S1",
-      classIds: [f1.classId],
-      components: [{ label: "Tuition", amountMinor: 500000 }],
-      installments: [{ label: "Term 1", dueDate: "2026-05-01", amountMinor: 500000 }],
-    });
-    await admin1.mutation(api.fees.assignStructure, { structureId: s1, classId: f1.classId });
+    expect(s1[0]).toMatchObject({ paidOn: "2026-05-10", method: "cash", amountMinor: 150000 });
+    expect(s1[0].receiptNo).toBeTruthy();
+    expect(s1[0].studentName).toBeTruthy();
+    expect(s1[0].admissionNo).toBeTruthy();
+    expect(s1[0].classLabel).toBe("8-B");
 
-    // Record two payments in school 1: one UPI on 2026-05-02, one Cash on 2026-05-10
-    const pay1 = await admin1.mutation(api.fees.recordPayment, {
-      studentId: f1.studentA,
-      amountMinor: 200000,
-      method: "upi",
-      paidOn: "2026-05-02",
-      reference: "UPI/TXN/999",
-    });
-
-    const pay2 = await admin1.mutation(api.fees.recordPayment, {
-      studentId: f1.studentB,
-      amountMinor: 150000,
-      method: "cash",
-      paidOn: "2026-05-10",
-      reference: "CASH-RECEIPT-01",
-    });
-
-    // Setup and record one payment in school 2
-    const { structureId: s2 } = await admin2.mutation(api.fees.createStructure, {
-      name: "Standard Fee S2",
-      classIds: [f2.classId],
-      components: [{ label: "Tuition", amountMinor: 300000 }],
-      installments: [{ label: "Term 1", dueDate: "2026-05-01", amountMinor: 300000 }],
-    });
-    await admin2.mutation(api.fees.assignStructure, { structureId: s2, classId: f2.classId });
-
-    const paySchool2 = await admin2.mutation(api.fees.recordPayment, {
-      studentId: f2.studentA,
-      amountMinor: 300000,
-      method: "online",
-      paidOn: "2026-05-05",
-      reference: "NETBANK/S2/001",
-    });
-
-    // 3. Tenant isolation: admin 1 only sees school 1 payments, admin 2 only sees school 2 payments
-    const paymentsS1 = await admin1.query(api.fees.listPayments, {});
-    expect(paymentsS1.length).toBe(2);
-    expect(paymentsS1.some((p) => p.paymentId === pay1.paymentId)).toBe(true);
-    expect(paymentsS1.some((p) => p.paymentId === pay2.paymentId)).toBe(true);
-    expect(paymentsS1.some((p) => p.paymentId === paySchool2.paymentId)).toBe(false);
-
-    const paymentsS2 = await admin2.query(api.fees.listPayments, {});
-    expect(paymentsS2.length).toBe(1);
-    expect(paymentsS2[0].paymentId).toBe(paySchool2.paymentId);
-    expect(paymentsS2[0].method).toBe("online");
-
-    // 4. Verification of item structure
-    const firstRow = paymentsS1[0]; // ordered desc by date (2026-05-10 first)
-    expect(firstRow.paidOn).toBe("2026-05-10");
-    expect(firstRow.method).toBe("cash");
-    expect(firstRow.amountMinor).toBe(150000);
-    expect(firstRow.receiptNo).toBeDefined();
-    expect(firstRow.studentName).toBeDefined();
-    expect(firstRow.admissionNo).toBeDefined();
-    expect(firstRow.classLabel).toBeDefined();
-
-    // 5. Method filter
-    const upiOnly = await admin1.query(api.fees.listPayments, { method: "upi" });
-    expect(upiOnly.length).toBe(1);
-    expect(upiOnly[0].paymentId).toBe(pay1.paymentId);
-    expect(upiOnly[0].method).toBe("upi");
-
-    // 6. Date range filter
-    const dateFiltered = await admin1.query(api.fees.listPayments, { from: "2026-05-05", to: "2026-05-15" });
-    expect(dateFiltered.length).toBe(1);
-    expect(dateFiltered[0].paymentId).toBe(pay2.paymentId);
-
-    // 7. Search filter by reference or receipt
-    const searchByRef = await admin1.query(api.fees.listPayments, { search: "TXN/999" });
-    expect(searchByRef.length).toBe(1);
-    expect(searchByRef[0].paymentId).toBe(pay1.paymentId);
-
-    // 8. Class filter
-    const classFiltered = await admin1.query(api.fees.listPayments, { classId: f1.classId });
-    expect(classFiltered.length).toBe(2);
+    expect((await admin1.query(api.fees.listPayments, { method: "upi" })).rows.map((p) => p.paymentId)).toEqual([pay1.paymentId]);
+    expect((await admin1.query(api.fees.listPayments, { from: "2026-05-05", to: "2026-05-15" })).rows.map((p) => p.paymentId)).toEqual([pay2.paymentId]);
+    expect((await admin1.query(api.fees.listPayments, { search: "TXN/999" })).rows.map((p) => p.paymentId)).toEqual([pay1.paymentId]);
+    expect((await admin1.query(api.fees.listPayments, { classId: f1.classId })).rows).toHaveLength(2);
+    // A class id from another school is rejected, not silently empty.
+    expect(await errorCode(admin1.query(api.fees.listPayments, { classId: f2.classId }))).toBe("NOT_FOUND");
   });
 
   test("strict overpayment restriction and FIFO allocation validation", async () => {
@@ -319,8 +336,9 @@ describe("Fees, payments and receipts (AP-01)", () => {
         { label: "Term 1", dueDate: "2026-05-01", amountMinor: 100000 },
         { label: "Term 2", dueDate: "2026-10-01", amountMinor: 100000 },
       ],
+      activate: true,
     });
-    await admin.mutation(api.fees.assignStructure, { structureId, studentId: f.studentA });
+    await admin.mutation(api.fees.assignStructure, { structureId, target: { kind: "students", studentIds: [f.studentA] } });
 
     // 1. Overpayment rejection: trying to pay 250000 paise when total due is 200000 paise
     const overpayErr = await errorCode(
@@ -329,6 +347,7 @@ describe("Fees, payments and receipts (AP-01)", () => {
         amountMinor: 250000,
         method: "cash",
         paidOn: "2026-05-02",
+        clientRequestId: "req-overpay-1",
       }),
     );
     expect(overpayErr).toBe("INVALID_ARGUMENT");
@@ -341,15 +360,16 @@ describe("Fees, payments and receipts (AP-01)", () => {
       method: "bank_transfer",
       paidOn: "2026-05-05",
       reference: "NEFT-1400",
+      clientRequestId: "req-fifo-1",
     });
     expect(p1.receiptNo).toBeDefined();
 
-    const ledgerAfterP1 = await student.query(api.fees.getStudentLedger, { studentId: f.studentA });
+    const ledgerAfterP1 = await student.query(api.fees.studentLedger, { studentId: f.studentA });
     expect(ledgerAfterP1.totals.paidMinor).toBe(140000);
     expect(ledgerAfterP1.totals.outstandingMinor).toBe(60000);
 
-    const term1 = ledgerAfterP1.obligations.find((o) => o.label === "Term 1");
-    const term2 = ledgerAfterP1.obligations.find((o) => o.label === "Term 2");
+    const term1 = ledgerAfterP1.obligations.find((o) => o.label.includes("Term 1"));
+    const term2 = ledgerAfterP1.obligations.find((o) => o.label.includes("Term 2"));
     expect(term1?.paidMinor).toBe(100000);
     expect(term1?.outstandingMinor).toBe(0);
     expect(term2?.paidMinor).toBe(40000);
@@ -362,6 +382,7 @@ describe("Fees, payments and receipts (AP-01)", () => {
         amountMinor: 70000,
         method: "cash",
         paidOn: "2026-05-10",
+        clientRequestId: "req-overpay-2",
       }),
     );
     expect(secondOverpayErr).toBe("INVALID_ARGUMENT");
@@ -375,6 +396,7 @@ describe("Fees, payments and receipts (AP-01)", () => {
           method: "cash",
           paidOn: "2026-05-10",
           allocations: [{ studentFeeId: term2.obligationId, amountMinor: 80000 }],
+          clientRequestId: "req-alloc-overpay",
         }),
       );
       expect(explicitOverpayErr).toBe("INVALID_ARGUMENT");
@@ -386,10 +408,11 @@ describe("Fees, payments and receipts (AP-01)", () => {
       amountMinor: 60000,
       method: "cash",
       paidOn: "2026-05-10",
+      clientRequestId: "req-exact-payment",
     });
     expect(p2.receiptNo).toBeDefined();
 
-    const finalLedger = await student.query(api.fees.getStudentLedger, { studentId: f.studentA });
+    const finalLedger = await student.query(api.fees.studentLedger, { studentId: f.studentA });
     expect(finalLedger.totals.paidMinor).toBe(200000);
     expect(finalLedger.totals.outstandingMinor).toBe(0);
   });

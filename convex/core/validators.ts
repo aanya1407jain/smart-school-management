@@ -6,11 +6,17 @@
  */
 import { v, type Infer } from "convex/values";
 import { ROLES, PERMISSION_SET_NAMES } from "./permissions";
+import { ACTIONS } from "./grants";
 import { invalid } from "./errors";
 import { canonicalLoginId, LOGIN_ID_RULES_TEXT } from "../model/loginIds";
 
 // ---------------------------------------------------------------- enums
 export const vRole = v.union(v.literal("admin"), v.literal("teacher"), v.literal("student"));
+
+/** Grant actions (core/grants.ts). */
+export const vAction = v.union(v.literal("view"), v.literal("create"), v.literal("edit"), v.literal("delete"), v.literal("approve"), v.literal("export"));
+const _actionsMatch: readonly Infer<typeof vAction>[] = ACTIONS;
+void _actionsMatch;
 export type RoleValue = Infer<typeof vRole>;
 // Compile-time guard: vRole must match the permission catalogue.
 const _rolesMatch: readonly RoleValue[] = ROLES;
@@ -68,8 +74,12 @@ export const vNotificationType = v.union(
 );
 export const vFileKind = v.union(
   v.literal("student_document"), v.literal("profile_photo"), v.literal("receipt"), v.literal("report_card"), v.literal("school_document"),
+  v.literal("homework_attachment"), v.literal("submission_attachment"),
 );
-export const vFileOwnerType = v.union(v.literal("student"), v.literal("teacher"), v.literal("school"), v.literal("receipt"), v.literal("result"));
+export const vFileOwnerType = v.union(
+  v.literal("student"), v.literal("teacher"), v.literal("school"), v.literal("receipt"), v.literal("result"),
+  v.literal("homework"), v.literal("submission"),
+);
 
 /** Who a notice / event is addressed to. Resolved server-side, never trusted from the client for visibility. */
 export const vAudience = v.union(

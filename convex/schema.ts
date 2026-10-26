@@ -19,11 +19,12 @@
 import { defineSchema, defineTable } from "convex/server";
 import { authTables } from "@convex-dev/auth/server";
 import { v } from "convex/values";
+import { vModuleKey } from "./core/modules";
 import {
   vAcademicYearStatus, vAttendanceStatus, vAudience, vConcessionKind, vEnrollmentStatus, vEntityRef, vEventKind,
   vExamStatus, vFileKind, vFileOwnerType, vGender, vHomeworkStatus, vLeaveStatus, vLeaveType, vMembershipStatus, vNoticeStatus,
   vNoticeType, vNotificationType, vPaymentMethod, vPaymentStatus, vPermissionSet, vPersonStatus, vPriority, vRole, vSchoolStatus,
-  vStaffAttendanceStatus, vStaffStatus, vSubmissionStatus,
+  vStaffAttendanceStatus, vStaffStatus, vSubmissionStatus, vAction,
 } from "./core/validators";
 
 export default defineSchema({
@@ -106,12 +107,35 @@ export default defineSchema({
   }).index("by_school", ["schoolId"]),
 
   /**
+   * Module entitlements: which configurable modules (convex/core/modules.ts)
+   * a school may use. One row per (school, module), written only by the
+   * deployment operator (internal schoolModules.setSchoolModules). A school
+   * with NO rows is unconfigured and keeps the original modules; a configured
+   * school has a module only if its row says enabled (convex/model/modules.ts).
+   * Disabling never deletes the module's data.
+   */
+  schoolModules: defineTable({
+    schoolId: v.id("schools"),
+    module: vModuleKey,
+    enabled: v.boolean(),
+    /** When this row last changed (ms). `_creationTime` is when it was created. */
+    updatedAt: v.number(),
+    /** Who changed it: the operator's name or reference as given to the internal mutation. */
+    updatedBy: v.string(),
+    /** Why (e.g. the subscription or ticket reference). */
+    reason: v.string(),
+  }).index("by_school", ["schoolId"])
+    .index("by_school_module", ["schoolId", "module"]),
+
+  /**
    * A user's access to ONE school. This is the only thing that grants access.
-   * role = portal (admin | teacher | student). Links:
+   * role = portal (admin | teacher | student) — the ONLY three account roles.
+   * Links:
    *  - teacher role → teacherId (required)
-   *  - student role → studentId (the student) OR guardianId (a guardian using
-   *    the student portal for their linked children). Exactly one of the two.
+   *  - student role → studentId (required): the student's own account
    *  - admin role   → optionally teacherId if the principal also teaches.
+   * There are no parent/guardian accounts. Parent contact details are plain
+   * records on the student (`guardians` + `guardianLinks` tables below).
    * Accounts are created by the school, never self-registered: an admin (or
    * the deployment setup / import) creates the membership with status
    * "invited" and a reserved `loginId`; creating the Convex Auth account for
@@ -130,6 +154,26 @@ export default defineSchema({
     permissionSets: v.array(vPermissionSet),
     teacherId: v.optional(v.id("teachers")),
     studentId: v.optional(v.id("students")),
+    /**
+     * Per-member module × action grants set by the Principal (core/grants.ts,
+     * memberships.setPermissions). On an ADMIN membership, present (even
+     * empty) = a restricted office login with exactly these grants; absent =
+     * full administrator. On a TEACHER membership: extra duties on top of
+     * teaching. Never on students.
+     */
+    grants: v.optional(v.array(v.object({ module: vModuleKey, actions: v.array(vAction) }))),
+    /** Label for the member's access, e.g. "Accountant" (display only; never used for authorization). */
+    accessProfile: v.optional(v.string()),
+    /** Teachers only: extra sections their Students/Attendance VIEW grants cover (instead of school-wide). */
+    sectionScope: v.optional(v.array(v.id("sections"))),
+    /**
+     * LEGACY — set only on memberships of the removed guardian sign-in. Never
+     * written any more and never accepted for access (core/actor.ts). Kept
+     * optional so not-yet-migrated deployments still validate; the one-off
+     * internal migration `migrations:removeGuardianAccounts` deletes those
+     * memberships. Remove this field and `by_guardian` after every deployment
+     * has run it.
+     */
     guardianId: v.optional(v.id("guardians")),
     /** Administrator who created the account (absent for setup/seed). */
     createdByUserId: v.optional(v.id("users")),
@@ -276,10 +320,64 @@ export default defineSchema({
     address: v.optional(v.string()),
     bloodGroup: v.optional(v.string()),
     photoStorageId: v.optional(v.id("_storage")),
+    /**
+     * The school's own register number ("scholar number"), entered by the
+     * office. Optional; UNIQUE per school (checked in every mutation that sets
+     * it — model/scholarNumbers.ts). `scholarNoKey` is the normalised form the
+     * uniqueness check and lookups use (upper case, no spaces).
+     */
+    scholarNo: v.optional(v.string()),
+    scholarNoKey: v.optional(v.string()),
   })
     .index("by_school_admission", ["schoolId", "admissionNo"])
-    .index("by_school_status_name", ["schoolId", "status", "lastName"]),
+    .index("by_school_status_name", ["schoolId", "status", "lastName"])
+    .index("by_school_scholar", ["schoolId", "scholarNoKey"]),
 
+  /**
+   * Transfer certificates (TC) issued when a student leaves the school
+   * (convex/studentLifecycle.ts). Historical record: never deleted; a
+   * cancelled TC keeps its row and number. `snapshot` freezes what the
+   * certificate states (name, numbers, class, dates) at issue time.
+   */
+  transferCertificates: defineTable({
+    schoolId: v.id("schools"),
+    studentId: v.id("students"),
+    tcNo: v.string(),
+    status: v.union(v.literal("issued"), v.literal("cancelled")),
+    issueDate: v.string(),
+    leavingDate: v.string(),
+    reason: v.string(),
+    conduct: v.optional(v.string()),
+    destinationSchool: v.optional(v.string()),
+    remarks: v.optional(v.string()),
+    /** Student status before the TC (restored if the TC is cancelled). */
+    previousStatus: vPersonStatus,
+    /** The enrollment the TC ended (null if the student had none in the current year). */
+    endedEnrollmentId: v.optional(v.id("enrollments")),
+    snapshot: v.object({
+      studentName: v.string(),
+      admissionNo: v.string(),
+      scholarNo: v.optional(v.string()),
+      dateOfBirth: v.optional(v.string()),
+      admissionDate: v.optional(v.string()),
+      lastClass: v.optional(v.string()),
+      lastSection: v.optional(v.string()),
+      academicYear: v.optional(v.string()),
+      parentName: v.optional(v.string()),
+    }),
+    issuedByUserId: v.id("users"),
+    cancelledAt: v.optional(v.number()),
+    cancelReason: v.optional(v.string()),
+    cancelledByUserId: v.optional(v.id("users")),
+  })
+    .index("by_school_student", ["schoolId", "studentId"])
+    .index("by_school_number", ["schoolId", "tcNo"]),
+
+  /**
+   * Parent contacts of students (name, phone, email…). CONTACT DATA ONLY — a
+   * parent contact never has an account or any access. (Storage name kept from
+   * the original design; shown in the product as "Parent contact".)
+   */
   guardians: defineTable({
     schoolId: v.id("schools"),
     name: v.string(),
@@ -289,12 +387,12 @@ export default defineSchema({
     address: v.optional(v.string()),
   }).index("by_school_phone", ["schoolId", "phone"]),
 
-  /** Guardian ↔ student (many-to-many). The ONLY basis for guardian data access. */
+  /** Parent contact ↔ student (many-to-many). Contact data only; grants no access. */
   guardianLinks: defineTable({
     schoolId: v.id("schools"),
     guardianId: v.id("guardians"),
     studentId: v.id("students"),
-    relationship: v.string(), // "Mother", "Father", "Guardian", …
+    relationship: v.string(), // "Mother", "Father", "Grandparent", …
     isPrimary: v.boolean(),
   })
     .index("by_guardian", ["guardianId"])
@@ -391,7 +489,9 @@ export default defineSchema({
     status: v.union(v.literal("active"), v.literal("cancelled")),
   })
     .index("by_student_year", ["studentId", "academicYearId"])
-    .index("by_school_due", ["schoolId", "dueDate"]),
+    .index("by_school_due", ["schoolId", "dueDate"])
+    .index("by_structure", ["feeStructureId"])
+    .index("by_school_year", ["schoolId", "academicYearId"]),
 
   feeConcessions: defineTable({
     schoolId: v.id("schools"),
@@ -405,7 +505,9 @@ export default defineSchema({
     reason: v.string(),
     approvedByUserId: v.id("users"),
     status: v.union(v.literal("active"), v.literal("revoked")),
-  }).index("by_student_year", ["studentId", "academicYearId"]),
+  })
+    .index("by_student_year", ["studentId", "academicYearId"])
+    .index("by_school_year", ["schoolId", "academicYearId"]),
 
   /** Append-only payment transactions. A reversal is a new row pointing at the original. */
   feePayments: defineTable({
@@ -421,9 +523,17 @@ export default defineSchema({
     allocations: v.array(v.object({ studentFeeId: v.id("studentFees"), amountMinor: v.number() })),
     recordedByUserId: v.id("users"),
     note: v.optional(v.string()),
+    /**
+     * Client-generated id of the "record payment" request (fees.recordPayment).
+     * A retried request with the same id returns the original payment instead
+     * of charging twice. Absent on rows written before it existed.
+     */
+    clientRequestId: v.optional(v.string()),
   })
     .index("by_student_paid", ["studentId", "paidOn"])
-    .index("by_school_paid", ["schoolId", "paidOn"]),
+    .index("by_school_paid", ["schoolId", "paidOn"])
+    .index("by_school_request", ["schoolId", "clientRequestId"])
+    .index("by_school_year", ["schoolId", "academicYearId"]),
 
   receipts: defineTable({
     schoolId: v.id("schools"),
@@ -535,7 +645,8 @@ export default defineSchema({
     room: v.optional(v.string()),
   })
     .index("by_section_day_period", ["sectionId", "dayOfWeek", "periodId"])
-    .index("by_teacher_day_period", ["teacherId", "dayOfWeek", "periodId"]),
+    .index("by_teacher_day_period", ["teacherId", "dayOfWeek", "periodId"])
+    .index("by_school_day_period", ["schoolId", "dayOfWeek", "periodId"]),
 
   // ============================================================ homework
   homework: defineTable({
@@ -581,6 +692,8 @@ export default defineSchema({
     expiresOn: v.optional(v.string()),
     eventDate: v.optional(v.string()),
     createdByUserId: v.id("users"),
+    /** Set when the notice is first published (ms). Lets an archived notice be restored to the state it had. */
+    publishedAt: v.optional(v.number()),
   }).index("by_school_status_publish", ["schoolId", "status", "publishDate"]),
 
   events: defineTable({
@@ -604,9 +717,17 @@ export default defineSchema({
     readAt: v.optional(v.number()),
     href: v.optional(v.string()),
     entity: v.optional(vEntityRef),
+    /**
+     * Identifies the event that caused the notification (e.g.
+     * "homework.created:<id>"). notifyUsers never writes a second
+     * notification with the same key for the same user, so a repeated trigger
+     * cannot notify twice. Absent on older rows.
+     */
+    dedupeKey: v.optional(v.string()),
   })
     .index("by_user_school", ["userId", "schoolId"])
-    .index("by_user_school_read", ["userId", "schoolId", "isRead"]),
+    .index("by_user_school_read", ["userId", "schoolId", "isRead"])
+    .index("by_user_dedupe", ["userId", "dedupeKey"]),
 
   // ============================================================ platform
   /**

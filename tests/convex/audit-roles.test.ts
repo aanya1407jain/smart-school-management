@@ -7,7 +7,7 @@
 import { describe, expect, test } from "vitest";
 import { api, internal } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
-import { as, createSchool, makeTest, type T } from "./fixtures";
+import { as, createSchool, errorCode, makeTest, type T } from "./fixtures";
 import { activatePendingAccount, reserveAccount } from "../../convex/model/accounts";
 
 async function setup() {
@@ -79,21 +79,24 @@ describe("audit: actor role vs target role", () => {
     ]);
   });
 
-  test("teacher and guardian accounts record their own target role/kind; actor stays admin", async () => {
+  test("teacher and office accounts record their own target role/kind; actor stays admin", async () => {
     const { t, A, admin } = await setup();
     const extraTeacher = await t.run((ctx) => ctx.db.insert("teachers", { schoolId: A.schoolId, employeeId: "E-AR", firstName: "Nina", lastName: "Rao", specializationSubjectIds: [], status: "active" }));
-    const guardianId = await t.run(async (ctx) => (await ctx.db.query("guardians").first())!._id);
-    await t.run(async (ctx) => { // the fixture guardian already has an account; free it for this test
-      const m = (await ctx.db.query("schoolMemberships").withIndex("by_guardian", (q) => q.eq("guardianId", guardianId)).first())!;
-      await ctx.db.delete(m._id);
-    });
     await admin.action(api.accounts.create, { person: { kind: "teacher", teacherId: extraTeacher } });
-    await admin.action(api.accounts.create, { person: { kind: "guardian", guardianId } });
+    await admin.action(api.accounts.create, { person: { kind: "staff", displayName: "Office", accountantOnly: true } });
     const events = await createdEvents(t);
     expect(events.map((e) => [e.actorRole, (e.metadata as { targetRole: string }).targetRole, (e.metadata as { targetKind: string }).targetKind])).toEqual([
       ["admin", "teacher", "teacher"],
-      ["admin", "student", "guardian"],
+      ["admin", "admin", "admin"],
     ]);
+  });
+
+  test("a guardian account can no longer be created through the API (only admin, teacher, student)", async () => {
+    const { t, A, admin } = await setup();
+    const contactId = A.parentContactId;
+    // Rejected by the argument validator: "guardian" is no longer a person kind.
+    expect(await errorCode(admin.action(api.accounts.create, { person: { kind: "guardian", guardianId: contactId } } as never))).toMatch(/^THROWN: .*(ArgumentValidationError|Validator)/s);
+    expect(await t.run(async (ctx) => (await ctx.db.query("schoolMemberships").collect()).filter((m) => m.guardianId && m._id !== A.memberships.legacyGuardian).length)).toBe(0);
   });
 
   test("actorRole is derived from the creator's membership, not assumed to be admin", async () => {

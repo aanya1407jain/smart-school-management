@@ -21,7 +21,9 @@ import { ResultCard } from "@/features/examinations/result-card";
  * Real records use the Convex-backed view in ./student-profile.tsx.
  */
 export function DemoStudentProfileBody({ p, backHref }: { p: Profile; backHref?: string }) {
-  const { can } = useSession();
+  const { can, hasModule } = useSession();
+  // Demo data; sections follow the school's module entitlements like the live profile does.
+  const A = hasModule("attendance"), AC = hasModule("academics"), F = hasModule("finance"), S = hasModule("students");
   const s = p.student;
   const name = `${s.firstName} ${s.lastName}`;
   const age = Math.floor(daysBetween(s.dateOfBirth, todayISO()) / 365.25);
@@ -29,12 +31,11 @@ export function DemoStudentProfileBody({ p, backHref }: { p: Profile; backHref?:
   const tabs = [
     { value: "overview", label: "Overview" },
     { value: "academic", label: "Academic" },
-    { value: "attendance", label: "Attendance" },
-    ...(p.fees ? [{ value: "fees", label: "Fees" }] : []),
-    { value: "exams", label: "Examinations", count: p.results.length },
-    { value: "homework", label: "Homework", count: p.homework.length },
-    { value: "documents", label: "Documents", count: s.documents.length },
-    { value: "guardian", label: "Guardian" },
+    ...(A ? [{ value: "attendance", label: "Attendance" }] : []),
+    ...(p.fees && F ? [{ value: "fees", label: "Fees" }] : []),
+    ...(AC ? [{ value: "exams", label: "Examinations", count: p.results.length }, { value: "homework", label: "Homework", count: p.homework.length }] : []),
+    ...(S ? [{ value: "documents", label: "Documents", count: s.documents.length }] : []),
+    { value: "parent", label: "Parent contact" },
   ];
   const pendingHw = p.homework.filter((h) => h.status === "pending" || h.status === "overdue").length;
 
@@ -58,15 +59,15 @@ export function DemoStudentProfileBody({ p, backHref }: { p: Profile; backHref?:
           </div>
           <div className="flex flex-wrap gap-2">
             {backHref && <LinkButton href={backHref} variant="ghost">Back</LinkButton>}
-            {isAdmin && <LinkButton href={`/admin/fees/${s.id}`} variant="outline"><Wallet className="h-4 w-4" /> Fee ledger</LinkButton>}
+            {isAdmin && F && <LinkButton href={`/admin/fees/${s.id}`} variant="outline"><Wallet className="h-4 w-4" /> Fee ledger</LinkButton>}
             {isAdmin && <LinkButton href={`/admin/students/${s.id}/edit`}><Pencil className="h-4 w-4" /> Edit</LinkButton>}
           </div>
         </div>
         <dl className="relative mt-6 grid grid-cols-2 gap-4 border-t border-white/70 pt-5 sm:grid-cols-4">
-          <Metric label="Attendance" value={formatPercent(p.attendance.stats.percentage, 1)} tone={(p.attendance.stats.percentage ?? 100) < 85 ? "warn" : undefined} />
-          <Metric label="Latest result" value={p.results[0]?.percentage != null ? `${formatPercent(p.results[0].percentage, 1)} · ${p.results[0].grade}` : "—"} />
-          <Metric label="Pending homework" value={String(pendingHw)} />
-          <Metric label="Fee balance" value={p.fees ? (p.fees.totals.outstanding ? formatCurrency(p.fees.totals.outstanding) : "Paid") : "Restricted"} tone={p.fees?.standing === "overdue" ? "warn" : undefined} />
+          {A && <Metric label="Attendance" value={formatPercent(p.attendance.stats.percentage, 1)} tone={(p.attendance.stats.percentage ?? 100) < 85 ? "warn" : undefined} />}
+          {AC && <Metric label="Latest result" value={p.results[0]?.percentage != null ? `${formatPercent(p.results[0].percentage, 1)} · ${p.results[0].grade}` : "—"} />}
+          {AC && <Metric label="Pending homework" value={String(pendingHw)} />}
+          {F && <Metric label="Fee balance" value={p.fees ? (p.fees.totals.outstanding ? formatCurrency(p.fees.totals.outstanding) : "Paid") : "Restricted"} tone={p.fees?.standing === "overdue" ? "warn" : undefined} />}
         </dl>
       </GlassCard>
 
@@ -88,7 +89,7 @@ export function DemoStudentProfileBody({ p, backHref }: { p: Profile; backHref?:
               </dl>
             </Card>
             <Card>
-              <CardHeader title="Primary guardian" />
+              <CardHeader title="Parent contact" />
               <div className="p-5">
                 {p.guardians[0] ? (
                   <div className="flex items-start gap-3">
@@ -100,7 +101,7 @@ export function DemoStudentProfileBody({ p, backHref }: { p: Profile; backHref?:
                       <p className="text-ink-soft">{p.guardians[0].email}</p>
                     </div>
                   </div>
-                ) : <EmptyState title="No guardian linked" />}
+                ) : <EmptyState title="No parent contact recorded" />}
               </div>
               {p.account && <p className="border-t border-line/60 px-5 py-3 text-[12.5px] text-ink-muted">Portal login: <span className="font-mono text-ink-soft">{p.account.email}</span></p>}
             </Card>
@@ -221,7 +222,7 @@ export function DemoStudentProfileBody({ p, backHref }: { p: Profile; backHref?:
           </Card>
         </TabsContent>
 
-        <TabsContent value="guardian">
+        <TabsContent value="parent">
           <div className="grid gap-4 md:grid-cols-2">
             {p.guardians.map((g) => (
               <Card key={g.id} className="p-5">
@@ -239,7 +240,7 @@ export function DemoStudentProfileBody({ p, backHref }: { p: Profile; backHref?:
                 </div>
                 {g.otherChildren.length > 0 && (
                   <div className="mt-4 rounded-xl bg-alabaster p-3 text-sm">
-                    <p className="text-[12px] font-semibold uppercase tracking-wide text-ink-muted">Also guardian of</p>
+                    <p className="text-[12px] font-semibold uppercase tracking-wide text-ink-muted">Also parent contact for</p>
                     {g.otherChildren.map((c) => (
                       <p key={c.id} className="mt-1">
                         {isAdmin ? <Link href={`/admin/students/${c.id}`} className="font-medium text-lagoon hover:underline">{c.name}</Link> : <span className="font-medium text-ink">{c.name}</span>}
