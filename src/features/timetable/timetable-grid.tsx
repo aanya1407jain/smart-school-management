@@ -1,18 +1,10 @@
 "use client";
 /**
- * The one weekly timetable grid, shared by every timetable view (admin builder,
- * teacher and student pages, demo and live). Callers adapt their data to
- * periods + a `lessonAt` lookup; this component owns layout, spacing,
- * typography and colour so all views read the same.
- *
- * - md and up: periods as rows, days as columns, sticky day header and period
- *   column inside a scroll container; fixed column widths so free cells never
- *   shift the grid.
- * - below md: one day at a time (day picker + list).
- * - breaks / recess / assembly span the whole row with a muted hatch.
+ * Weekly timetable grid supporting view-mode and interactive drag-and-drop
+ * reordering with conflict indicators and smart drop zones.
  */
 import { useState, type ReactNode } from "react";
-import { Coffee, Megaphone, Plus } from "lucide-react";
+import { AlertCircle, Coffee, GripVertical, Megaphone, Plus } from "lucide-react";
 import { dayOfWeek, todayISO, WEEKDAY_NAMES } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils/cn";
 import { Segmented } from "@/components/ui/segmented";
@@ -26,14 +18,14 @@ export interface GridPeriod {
 }
 
 export interface GridLesson {
+  id?: string;
   subject: string;
-  /** Secondary line, e.g. "Room 204 · Mr. Sharma" or "Class 10-A · Room 204". */
   detail?: string;
-  /** Keeps a subject's colour stable across views; defaults to the subject name. */
   colorKey?: string;
+  hasConflict?: boolean;
+  conflictReason?: string;
 }
 
-/** Soft tint + left stripe per subject (always paired with the subject name, never colour alone). */
 const TINTS = [
   "bg-teal-soft/60 border-l-teal",
   "bg-sapphire/[0.05] border-l-sapphire/60",
@@ -43,7 +35,6 @@ const TINTS = [
   "bg-alabaster border-l-lagoon/60",
 ];
 
-/** Subject → tint for one grid: subjects in sorted order take distinct tints (no clashes up to six subjects). */
 function tintMap(keys: Iterable<string>) {
   return new Map([...new Set(keys)].sort().map((k, i) => [k, TINTS[i % TINTS.length]]));
 }
@@ -52,7 +43,6 @@ const HATCH = "bg-[repeating-linear-gradient(135deg,rgb(var(--c-heather)/0.16)_0
 
 export const DEFAULT_DAYS = [1, 2, 3, 4, 5];
 
-/** Monday–Friday plus any other day that actually has lessons, in week order. */
 export function daysWithLessons(lessonDays: number[]) {
   return [...new Set([...DEFAULT_DAYS, ...lessonDays])].sort((a, b) => a - b);
 }
@@ -77,33 +67,89 @@ function BreakBand({ period, compact }: { period: GridPeriod; compact?: boolean 
 }
 
 export function TimetableGrid({
-  periods, days = DEFAULT_DAYS, lessonAt, caption = "Weekly timetable", onSlotClick, slotLabel, highlightToday = true, freeLabel = "Free",
+  periods,
+  days = DEFAULT_DAYS,
+  lessonAt,
+  caption = "Weekly timetable",
+  onSlotClick,
+  slotLabel,
+  highlightToday = true,
+  freeLabel = "Free",
+  draggable = false,
+  onMoveLesson,
 }: {
   periods: GridPeriod[];
   days?: number[];
   lessonAt: (day: number, period: GridPeriod) => GridLesson | undefined;
   caption?: string;
-  /** Makes every lesson slot a button (the timetable builders). */
   onSlotClick?: (day: number, period: GridPeriod) => void;
-  /** Accessible name for a clickable slot; defaults to "<Day> <Period>: <subject|empty>". */
   slotLabel?: (day: number, period: GridPeriod, lesson: GridLesson | undefined) => string;
   highlightToday?: boolean;
   freeLabel?: string;
+  draggable?: boolean;
+  onMoveLesson?: (source: { day: number; periodKey: string }, target: { day: number; periodKey: string }) => void;
 }) {
   const today = dayOfWeek(todayISO());
   const [mobileDay, setMobileDay] = useState<number>(days.includes(today) ? today : days[0] ?? 1);
+  const [dragSource, setDragSource] = useState<{ day: number; periodKey: string } | null>(null);
+  const [dragOverCell, setDragOverCell] = useState<string | null>(null);
+
   const isToday = (d: number) => highlightToday && d === today;
   const tints = tintMap(days.flatMap((d) => periods.flatMap((p) => {
     const l = p.isBreak ? undefined : lessonAt(d, p);
     return l ? [l.colorKey ?? l.subject] : [];
   })));
 
+  const handleDragStart = (e: React.DragEvent, day: number, periodKey: string) => {
+    if (!draggable) return;
+    e.dataTransfer.setData("text/plain", JSON.stringify({ day, periodKey }));
+    e.dataTransfer.effectAllowed = "move";
+    setDragSource({ day, periodKey });
+  };
+
+  const handleDragOver = (e: React.DragEvent, cellKey: string, isBreak?: boolean) => {
+    if (!draggable || isBreak) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDragOverCell(cellKey);
+  };
+
+  const handleDrop = (e: React.DragEvent, targetDay: number, targetPeriodKey: string, isBreak?: boolean) => {
+    if (!draggable || isBreak) return;
+    e.preventDefault();
+    setDragOverCell(null);
+    setDragSource(null);
+    try {
+      const data = JSON.parse(e.dataTransfer.getData("text/plain"));
+      if (data && (data.day !== targetDay || data.periodKey !== targetPeriodKey)) {
+        onMoveLesson?.(data, { day: targetDay, periodKey: targetPeriodKey });
+      }
+    } catch {
+      // Ignored malformed drag payload
+    }
+  };
+
   const slot = (day: number, p: GridPeriod) => {
     const l = lessonAt(day, p);
+    const cellKey = `${day}-${p.key}`;
+    const isOver = dragOverCell === cellKey;
+    const isSource = dragSource?.day === day && dragSource?.periodKey === p.key;
+
     const body: ReactNode = l ? (
       <>
-        <p className="line-clamp-2 break-normal text-[13px] font-semibold leading-5 text-ink" title={l.subject}>{l.subject}</p>
+        <div className="flex items-start justify-between gap-1">
+          <p className="line-clamp-2 break-normal text-[13px] font-semibold leading-5 text-ink" title={l.subject}>
+            {l.subject}
+          </p>
+          {draggable && <GripVertical className="h-3.5 w-3.5 shrink-0 text-ink-muted/50" />}
+        </div>
         {l.detail && <p className="line-clamp-2 break-normal text-[11.5px] leading-4 text-ink-muted" title={l.detail}>{l.detail}</p>}
+        {l.hasConflict && (
+          <div className="mt-1 flex items-center gap-1 rounded bg-blush/40 px-1.5 py-0.5 text-[10.5px] font-semibold text-plum" title={l.conflictReason}>
+            <AlertCircle className="h-3 w-3 shrink-0" />
+            <span className="truncate">Conflict: {l.conflictReason ?? "Clash"}</span>
+          </div>
+        )}
         <TimeBadge start={p.startTime} end={p.endTime} className="mt-auto" />
       </>
     ) : (
@@ -111,21 +157,42 @@ export function TimetableGrid({
         {onSlotClick ? <><Plus className="h-3.5 w-3.5" aria-hidden /> Add</> : freeLabel}
       </span>
     );
+
     const cls = cn(
-      "flex h-full min-h-[88px] w-full min-w-0 flex-col gap-1 rounded-lg p-3 text-left",
+      "flex h-full min-h-[88px] w-full min-w-0 flex-col gap-1 rounded-lg p-3 text-left transition-all",
       l ? cn("border border-line/60 border-l-[3px]", tints.get(l.colorKey ?? l.subject)) : cn("border border-dashed border-line/70", HATCH),
+      isOver && "ring-2 ring-teal border-teal bg-teal-soft/60 shadow-md",
+      isSource && "opacity-40",
+      l?.hasConflict && "border-l-plum border-line ring-1 ring-plum/40 bg-blush/20",
     );
-    return onSlotClick ? (
-      <button type="button" onClick={() => onSlotClick(day, p)} aria-label={slotLabel?.(day, p, l) ?? `${WEEKDAY_NAMES[day]} ${p.label}: ${l ? l.subject : "empty"}`}
-        className={cn(cls, "transition-all hover:-translate-y-0.5 hover:shadow-soft focus:outline-none focus-visible:ring-2 focus-visible:ring-teal", !l && "hover:border-teal hover:bg-teal-soft/40")}>
-        {body}
-      </button>
-    ) : <div className={cls}>{body}</div>;
+
+    return (
+      <div
+        className="h-full w-full"
+        onDragOver={(e) => handleDragOver(e, cellKey, p.isBreak)}
+        onDragLeave={() => setDragOverCell(null)}
+        onDrop={(e) => handleDrop(e, day, p.key, p.isBreak)}
+      >
+        {onSlotClick ? (
+          <button
+            type="button"
+            draggable={draggable && Boolean(l)}
+            onDragStart={(e) => handleDragStart(e, day, p.key)}
+            onClick={() => onSlotClick(day, p)}
+            aria-label={slotLabel?.(day, p, l) ?? `${WEEKDAY_NAMES[day]} ${p.label}: ${l ? l.subject : "empty"}`}
+            className={cn(cls, "hover:-translate-y-0.5 hover:shadow-soft focus:outline-none focus-visible:ring-2 focus-visible:ring-teal cursor-pointer")}
+          >
+            {body}
+          </button>
+        ) : (
+          <div className={cls}>{body}</div>
+        )}
+      </div>
+    );
   };
 
   return (
     <>
-      {/* md and up: full week */}
       <div className="scrollbar-thin hidden max-h-[72vh] overflow-auto rounded-xl md:block">
         <table className="w-full table-fixed border-separate border-spacing-0" style={{ minWidth: 120 + days.length * 150 }}>
           <caption className="sr-only">{caption}</caption>
@@ -165,7 +232,6 @@ export function TimetableGrid({
         </table>
       </div>
 
-      {/* Below md: one day at a time */}
       <div className="md:hidden">
         <Segmented<string>
           label="Day"
