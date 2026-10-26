@@ -15,18 +15,8 @@ import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
 import { schoolMutation, schoolQuery, moduleQuery, moduleMutation } from "./core/functions";
 import {
-  getCurrentAcademicYearId,
-  getInSchool,
-  getSchoolSettings,
-  hasPermission,
-  linkedStudentIds,
-  requirePermission,
-  requireAnyPermission,
-  requireSectionRead,
-  requireStudentAccess,
-  readScopeSectionIds,
-  teacherSectionIds,
-  enrollmentFor,
+  getCurrentAcademicYearId, getInSchool, getSchoolSettings, hasPermission, linkedStudentIds, requirePermission,
+  requireSectionRead, requireStudentAccess, readScopeSectionIds, enrollmentFor,
 } from "./core/authorization";
 import { AppError, conflict, invalid, invalidRelationship } from "./core/errors";
 import { assertIsoDate, assertNonEmpty, vAcademicYearStatus, vGender } from "./core/validators";

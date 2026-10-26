@@ -400,6 +400,22 @@ describe("AP-01 scenarios from PR #11 (final API)", () => {
         }),
       );
       expect(explicitOverpayErr).toBe("INVALID_ARGUMENT");
+
+      // 4b. Duplicate allocation entry for the same obligation is rejected
+      const dupAllocErr = await errorCode(
+        admin.mutation(api.fees.recordPayment, {
+          studentId: f.studentA,
+          amountMinor: 60000,
+          method: "cash",
+          paidOn: "2026-05-10",
+          allocations: [
+            { studentFeeId: term2.obligationId, amountMinor: 30000 },
+            { studentFeeId: term2.obligationId, amountMinor: 30000 },
+          ],
+          clientRequestId: "req-alloc-dup",
+        }),
+      );
+      expect(dupAllocErr).toBe("INVALID_ARGUMENT");
     }
 
     // 5. Exact payment of remaining 60000 succeeds and clears all obligations

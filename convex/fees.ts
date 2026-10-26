@@ -363,8 +363,15 @@ export const recordPayment = financeMutation({
     if (a.allocations && a.allocations.length > 0) {
       let sum = 0;
       const obligationMap = new Map(ledger.obligations.map((o) => [o.obligationId, o]));
+      const seenFeeIds = new Set<Id<"studentFees">>();
       for (const alloc of a.allocations) {
         assertAmountMinor(alloc.amountMinor, "allocation amount");
+        if (seenFeeIds.has(alloc.studentFeeId)) {
+          throw invalid(`Invalid allocations: duplicate obligation ${alloc.studentFeeId}`, {
+            allocations: "Duplicate obligation",
+          });
+        }
+        seenFeeIds.add(alloc.studentFeeId);
         const ob = obligationMap.get(alloc.studentFeeId);
         if (!ob) {
           throw invalid(`Invalid allocations: obligation ${alloc.studentFeeId} does not exist or does not belong to student`, {
