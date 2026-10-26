@@ -189,7 +189,7 @@ export function LiveHomeworkList({ homework, today = todayISO() }: { homework: L
 
 // ------------------------------------------------------------------ timetable
 export function LiveTimetableGrid({ timetable }: { timetable: LiveTimetable }) {
-  const periods = [...timetable.periods].sort((a, b) => a.index - b.index);
+  const periods = [...timetable.periods].sort((a, b) => a.startTime.localeCompare(b.startTime) || a.index - b.index);
   if (timetable.lessons.length === 0) return <Card><EmptyState title="No timetable yet" description="The school has not published a timetable for this class." /></Card>;
   return (
     <Card className="p-4 sm:p-5" data-testid="live-timetable">
@@ -258,7 +258,7 @@ export function LiveCertificatesList({ certificates }: { certificates: LiveCerti
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <Badge tone="teal">Verified Document</Badge>
+              <Badge tone="teal">Issued by the school</Badge>
               {c.url ? (
                 <a
                   href={c.url}

@@ -52,6 +52,7 @@ export const ROUTE_RULES: RouteRule[] = [
   { pattern: r("/student/timetable"), anyOf: ["timetable:read:own"], module: "academics" },
   { pattern: r("/student/homework"), anyOf: ["homework:read:own"], module: "academics" },
   { pattern: r("/student/results"), anyOf: ["results:read:own"], module: "academics" },
+  { pattern: r("/student/certificates"), anyOf: ["profile:read:own"], module: "students" },
   { pattern: r("/student/fees"), anyOf: ["fees:read:own"], module: "finance" },
   { pattern: r("/student/notices"), anyOf: ["notices:read"], module: "administration" },
   { pattern: r("/student/notifications"), anyOf: ["notifications:read"] },

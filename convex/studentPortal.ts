@@ -28,6 +28,7 @@ import {
 } from "./model/studentRecords";
 
 // Module entitlements (model/modules.ts): myProfile is core; the other pages belong to their module.
+const studentsQuery = moduleQuery("students");
 const academicsQuery = moduleQuery("academics");
 const financeQuery = moduleQuery("finance");
 const administrationQuery = moduleQuery("administration");
@@ -87,21 +88,29 @@ export const myProfile = schoolQuery({
   },
 });
 
+/** Most documents listed for one student. */
+const MAX_CERTIFICATES = 100;
+
 /**
- * Official certificates and verified documents belonging to the student.
- * Read-only access — students cannot alter or delete official certificates.
+ * Official certificates and verified documents belonging to the student
+ * (files of kind `student_document`, uploaded by the office). Read-only.
+ * Student documents belong to Student Management (files.ts KIND_MODULE), so
+ * this is a students-module query: MODULE_DISABLED when the school does not
+ * have it, exactly like files.listForOwner — the files themselves are kept.
  */
-export const myCertificates = schoolQuery({
+export const myCertificates = studentsQuery({
   args: vPortalStudent,
   handler: async (ctx, { studentId }) => {
     const student = await resolvePortalStudent(ctx, studentId, "profile:read:own");
     if (!student) return { state: "no_student_record" as const };
-    const files = await ctx.db
+    const files = (await ctx.db
       .query("files")
       .withIndex("by_owner", (q) =>
         q.eq("schoolId", ctx.actor.schoolId).eq("ownerType", "student").eq("ownerId", student._id),
       )
-      .collect();
+      .take(MAX_CERTIFICATES * 2))
+      .filter((f) => f.kind === "student_document") // not profile photos
+      .slice(0, MAX_CERTIFICATES);
     const certificates = await Promise.all(
       files.map(async (f) => ({
         fileId: f._id,
