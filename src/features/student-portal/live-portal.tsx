@@ -195,6 +195,8 @@ export function LiveStudentProfile() {
 }
 
 function StudentRecord({ p }: { p: OkProfile }) {
+  // Student documents belong to Student Management: the section (and its query) only runs when the school has it.
+  const { hasModule } = useSession();
   const s = p.student;
   const g = s.gender ? s.gender.charAt(0).toUpperCase() + s.gender.slice(1) : null;
   return (
@@ -250,14 +252,16 @@ function StudentRecord({ p }: { p: OkProfile }) {
           )}
         </CardBody>
       </Card>
-      <div id="certificates" className="mt-4">
-        <Card>
-          <CardHeader title="Official Certificates & Documents" icon={<FileText className="h-4 w-4" />} />
-          <CardBody>
-            <StudentCertificatesSection studentId={p.student.studentId} />
-          </CardBody>
-        </Card>
-      </div>
+      {hasModule("students") && (
+        <div id="certificates" className="mt-4">
+          <Card>
+            <CardHeader title="Official Certificates & Documents" icon={<FileText className="h-4 w-4" />} />
+            <CardBody>
+              <StudentCertificatesSection studentId={p.student.studentId} />
+            </CardBody>
+          </Card>
+        </div>
+      )}
     </>
   );
 }
@@ -359,7 +363,11 @@ export function LiveNotices() {
 }
 
 export function LiveCertificates() {
-  const c = useSchoolQuery(api.studentPortal.myCertificates, usePortalArgs());
+  // Demo personas carry an in-browser student id ("stu_…"), not a Convex id: let the server resolve
+  // the student from the signed-in membership instead (its seeded account is linked to the record).
+  const { dataSource } = useSession();
+  const portalArgs = usePortalArgs();
+  const c = useSchoolQuery(api.studentPortal.myCertificates, dataSource === "live" ? portalArgs : {});
   if (c === undefined) return <LoadingState variant="table" label="Loading certificates" />;
   if (c.state === "no_student_record") return <MissingRecord />;
   return (

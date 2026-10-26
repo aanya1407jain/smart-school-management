@@ -18,6 +18,7 @@ import {
 import { FormError } from "@/features/shared/form-error";
 import { formatDate } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils/cn";
+import { SyllabusProgressTracker } from "./syllabus-tracker";
 
 type Overview = AcademicsOverview;
 
@@ -45,6 +46,10 @@ export function DemoAcademicsWorkspace() {
           </div>
         )}
       />
+      {/* Same Principal view as the live workspace (the tracker is self-contained). */}
+      <div className="mb-6 mt-4">
+        <SyllabusProgressTracker readOnly={true} />
+      </div>
       <QueryView query={q}>
         {(d) => (
           <Tabs value={tab} onValueChange={changeTab}>

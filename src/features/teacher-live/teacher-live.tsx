@@ -32,7 +32,7 @@ const clock = (t: string) => {
 export function LiveTeacherTimetable() {
   const t = useSchoolQuery(api.timetable.myTimetable, {});
   if (t === undefined) return <LoadingState variant="table" label="Loading timetable" />;
-  const periods = [...t.periods].sort((a, b) => a.index - b.index);
+  const periods = [...t.periods].sort((a, b) => a.startTime.localeCompare(b.startTime) || a.index - b.index);
   return (
     <div>
       <PageHeader title="My Timetable" description={`${t.lessons.length} lesson${t.lessons.length === 1 ? "" : "s"} a week, from the school's published timetable.`} />

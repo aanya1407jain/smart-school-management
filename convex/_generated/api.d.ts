@@ -73,6 +73,7 @@ import type * as studentLifecycle from "../studentLifecycle.js";
 import type * as studentLoginMigration from "../studentLoginMigration.js";
 import type * as studentPortal from "../studentPortal.js";
 import type * as timetable from "../timetable.js";
+import type * as timetableMaintenance from "../timetableMaintenance.js";
 import type * as users from "../users.js";
 
 import type {
@@ -147,6 +148,7 @@ declare const fullApi: ApiFromModules<{
   studentLoginMigration: typeof studentLoginMigration;
   studentPortal: typeof studentPortal;
   timetable: typeof timetable;
+  timetableMaintenance: typeof timetableMaintenance;
   users: typeof users;
 }>;
 
