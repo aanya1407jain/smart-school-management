@@ -130,12 +130,12 @@ function SectionWeek({ sectionId, classId, workingDays }: { sectionId: Id<"secti
           const hasTeacherClash = sameDayLessons.some((x) => x.periodId === gp.key && x.teacherId === l.teacherId);
 
           const hasConflict = hasSubjectRepeat || hasRoomClash || hasTeacherClash;
-          const conflictReason = hasTeacherClash 
-            ? "Teacher double-booked" 
-            : hasRoomClash 
-            ? `Room ${l.room} occupied` 
-            : hasSubjectRepeat 
-            ? "Max daily subject limit reached" 
+          const conflictReason = hasTeacherClash
+            ? "Teacher double-booked"
+            : hasRoomClash
+            ? `Room ${l.room} occupied`
+            : hasSubjectRepeat
+            ? "Max daily subject limit reached"
             : undefined;
 
           return {
@@ -213,7 +213,7 @@ function LessonModal({
   // Conflict detection: Same section daily subject repeats, teacher overlap & room clash
   const conflict = useMemo(() => {
     const sameDayLessons = existingLessons.filter((l) => l.dayOfWeek === slot.dayOfWeek && l.entryId !== slot.lesson?.entryId);
-    
+
     if (teacherId) {
       const teacherClash = sameDayLessons.find((l) => l.teacherId === teacherId && l.periodId === slot.period.periodId);
       if (teacherClash) {

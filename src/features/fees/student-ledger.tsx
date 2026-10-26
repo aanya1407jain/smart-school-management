@@ -222,8 +222,14 @@ function PaymentModal({ open, onOpenChange, studentId, outstanding, suggested, o
   const submit = async () => {
     if (pending) return;
     setError(null);
-    if (live && (!Number.isFinite(amount) || amount <= 0 || amount > outstanding)) { setError(`Enter an amount between ₹1 and ${formatCurrency(outstanding)}.`); return; }
-    if (live && method !== "cash" && !reference.trim()) { setError("Enter the transaction reference for this payment method."); return; }
+    if (!Number.isFinite(amount) || amount <= 0 || amount > outstanding) {
+      setError(amount > outstanding ? `Payment amount (${formatCurrency(amount)}) exceeds total outstanding balance (${formatCurrency(outstanding)})` : `Enter an amount between ₹1 and ${formatCurrency(outstanding)}.`);
+      return;
+    }
+    if (method !== "cash" && !reference.trim()) {
+      setError("Enter the transaction reference for this payment method.");
+      return;
+    }
     setPending(true);
     try {
       if (live) {

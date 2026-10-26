@@ -87,6 +87,39 @@ export const myProfile = schoolQuery({
   },
 });
 
+/**
+ * Official certificates and verified documents belonging to the student.
+ * Read-only access — students cannot alter or delete official certificates.
+ */
+export const myCertificates = schoolQuery({
+  args: vPortalStudent,
+  handler: async (ctx, { studentId }) => {
+    const student = await resolvePortalStudent(ctx, studentId, "profile:read:own");
+    if (!student) return { state: "no_student_record" as const };
+    const files = await ctx.db
+      .query("files")
+      .withIndex("by_owner", (q) =>
+        q.eq("schoolId", ctx.actor.schoolId).eq("ownerType", "student").eq("ownerId", student._id),
+      )
+      .collect();
+    const certificates = await Promise.all(
+      files.map(async (f) => ({
+        fileId: f._id,
+        kind: f.kind,
+        fileName: f.fileName,
+        contentType: f.contentType,
+        size: f.size,
+        uploadedAt: f._creationTime,
+        url: await ctx.storage.getUrl(f.storageId),
+      })),
+    );
+    return {
+      state: "ok" as const,
+      certificates,
+    };
+  },
+});
+
 /** Weekly timetable of the student's current section. */
 export const myTimetable = academicsQuery({
   args: vPortalStudent,

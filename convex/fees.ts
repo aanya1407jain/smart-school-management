@@ -335,6 +335,9 @@ export const recordPayment = financeMutation({
   args: {
     studentId: v.id("students"), academicYearId: v.optional(v.id("academicYears")), amountMinor: v.number(), method: vPaymentMethod,
     paidOn: v.string(), reference: v.optional(v.string()), note: v.optional(v.string()),
+    allocations: v.optional(
+      v.array(v.object({ studentFeeId: v.id("studentFees"), amountMinor: v.number() })),
+    ),
     /** Client-generated unique id of this request (e.g. crypto.randomUUID()); a retry with the same id returns the original payment. */
     clientRequestId: v.string(),
   },
@@ -355,9 +358,46 @@ export const recordPayment = financeMutation({
     const school = (await ctx.db.get(ctx.actor.schoolId))!;
     if (a.paidOn > todayIn(school.timezone)) throw invalid("The payment date cannot be in the future.", { paidOn: "Future date" });
     const ledger = await feeLedger(ctx, student, year);
-    const { allocations, unallocated } = allocate(a.amountMinor, ledger.obligations);
-    if (allocations.length === 0) throw conflict("This student has nothing outstanding for the year.");
-    if (unallocated > 0) throw invalid(`The amount exceeds the outstanding balance (${ledger.totals.outstandingMinor}).`, { amountMinor: "More than outstanding" });
+
+    let allocations: { studentFeeId: Id<"studentFees">; amountMinor: number }[];
+    if (a.allocations && a.allocations.length > 0) {
+      let sum = 0;
+      const obligationMap = new Map(ledger.obligations.map((o) => [o.obligationId, o]));
+      const seenFeeIds = new Set<Id<"studentFees">>();
+      for (const alloc of a.allocations) {
+        assertAmountMinor(alloc.amountMinor, "allocation amount");
+        if (seenFeeIds.has(alloc.studentFeeId)) {
+          throw invalid(`Invalid allocations: duplicate obligation ${alloc.studentFeeId}`, {
+            allocations: "Duplicate obligation",
+          });
+        }
+        seenFeeIds.add(alloc.studentFeeId);
+        const ob = obligationMap.get(alloc.studentFeeId);
+        if (!ob) {
+          throw invalid(`Invalid allocations: obligation ${alloc.studentFeeId} does not exist or does not belong to student`, {
+            allocations: "Foreign or missing obligation",
+          });
+        }
+        if (alloc.amountMinor > ob.outstandingMinor) {
+          throw invalid(
+            `Invalid allocations: allocation amount (${alloc.amountMinor}) exceeds obligation outstanding balance (${ob.outstandingMinor}) for ${ob.label}`,
+            { allocations: "Exceeds balance" },
+          );
+        }
+        sum += alloc.amountMinor;
+      }
+      if (sum !== a.amountMinor) {
+        throw invalid(`Invalid allocations: allocation sum (${sum}) does not match payment amount (${a.amountMinor})`, {
+          allocations: "Sum mismatch",
+        });
+      }
+      allocations = a.allocations;
+    } else {
+      const allocated = allocate(a.amountMinor, ledger.obligations);
+      if (allocated.allocations.length === 0) throw conflict("This student has nothing outstanding for the year.");
+      if (allocated.unallocated > 0) throw invalid(`The amount exceeds the outstanding balance (${ledger.totals.outstandingMinor}).`, { amountMinor: "More than outstanding" });
+      allocations = allocated.allocations;
+    }
 
     const paymentId = await ctx.db.insert("feePayments", {
       schoolId: ctx.actor.schoolId, studentId: student._id, academicYearId: year._id, amountMinor: a.amountMinor, method: a.method,

@@ -400,7 +400,7 @@ describe("source inventory: every public function is classified", () => {
     "admissionRegister.ts": { module: "students" },
   };
   // studentPortal.ts maps functions to several modules.
-  const PORTAL: Record<string, ModuleKey | "core"> = { myProfile: "core", myTimetable: "academics", myHomework: "academics", myResults: "academics", myFees: "finance", myNotices: "administration" };
+  const PORTAL: Record<string, ModuleKey | "core"> = { myProfile: "core", myCertificates: "core", myTimetable: "academics", myHomework: "academics", myResults: "academics", myFees: "finance", myNotices: "administration" };
   // Core files: no module (mixed views gate their parts inside: files.ts by kind, dashboards.ts by panel).
   const CORE_FILES = ["account.ts", "accounts.ts", "audit.ts", "bulkAccounts.ts", "dashboards.ts", "files.ts", "memberships.ts", "notifications.ts", "profile.ts", "schools.ts", "users.ts"];
 

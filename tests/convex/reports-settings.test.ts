@@ -222,4 +222,38 @@ describe("AP-04: Dashboards and reports reconciliation", () => {
     expect(thisMonth?.percentage).toBe(100);
     expect(thisMonth?.absent).toBe(0);
   });
+
+  test("academics.studentCounts computes accurate executive metrics with RBAC enforcement", async () => {
+    const t = makeTest();
+    const A = await createSchool(t, "alpha");
+    const admin = await as(t, A.users.admin);
+    const ct = await as(t, A.users.classTeacher);
+    const student = await as(t, A.users.student);
+
+    // 1. RBAC: student and standard teacher cannot view school-wide studentCounts
+    expect(await errorCode(student.query(api.academics.studentCounts, {}))).toBe("FORBIDDEN");
+    expect(await errorCode(ct.query(api.academics.studentCounts, {}))).toBe("FORBIDDEN");
+
+    // 2. Administrator (with students:read:all) CAN view studentCounts
+    const counts = await admin.query(api.academics.studentCounts, {});
+    expect(counts).toBeDefined();
+
+    // In createSchool(t, "alpha"): studentA and studentB are created active
+    expect(counts.activeRecords).toBeGreaterThanOrEqual(2);
+    expect(counts.enrolled).toBeGreaterThanOrEqual(2);
+    expect(counts.notEnrolled).toBe(0);
+    expect(counts.academicYear).not.toBeNull();
+
+    const sectionCounts = await admin.query(api.academics.studentCounts, { sectionId: A.sectionA });
+    expect(sectionCounts.section?.enrolled).toBe(1);
+
+    // Update studentB status to "transferred" (TC-issued) and verify count updates
+    await t.run(async (ctx) => {
+      await ctx.db.patch(A.studentB, { status: "transferred" });
+    });
+
+    const updatedCounts = await admin.query(api.academics.studentCounts, {});
+    expect(updatedCounts.activeRecords).toBe(counts.activeRecords - 1);
+    expect(updatedCounts.enrolled).toBe(counts.enrolled - 1);
+  });
 });
