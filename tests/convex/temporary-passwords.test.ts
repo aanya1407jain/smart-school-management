@@ -24,6 +24,14 @@ async function newStudentAccount() {
   return { t, A, admin, r, userId, extraTeacher };
 }
 
+/** Teachers (and office logins) get random one-time passwords that expire; the student default does not. */
+async function newTeacherAccount() {
+  const base = await newStudentAccount();
+  const r = await base.admin.action(api.accounts.create, { person: { kind: "teacher", teacherId: base.extraTeacher } });
+  const userId = (await base.t.run(async (ctx) => (await ctx.db.get(r.membershipId))!.userId!)) as Id<"users">;
+  return { ...base, r, userId };
+}
+
 const userRow = (t: T, id: Id<"users">) => t.run((ctx) => ctx.db.get(id));
 const sessionGate = (t: T, userId: Id<"users">, now: number) =>
   t.run(async (ctx) => { await assertSessionAllowed(ctx, userId, now); return "allowed"; });
@@ -38,7 +46,9 @@ describe("forced password change", () => {
 
     const student = await as(t, userId);
     const s = await student.query(api.users.session, {});
-    expect(s.status === "signedIn" && s.viewer.mustChangePassword && s.viewer.temporaryPasswordExpiresAt === u!.temporaryPasswordIssuedAt! + TEMPORARY_PASSWORD_TTL_MS).toBe(true);
+    // Students start with the school default password: forced change, but no expiry.
+    expect(s.status === "signedIn" && s.viewer.mustChangePassword && s.viewer.temporaryPasswordExpiresAt === null).toBe(true);
+    expect(u?.defaultPassword).toBe(true);
     expect(await errorCode(student.query(api.users.viewer, {}))).toBe("PASSWORD_CHANGE_REQUIRED");
     expect(await errorCode(student.query(api.attendance.studentHistory, { studentId: A.studentB }))).toBe("PASSWORD_CHANGE_REQUIRED");
     expect(await errorCode(student.query(api.studentPortal.myProfile, { studentId: A.studentB }))).toBe("PASSWORD_CHANGE_REQUIRED");
@@ -68,15 +78,21 @@ describe("forced password change", () => {
 });
 
 describe("temporary-password expiry", () => {
-  test("no new session and no password change with an expired temporary password", async () => {
-    const { t, r, userId } = await newStudentAccount();
+  test("the student default password never expires (it must still be changed at first sign-in)", async () => {
+    const { t, userId } = await newStudentAccount();
+    expect(await sessionGate(t, userId, Date.now() + 100 * TEMPORARY_PASSWORD_TTL_MS)).toBe("allowed");
+    expect((await userRow(t, userId))?.mustChangePassword).toBe(true);
+  });
+
+  test("no new session and no password change with an expired temporary password (teacher one-time password)", async () => {
+    const { t, r, userId } = await newTeacherAccount();
     const issuedAt = (await userRow(t, userId))!.temporaryPasswordIssuedAt!;
     expect(await sessionGate(t, userId, issuedAt + TEMPORARY_PASSWORD_TTL_MS - 1)).toBe("allowed");
     expect(await errorCode(sessionGate(t, userId, issuedAt + TEMPORARY_PASSWORD_TTL_MS))).toBe("TEMPORARY_PASSWORD_EXPIRED");
 
     vi.useFakeTimers({ now: issuedAt + TEMPORARY_PASSWORD_TTL_MS + 1000 });
-    const student = await as(t, userId);
-    expect(await errorCode(student.action(api.account.changePassword, { currentPassword: r.temporaryPassword, newPassword: "MyChoice2026" }))).toBe("TEMPORARY_PASSWORD_EXPIRED");
+    const teacher = await as(t, userId);
+    expect(await errorCode(teacher.action(api.account.changePassword, { currentPassword: r.temporaryPassword, newPassword: "MyChoice2026" }))).toBe("TEMPORARY_PASSWORD_EXPIRED");
     expect((await userRow(t, userId))?.mustChangePassword).toBe(true);
   });
 

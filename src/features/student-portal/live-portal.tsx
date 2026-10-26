@@ -139,7 +139,7 @@ export function LiveStudentDashboard() {
           <CardBody>
             <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
               <Field label="Name" value={p.student.name} testId="dash-name" />
-              <Field label="Admission number" value={p.student.admissionNo} testId="dash-admission" />
+              <Field label="Scholar number" value={p.student.scholarNo ?? "—"} testId="dash-scholar" />
               <Field label="Academic year" value={p.academicYear?.name ?? "Not set"} testId="dash-year" />
               <Field label="Enrollment" value={p.enrollment ? <StatusBadge status={p.enrollment.status} label={p.enrollment.status.charAt(0).toUpperCase() + p.enrollment.status.slice(1)} /> : "Not enrolled"} />
             </dl>
@@ -203,12 +203,12 @@ function StudentRecord({ p }: { p: OkProfile }) {
       <EnrollmentNotice p={p} />
       <div className="grid gap-5 lg:grid-cols-2">
         <Card>
-          <CardHeader title={s.name} description={`Admission no. ${s.admissionNo}`} icon={<IdCard className="h-4 w-4" />} action={<StatusBadge status={s.status} />} />
+          <CardHeader title={s.name} description={s.scholarNo ? `Scholar No: ${s.scholarNo}` : undefined} icon={<IdCard className="h-4 w-4" />} action={<StatusBadge status={s.status} />} />
           <CardBody>
             <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
               <Field label="First name" value={s.firstName} />
               <Field label="Last name" value={s.lastName} />
-              <Field label="Admission number" value={s.admissionNo} testId="profile-admission" />
+              <Field label="Scholar number" value={s.scholarNo ?? "—"} testId="profile-scholar" />
               <Field label="Admission date" value={s.admissionDate ? formatDate(s.admissionDate) : "—"} />
               <Field label="Date of birth" value={s.dateOfBirth ? formatDate(s.dateOfBirth) : "—"} />
               <Field label="Gender" value={g ?? "—"} />

@@ -64,7 +64,7 @@ export function StudentForm({ studentId }: { studentId?: string }) {
   const [serverError, setServerError] = useState<Error | null>(null);
   // A possible duplicate (same name + date of birth) the office must confirm is a different child.
   const [duplicate, setDuplicate] = useState<{ message: string; values: Values } | null>(null);
-  const [created, setCreated] = useState<{ studentId: Id<"students">; admissionNo: string; section: string; rollNo: number | null; classTeacher: string | null; warnings: string[] } | null>(null);
+  const [created, setCreated] = useState<{ studentId: Id<"students">; admissionNo: string; scholarNo: string | null; section: string; rollNo: number | null; classTeacher: string | null; warnings: string[] } | null>(null);
 
   const createStudentWithEnrollment = useSchoolMutation(api.academics.createStudentWithEnrollment);
 
@@ -243,7 +243,7 @@ export function StudentForm({ studentId }: { studentId?: string }) {
           <div className="space-y-4 text-sm" data-testid="student-created">
             <p className="flex items-center gap-2 text-ink-soft"><CheckCircle2 className="h-5 w-5 text-lagoon" /> The student appears in class lists, attendance registers and the teachers&apos; rosters.</p>
             <dl className="grid grid-cols-2 gap-3 rounded-2xl border border-line bg-alabaster p-4">
-              <div><dt className="text-[12px] text-ink-muted">Admission no.</dt><dd className="font-mono font-semibold text-ink" data-testid="created-admission">{created.admissionNo}</dd></div>
+              <div><dt className="text-[12px] text-ink-muted">Scholar No. (sign-in Login ID)</dt><dd className="font-mono font-semibold text-ink" data-testid="created-scholar">{created.scholarNo ?? "Not assigned"}</dd></div>
               <div><dt className="text-[12px] text-ink-muted">Class</dt><dd className="font-semibold text-ink" data-testid="created-section">{created.section}{created.rollNo != null ? ` · Roll ${created.rollNo}` : ""}</dd></div>
               <div className="col-span-2"><dt className="text-[12px] text-ink-muted">Class teacher</dt><dd className="font-semibold text-ink">{created.classTeacher ?? "Not assigned yet"}</dd></div>
             </dl>

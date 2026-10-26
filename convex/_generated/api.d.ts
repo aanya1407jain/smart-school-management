@@ -11,6 +11,7 @@
 import type * as academics from "../academics.js";
 import type * as account from "../account.js";
 import type * as accounts from "../accounts.js";
+import type * as admissionRegister from "../admissionRegister.js";
 import type * as attendance from "../attendance.js";
 import type * as audit from "../audit.js";
 import type * as auth from "../auth.js";
@@ -60,6 +61,7 @@ import type * as notifications from "../notifications.js";
 import type * as profile from "../profile.js";
 import type * as reports from "../reports.js";
 import type * as rollNumberMaintenance from "../rollNumberMaintenance.js";
+import type * as scholarNumberMaintenance from "../scholarNumberMaintenance.js";
 import type * as schoolModules from "../schoolModules.js";
 import type * as schools from "../schools.js";
 import type * as seed from "../seed.js";
@@ -68,6 +70,7 @@ import type * as seedData_types from "../seedData/types.js";
 import type * as setup from "../setup.js";
 import type * as staff from "../staff.js";
 import type * as studentLifecycle from "../studentLifecycle.js";
+import type * as studentLoginMigration from "../studentLoginMigration.js";
 import type * as studentPortal from "../studentPortal.js";
 import type * as timetable from "../timetable.js";
 import type * as users from "../users.js";
@@ -82,6 +85,7 @@ declare const fullApi: ApiFromModules<{
   academics: typeof academics;
   account: typeof account;
   accounts: typeof accounts;
+  admissionRegister: typeof admissionRegister;
   attendance: typeof attendance;
   audit: typeof audit;
   auth: typeof auth;
@@ -131,6 +135,7 @@ declare const fullApi: ApiFromModules<{
   profile: typeof profile;
   reports: typeof reports;
   rollNumberMaintenance: typeof rollNumberMaintenance;
+  scholarNumberMaintenance: typeof scholarNumberMaintenance;
   schoolModules: typeof schoolModules;
   schools: typeof schools;
   seed: typeof seed;
@@ -139,6 +144,7 @@ declare const fullApi: ApiFromModules<{
   setup: typeof setup;
   staff: typeof staff;
   studentLifecycle: typeof studentLifecycle;
+  studentLoginMigration: typeof studentLoginMigration;
   studentPortal: typeof studentPortal;
   timetable: typeof timetable;
   users: typeof users;

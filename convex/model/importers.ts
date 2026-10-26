@@ -19,6 +19,7 @@ import { counterKeys, ensureCounterAtLeast, nextAdmissionNumber, nextEmployeeId 
 import { IMPORT_SPECS, MAX_IMPORT_ROWS, academicYearMatches, parseDateInput, parseGender, type ImportSpec, type ImportTarget } from "./importSpecs";
 import { writeAudit } from "./audit";
 import { MAX_SECTION_ROSTER, renumberSections } from "./rollNumbers";
+import { parseScholarNo, personNameKey, possibleDuplicates, scholarForNewStudent, scholarPrefixOf, studentByScholarNo, syncScholarCounter } from "./scholarNumbers";
 
 export type ImportRowInput = { rowNumber: number; values: Record<string, string> };
 export type RowIssue = { field: string; message: string };
@@ -147,7 +148,7 @@ async function loginIdChecks(ctx: QueryCtx, r: RowReader, loginId: string | unde
 // ================================================================ students
 export type StudentPlan = {
   rowNumber: number; firstName: string; lastName: string; gender?: "male" | "female" | "other"; dateOfBirth?: string;
-  admissionNo?: string; admissionDate: string; classId: Id<"classes">; sectionId: Id<"sections">;
+  admissionNo?: string; scholar?: { scholarNo: string; scholarNoKey: string }; admissionDate: string; classId: Id<"classes">; sectionId: Id<"sections">;
   email?: string; phone?: string; address?: string; loginId?: string;
   /** Parent contact (contact data only; stored in the `guardians` / `guardianLinks` tables). */
   parentContact?: { name: string; phone: string; email?: string; relation: string; existingContactId?: Id<"guardians"> };
@@ -177,9 +178,13 @@ export async function analyzeStudents(ctx: Ctx, rows: ImportRowInput[], opts: { 
   const results: RowResult[] = [];
   const plans: StudentPlan[] = [];
   const trackAdmission = dupTracker();
+  const trackScholar = dupTracker();
+  const trackPerson = dupTracker();
   const trackLogin = dupTracker();
   const newPerSection = new Map<Id<"sections">, number>();
   const rosterSize = new Map<Id<"sections">, number>();
+  // Rows without a scholar number get the school's next automatic one at commit (if configured).
+  const autoScholar = !!(await scholarPrefixOf(ctx, ctx.actor.schoolId));
 
   // Current active roster size (roll numbers themselves are system-assigned after the commit).
   const sectionRosterSize = async (sectionId: Id<"sections">) => {
@@ -204,7 +209,9 @@ export async function analyzeStudents(ctx: Ctx, rows: ImportRowInput[], opts: { 
     const email = r.email("email");
     const phone = r.phone("phone");
     const address = r.text("address");
-    const loginId = r.loginId(opts.createAccounts);
+    // Students sign in with their scholar number: a Login ID column is ignored.
+    if (r.loginId(opts.createAccounts)) r.warnings.push({ field: "loginId", message: "Login ID ignored — students sign in with their scholar number" });
+    const loginId: string | undefined = undefined;
 
     // Class / section must already exist for the current academic year.
     let cls: Doc<"classes"> | undefined;
@@ -234,6 +241,29 @@ export async function analyzeStudents(ctx: Ctx, rows: ImportRowInput[], opts: { 
     }
     await loginIdChecks(ctx, r, loginId, row.rowNumber, trackLogin);
 
+    // Scholar number (optional): unique in the file and in the school (model/scholarNumbers.ts).
+    let scholar: StudentPlan["scholar"];
+    try {
+      scholar = parseScholarNo(r.raw("scholarNo")) ?? undefined;
+    } catch (e) {
+      r.errors.push({ field: "scholarNo", message: e instanceof AppError ? e.message : "Invalid scholar number" });
+    }
+    if (scholar) {
+      trackScholar(scholar.scholarNoKey, (first) => r.errors.push({ field: "scholarNo", message: `Scholar number ${scholar!.scholarNo} is repeated (first used on row ${first})` }), row.rowNumber);
+      const holder = await studentByScholarNo(ctx, ctx.actor.schoolId, scholar.scholarNoKey);
+      if (holder) r.errors.push({ field: "scholarNo", message: `Scholar number ${scholar.scholarNo} already belongs to ${holder.firstName} ${holder.lastName}` });
+    }
+    // With accounts, the scholar number is the Login ID: it must exist (typed or automatic) and be usable.
+    if (opts.createAccounts) {
+      if (scholar) {
+        const asLogin = canonicalLoginId(scholar.scholarNoKey);
+        if (!asLogin) r.errors.push({ field: "scholarNo", message: `Scholar number ${scholar.scholarNo} cannot be used to sign in (letters, digits, . _ - only)` });
+        else if (await isLoginIdTaken(ctx, asLogin)) r.errors.push({ field: "scholarNo", message: `Login ID ${asLogin} (this scholar number) is already in use` });
+      } else if (!autoScholar && !r.errors.some((e) => e.field === "scholarNo")) {
+        r.errors.push({ field: "scholarNo", message: "Scholar number is required to create a sign-in account — students sign in with it" });
+      }
+    }
+
     // Parent contact: optional, but name + phone go together.
     const pName = r.text("parentName");
     const pPhone = r.phone("parentPhone");
@@ -252,11 +282,15 @@ export async function analyzeStudents(ctx: Ctx, rows: ImportRowInput[], opts: { 
       }
     }
 
-    // Possible duplicate person (same name + date of birth).
+    // Duplicate person (same name + date of birth): blocked, in the file and against every existing
+    // student of any status — the same rule as the admission form. A returning student is re-enrolled,
+    // not imported again; a genuinely different child with the same name and birthday is admitted
+    // through the admission form, which asks for (and audits) that confirmation.
     if (names && dateOfBirth) {
-      const sameName = await ctx.db.query("students").withIndex("by_school_status_name", (q) => q.eq("schoolId", ctx.actor.schoolId).eq("status", "active").eq("lastName", names.lastName)).collect();
-      if (sameName.some((s) => lower(s.firstName) === lower(names.firstName) && s.dateOfBirth === dateOfBirth)) {
-        r.warnings.push({ field: "fullName", message: `A student named ${label} with the same date of birth already exists` });
+      trackPerson(`${personNameKey(names.firstName, names.lastName)}|${dateOfBirth}`, (first) => r.errors.push({ field: "fullName", message: `${label} with the same date of birth is repeated (first on row ${first})` }), row.rowNumber);
+      const same = await possibleDuplicates(ctx, ctx.actor.schoolId, { ...names, dateOfBirth });
+      if (same.length) {
+        r.errors.push({ field: "fullName", message: `A student named ${label} with the same date of birth already exists (${same.map((s) => s.scholarNo ? `scholar no. ${s.scholarNo}` : s.admissionNo).join(", ")}). Re-enrol that student, or admit a different child with the same name through Add student.` });
       }
     }
 
@@ -277,7 +311,7 @@ export async function analyzeStudents(ctx: Ctx, rows: ImportRowInput[], opts: { 
     results.push(result);
     if (result.status !== "invalid" && names && cls && section) {
       plans.push({
-        rowNumber: row.rowNumber, ...names, gender, dateOfBirth, admissionNo, admissionDate, classId: cls._id, sectionId: section._id,
+        rowNumber: row.rowNumber, ...names, gender, dateOfBirth, admissionNo, scholar, admissionDate, classId: cls._id, sectionId: section._id,
         email, phone, address, loginId, parentContact,
       });
     }
@@ -294,16 +328,23 @@ export async function commitStudents(ctx: MutationCtx & { actor: Actor }, rows: 
   const school = (await ctx.db.get(ctx.actor.schoolId))!;
   const created: { rowNumber: number; studentId: Id<"students">; name: string; admissionNo: string; membershipId?: Id<"schoolMemberships">; loginId?: string }[] = [];
   const contactIdsByPhone = new Map<string, Id<"guardians">>();
+  // Typed scholar numbers first move the automatic sequence past them, so an
+  // automatic number for an earlier row can never take a later row's number.
+  for (const p of plans) if (p.scholar) await syncScholarCounter(ctx, school._id, p.scholar.scholarNoKey);
   for (const p of plans) {
+    // The file's scholar number (checked in analyze), or the school's next automatic one.
+    const scholar = await scholarForNewStudent(ctx, school._id, p.scholar);
     let admissionNo = p.admissionNo;
     if (admissionNo) {
       const m = new RegExp(`^${school.code}-(\\d{4})-(\\d+)$`).exec(admissionNo);
       if (m) await ensureCounterAtLeast(ctx, school._id, counterKeys.admission(m[1]), Number(m[2]));
     } else {
-      admissionNo = await nextAdmissionNumber(ctx, school, p.admissionDate.slice(0, 4));
+      // No legacy <code>-<year>-NNNN numbers for students with a scholar number: it is their identifier.
+      admissionNo = scholar?.scholarNo ?? await nextAdmissionNumber(ctx, school, p.admissionDate.slice(0, 4));
     }
     const studentId = await ctx.db.insert("students", {
       schoolId: school._id, admissionNo, firstName: p.firstName, lastName: p.lastName, status: "active", admissionDate: p.admissionDate,
+      ...(scholar ?? {}),
       ...(p.gender ? { gender: p.gender } : {}), ...(p.dateOfBirth ? { dateOfBirth: p.dateOfBirth } : {}),
       ...(p.email ? { email: p.email } : {}), ...(p.phone ? { phone: p.phone } : {}), ...(p.address ? { address: p.address } : {}),
     });

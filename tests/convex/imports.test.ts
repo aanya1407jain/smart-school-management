@@ -120,26 +120,29 @@ describe("student import", () => {
     expect(await counts(t)).toEqual(before);
   });
 
-  test("duplicate Login IDs (in file and existing) are rejected; accounts are reserved then issued", async () => {
+  test("with accounts, students sign in with their scholar number: required, usable and free; accounts are reserved then issued", async () => {
     const { t, A } = await setup();
     const admin = await as(t, A.users.admin);
-    await admin.action(api.accounts.create, { person: { kind: "student", studentId: A.studentB }, loginId: "TAKEN-1" });
+    // A teacher already uses Login ID TAKEN-1.
+    const teacherId = await t.run((ctx) => ctx.db.insert("teachers", { schoolId: A.schoolId, employeeId: "E-77", firstName: "Tara", lastName: "T", specializationSubjectIds: [], status: "active" }));
+    await admin.action(api.accounts.create, { person: { kind: "teacher", teacherId }, loginId: "TAKEN-1" });
     const { results } = await admin.query(api.imports.previewStudents, {
       rows: [
-        row(2, { fullName: "L One", className: "Grade 8", section: "A", loginId: "new-1" }),
-        row(3, { fullName: "L Two", className: "Grade 8", section: "A", loginId: "NEW-1" }),
-        row(4, { fullName: "L Three", className: "Grade 8", section: "A", loginId: "taken-1" }),
-        row(5, { fullName: "L Four", className: "Grade 8", section: "A", loginId: "no spaces!" }),
+        row(2, { fullName: "L One", className: "Grade 8", section: "A", scholarNo: "new-1", loginId: "ignored-1" }),
+        row(3, { fullName: "L Two", className: "Grade 8", section: "A" }), // no scholar number, school has no automatic numbering
+        row(4, { fullName: "L Three", className: "Grade 8", section: "A", scholarNo: "taken-1" }),
+        row(5, { fullName: "L Four", className: "Grade 8", section: "A", scholarNo: "SR/4" }), // valid scholar number, not usable to sign in
       ],
       createAccounts: true, today: TODAY,
     });
-    expect(results.map((r) => r.status)).toEqual(["valid", "invalid", "invalid", "invalid"]);
+    expect(results.map((r) => r.status)).toEqual(["warning", "invalid", "invalid", "invalid"]);
+    expect(results[0].warnings.map((w) => w.message).join(" ")).toMatch(/students sign in with their scholar number/);
 
     const res = await admin.mutation(api.imports.commitStudentRows, {
-      rows: [row(2, { fullName: "L One", className: "Grade 8", section: "A", loginId: "new-1" }), row(3, { fullName: "L Two", className: "Grade 8", section: "A" })],
+      rows: [row(2, { fullName: "L One", className: "Grade 8", section: "A", scholarNo: "new-1" }), row(3, { fullName: "L Two", className: "Grade 8", section: "A", scholarNo: "NEW-2" })],
       createAccounts: true, today: TODAY,
     });
-    expect(res.created.map((c) => c.loginId)).toEqual(["NEW-1", expect.stringMatching(/^STU-2026-\d{5}$/)]);
+    expect(res.created.map((c) => c.loginId)).toEqual(["NEW-1", "NEW-2"]);
     // Reserved accounts are pending (no identity) until credentials are issued.
     const pending = await t.run((ctx) => Promise.all(res.created.map((c) => ctx.db.get(c.membershipId!))));
     expect(pending.every((m) => m!.status === "invited" && !m!.userId && m!.studentId)).toBe(true);

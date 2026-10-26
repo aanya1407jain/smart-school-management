@@ -14,7 +14,7 @@ import { getInSchool, requirePermission } from "./core/authorization";
 import { forbidden, invalid } from "./core/errors";
 import { vAction, vMembershipStatus, vPermissionSet, vRole } from "./core/validators";
 import { vModuleKey } from "./core/modules";
-import { describeAccess, grantProblems, normalizeGrants, type Grant } from "./core/grants";
+import { ACCOUNTANT_ACCESS, describeAccess, grantProblems, normalizeGrants, type Grant } from "./core/grants";
 import { resolvePermissions } from "./core/permissions";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
@@ -62,8 +62,12 @@ export const updateAccess = schoolMutation({
     if (status && target.status === "invited") throw invalid("This account has no credentials yet. Issue a temporary password first.");
     if (status === "active" && !target.userId) throw invalid("This account has no credentials yet. Issue a temporary password first.");
     if (permissionSets && target.role !== "admin") throw invalid("Permission sets can only be added to administrative memberships.");
-    // A legacy permission-set change replaces any per-member grants (one access model at a time).
-    await ctx.db.patch(target._id, { ...(status ? { status } : {}), ...(permissionSets ? { permissionSets, grants: undefined, accessProfile: undefined, sectionScope: undefined } : {}) });
+    // "Accountant only" is stored as the Accountant grants preset (core/grants.ts), not the legacy
+    // permission set; any other permission-set change (e.g. [] = full administrator) clears grants.
+    const access = !permissionSets ? {}
+      : permissionSets.includes("accountant") ? { permissionSets: [], grants: ACCOUNTANT_ACCESS.grants, accessProfile: ACCOUNTANT_ACCESS.accessProfile, sectionScope: undefined }
+      : { permissionSets, grants: undefined, accessProfile: undefined, sectionScope: undefined };
+    await ctx.db.patch(target._id, { ...(status ? { status } : {}), ...access });
     // Same rule as accounts.setStatus: suspending signs the account out everywhere.
     if (status === "suspended" && target.status !== "suspended" && target.userId) {
       await ctx.scheduler.runAfter(0, internal.accounts.revokeSessions, { userId: target.userId });
@@ -72,7 +76,11 @@ export const updateAccess = schoolMutation({
       schoolId: ctx.actor.schoolId, actor: ctx.actor, action: "membership.access_changed",
       entity: { table: "schoolMemberships", id: target._id },
       summary: `Changed access for ${target.displayName}`,
-      metadata: { ...accountTarget(target), from: { status: target.status, permissionSets: target.permissionSets }, to: { status: status ?? target.status, permissionSets: permissionSets ?? target.permissionSets } },
+      metadata: {
+        ...accountTarget(target),
+        from: { status: target.status, permissionSets: target.permissionSets, grants: target.grants ?? null },
+        to: { status: status ?? target.status, ...("grants" in access ? { permissionSets: access.permissionSets, grants: access.grants ?? null } : { permissionSets: target.permissionSets, grants: target.grants ?? null }) },
+      },
     });
     return { ok: true };
   },

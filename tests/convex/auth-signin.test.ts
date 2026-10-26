@@ -85,11 +85,12 @@ describe("accounts provisioned through Accounts & Import", () => {
     return { t, A, B, admin };
   }
 
-  test("a provisioned student signs in with the generated Login ID + temporary password, must change it, then uses the new one", async () => {
+  test("a provisioned student signs in with their scholar number + the default password, must change it, then uses the new one", async () => {
     const { t, A, admin } = await setup();
     const acc = await admin.action(api.accounts.create, { person: { kind: "student", studentId: A.studentB } });
-    expect(acc.loginId).toMatch(/^STU-\d{4}-\d{5}$/);
-    expect((await signIn(t, { loginId: acc.loginId.toLowerCase(), password: acc.temporaryPassword })).tokens?.token).toBeTruthy();
+    expect(acc.loginId).toBe("ALPHABALA"); // scholar number
+    expect(acc.temporaryPassword).toBe("Aster@123");
+    expect((await signIn(t, { loginId: "alphabala", password: "Aster@123" })).tokens?.token).toBeTruthy();
     const userId = await latestSessionUser(t);
     const me = await as(t, userId);
     // Temporary password: everything but the password change is refused.

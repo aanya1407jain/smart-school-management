@@ -15,7 +15,7 @@ async function addStudents(t: T, A: Awaited<ReturnType<typeof createSchool>>, n:
   return await t.run(async (ctx) => {
     const ids: Id<"students">[] = [];
     for (let i = 0; i < n; i++) {
-      const id = await ctx.db.insert("students", { schoolId: A.schoolId, admissionNo: `${prefix}-${i}`, firstName: `${prefix}${String(i).padStart(4, "0")}`, lastName: "Bulk", status: "active", admissionDate: "2026-04-01" });
+      const id = await ctx.db.insert("students", { schoolId: A.schoolId, admissionNo: `${prefix}-${i}`, scholarNo: `${prefix}-${i}`, scholarNoKey: `${prefix}-${i}`.toUpperCase(), firstName: `${prefix}${String(i).padStart(4, "0")}`, lastName: "Bulk", status: "active", admissionDate: "2026-04-01" });
       await ctx.db.insert("enrollments", { schoolId: A.schoolId, studentId: id, academicYearId: A.yearId, classId: A.classId, sectionId: A.sectionB, rollNo: i + 2, status: "active", startDate: "2026-04-01" });
       ids.push(id);
     }
@@ -65,7 +65,9 @@ describe("bulk account creation", () => {
     expect(job).toMatchObject({ status: "completed", created: 3, skipped: 1, failed: 0, delivered: 3, undelivered: 0 });
     expect(creds.map((c) => c.admissionNo).sort()).toEqual(["Stu-0", "Stu-1", "Stu-2"]);
     expect(new Set(creds.map((c) => c.loginId)).size).toBe(3);
-    expect(creds.every((c) => /^STU-2026-\d{5}$/.test(c.loginId) && /^[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}$/.test(c.temporaryPassword))).toBe(true);
+    // Login ID = scholar number (canonical), first password = the school default.
+    expect(creds.map((c) => c.loginId).sort()).toEqual(["STU-0", "STU-1", "STU-2"]);
+    expect(creds.every((c) => c.temporaryPassword === "Aster@123")).toBe(true);
 
     const state = await t.run(async (ctx) => {
       const users = [];
@@ -167,24 +169,26 @@ describe("bulk account creation", () => {
 
   test("partial failures are reported and only the failed students are retried", async () => {
     const { t, A, admin, ids } = await setup(3);
-    // ids[1] has a pending account whose Login ID is already taken in Convex Auth → createAccount fails.
+    // ids[1] has a pending account on an old Login ID; its scholar number (the new Login ID) is already
+    // taken in Convex Auth by someone else → that student fails, and the stranger's account is not touched.
     const bogus = await t.run(async (ctx) => {
       await ctx.db.insert("schoolMemberships", { schoolId: A.schoolId, loginId: "STU-2026-77777", displayName: "x", role: "student", status: "invited", permissionSets: [], studentId: ids[1] });
       const u = await ctx.db.insert("users", { name: "someone else" });
-      return await ctx.db.insert("authAccounts", { userId: u, provider: "password", providerAccountId: "STU-2026-77777", secret: "x" });
+      return await ctx.db.insert("authAccounts", { userId: u, provider: "password", providerAccountId: "STU-1", secret: "x" });
     });
     const jobId = await admin.mutation(api.bulkAccounts.createJob, { scope: { type: "selected", studentIds: ids } });
     let { job } = await runJob(admin, jobId);
     expect(job).toMatchObject({ status: "completed", created: 2, failed: 1 });
     const failed = await admin.query(api.bulkAccounts.jobItems, { jobId, status: "failed" });
-    expect(failed).toMatchObject([{ admissionNo: "Stu-1", reason: "A sign-in account with this Login ID already exists" }]);
+    expect(failed).toMatchObject([{ admissionNo: "Stu-1", reason: "Login ID STU-1 (the scholar number) is already in use" }]);
+    expect((await t.run((ctx) => ctx.db.get(bogus)))?.providerAccountId).toBe("STU-1");
     // Fix the cause, retry only the failure.
     await t.run((ctx) => ctx.db.delete(bogus));
     expect(await admin.mutation(api.bulkAccounts.retryFailed, { jobId })).toMatchObject({ requeued: 1 });
     const second = await runJob(admin, jobId);
     job = second.job;
     expect(job).toMatchObject({ status: "completed", created: 3, failed: 0 });
-    expect(second.creds.map((c) => c.loginId)).toEqual(["STU-2026-77777"]); // only the retried student
+    expect(second.creds.map((c) => c.loginId)).toEqual(["STU-1"]); // only the retried student, now on the scholar number
   });
 
   test("authorization: only school admins, only their school, only the initiator receives passwords", async () => {
