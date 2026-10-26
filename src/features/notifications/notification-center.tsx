@@ -10,7 +10,7 @@ import { useSchoolMutation, useSchoolQuery } from "@/lib/convex/membership";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { useSession } from "@/features/auth/session-provider";
-import { Badge, Button, Card, ConfirmDialog, EmptyState, PageHeader, QueryView, Segmented, useToast } from "@/components/ui";
+import { Badge, Button, Card, ConfirmDialog, EmptyState, FilterPills, PageHeader, QueryView, Segmented, useToast } from "@/components/ui";
 import { NOTIFICATION_CATEGORY_LABELS } from "@/lib/constants/labels";
 import { relativeTime, formatDateTime } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils/cn";
@@ -194,37 +194,15 @@ export function NotificationCenter() {
       <ConfirmDialog open={confirmClear} onOpenChange={setConfirmClear} title="Clear all notifications?" description="Every notification in your list will be removed. This only affects your own list — the notices, payments and results they point to are not touched." confirmLabel="Clear all" tone="danger" loading={clearing} onConfirm={handleClearAll} />
 
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="scrollbar-thin -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1" role="tablist" aria-label="Category">
-          {cats.map((c) => {
+        <FilterPills
+          label="Category"
+          value={category}
+          onChange={setCategory}
+          items={cats.map((c) => {
             const count = c === "all" ? unread : (unreadByCategory[c] ?? 0);
-            return (
-              <button
-                key={c}
-                role="tab"
-                aria-selected={category === c}
-                onClick={() => setCategory(c)}
-                className={cn(
-                  "flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[13px] font-medium transition-colors",
-                  category === c
-                    ? "bg-sapphire text-white"
-                    : "bg-white/70 text-ink-muted ring-1 ring-line hover:text-ink"
-                )}
-              >
-                <span>{c === "all" ? "All" : NOTIFICATION_CATEGORY_LABELS[c]}</span>
-                {count > 0 && (
-                  <span
-                    className={cn(
-                      "rounded-full px-1.5 py-0.2 text-[11px] font-bold",
-                      category === c ? "bg-white/25 text-white" : "bg-teal-soft text-lagoon"
-                    )}
-                  >
-                    {count}
-                  </span>
-                )}
-              </button>
-            );
+            return { value: c, label: c === "all" ? "All" : NOTIFICATION_CATEGORY_LABELS[c], count: count > 0 ? count : null };
           })}
-        </div>
+        />
         <Segmented
           label="Show"
           size="sm"

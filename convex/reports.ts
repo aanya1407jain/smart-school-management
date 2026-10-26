@@ -210,7 +210,7 @@ async function attendanceOn(ctx: QueryCtx, schoolId: Id<"schools">, yearId: Id<"
   const sessions = (await ctx.db.query("attendanceSessions").withIndex("by_school_date", (q) => q.eq("schoolId", schoolId).eq("date", date)).collect()).filter((s) => s.academicYearId === yearId);
   const counted = sessions.reduce((a, s) => a + s.presentCount + s.absentCount + s.lateCount, 0);
   const attended = sessions.reduce((a, s) => a + s.presentCount + (lateCounts ? s.lateCount : 0), 0);
-  return { marked: sessions.length, absent: sessions.reduce((a, s) => a + s.absentCount, 0), percentage: counted ? Math.round((attended / counted) * 1000) / 10 : null, sectionIds: new Set(sessions.map((s) => s.sectionId)) };
+  return { marked: sessions.length, present: attended, counted, absent: sessions.reduce((a, s) => a + s.absentCount, 0), percentage: counted ? Math.round((attended / counted) * 1000) / 10 : null, sectionIds: new Set(sessions.map((s) => s.sectionId)) };
 }
 
 // ================================================================ admin dashboard
@@ -262,7 +262,7 @@ export const adminDashboard = schoolQuery({
       const trend = [];
       for (const d of dates.slice(0, 15).reverse()) {
         const a = await attendanceOn(ctx, school._id, year._id, d, lateCounts);
-        trend.push({ date: d, percentage: a.percentage });
+        trend.push({ date: d, percentage: a.percentage, present: a.present, counted: a.counted });
       }
       // Latest published exam: class averages from the published result snapshots.
       const exams = !on("academics") ? [] : await ctx.db.query("exams").withIndex("by_school_year", (q) => q.eq("schoolId", school._id).eq("academicYearId", year._id)).collect();

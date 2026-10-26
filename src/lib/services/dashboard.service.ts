@@ -43,7 +43,7 @@ function trend(db: Database, days: number, sectionIds?: Set<ID>) {
       if (v === "present" || (lateCounts && v === "late")) byDate[a.date].ok += 1;
     }
   }
-  return Object.entries(byDate).sort(([a], [b]) => a.localeCompare(b)).slice(-days).map(([date, v]) => ({ date, percentage: v.total ? (v.ok / v.total) * 100 : 0 }));
+  return Object.entries(byDate).sort(([a], [b]) => a.localeCompare(b)).slice(-days).map(([date, v]) => ({ date, percentage: v.total ? (v.ok / v.total) * 100 : 0, present: v.ok, counted: v.total }));
 }
 
 /** Placeholder sports / special-recognition entries for the demo school (spread across its students). */

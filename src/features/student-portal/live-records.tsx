@@ -10,9 +10,10 @@ import { useState } from "react";
 import { Download, FileText, Megaphone } from "lucide-react";
 import type { FunctionReturnType } from "convex/server";
 import type { api } from "@convex/_generated/api";
-import { Badge, Button, Card, CardHeader, EmptyState, StatusBadge } from "@/components/ui";
+import { Badge, BadgeChip, Button, Card, CardHeader, EmptyState, StatusBadge } from "@/components/ui";
 import { ReportCardModal } from "@/features/examinations/report-card";
-import { formatCurrency, formatPercent } from "@/lib/utils/format";
+import { GradeChip, ResultSummary } from "@/features/examinations/result-card";
+import { formatCurrency } from "@/lib/utils/format";
 import { dueLabel, formatDate, todayISO } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils/cn";
 import { TimetableGrid, daysWithLessons } from "@/features/timetable/timetable-grid";
@@ -34,17 +35,15 @@ type ReportHeader = { school: string; student: { name: string; admissionNo: stri
 export function LiveResultCard({ r, header }: { r: LiveResult; header?: ReportHeader }) {
   const [card, setCard] = useState(false);
   return (
-    <Card className="overflow-hidden" data-testid="live-result">
-      <div className="flex items-start justify-between gap-3 border-b border-line/60 bg-gradient-to-r from-alabaster to-white px-5 py-4">
-        <div>
-          {r.term && <p className="text-[12px] font-semibold uppercase tracking-wide text-plum">{r.term}</p>}
-          <h3 className="text-base font-semibold text-sapphire">{r.examName}</h3>
-        </div>
-        <div className="text-right">
-          <p className="text-2xl font-semibold text-sapphire">{formatPercent(r.percentage, 1)}</p>
-          {r.grade && <Badge tone="lavender">Grade {r.grade}</Badge>}
-        </div>
-      </div>
+    <Card className="spatial overflow-hidden transition-all duration-300 hover:-translate-y-0.5 hover:shadow-ambient-lg" data-testid="live-result">
+      <ResultSummary
+        term={r.term}
+        examName={r.examName}
+        percentage={r.percentage}
+        grade={r.grade}
+        rank={r.rank ? `Rank ${r.rank} of ${r.sectionSize}` : null}
+        failed={r.subjects.some((s) => !s.isAbsent && s.marks !== null && !s.passed)}
+      />
       <table className="w-full text-sm">
         <caption className="sr-only">{r.examName} subject results</caption>
         <thead>
@@ -56,20 +55,20 @@ export function LiveResultCard({ r, header }: { r: LiveResult; header?: ReportHe
         </thead>
         <tbody>
           {r.subjects.map((s) => (
-            <tr key={s.subjectId} className="border-t border-line/50">
+            <tr key={s.subjectId} className="border-t border-line/50 transition-colors hover:bg-teal-soft/20">
               <td className="px-5 py-2.5 font-medium text-ink">{s.subject}</td>
-              <td className="px-2 py-2.5 text-right text-ink-soft">
+              <td className="figures px-2 py-2.5 text-right text-ink-soft">
                 {s.isAbsent ? <span className="text-plum">Absent</span> : s.marks === null ? "—" : <><span className="font-semibold text-ink">{s.marks}</span>/{s.maxMarks}</>}
               </td>
-              <td className={cn("px-5 py-2.5 text-right font-semibold", s.passed ? "text-sapphire" : "text-plum")}>{s.grade ?? "—"}</td>
+              <td className="px-5 py-2.5 text-right">{s.grade ? <GradeChip grade={s.grade} passed={s.passed} /> : "—"}</td>
             </tr>
           ))}
         </tbody>
         <tfoot>
           <tr className="border-t border-line bg-alabaster/60">
             <td className="px-5 py-3 font-semibold text-ink">Total</td>
-            <td className="px-2 py-3 text-right font-semibold text-ink">{r.totalMarks}/{r.maxMarks}</td>
-            <td className="px-5 py-3 text-right text-[12.5px] text-ink-muted">{r.rank ? `Rank ${r.rank} of ${r.sectionSize}` : ""}</td>
+            <td className="figures px-2 py-3 text-right font-semibold text-ink">{r.totalMarks}/{r.maxMarks}</td>
+            <td />
           </tr>
         </tfoot>
       </table>
@@ -102,10 +101,10 @@ export function LiveFeesPanel({ fees, today = todayISO() }: { fees: LiveFees; to
   return (
     <div className="space-y-4" data-testid="live-fees">
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <Amount label="Total fees" value={rupees(fees.totals.grossMinor)} />
-        <Amount label="Concession" value={rupees(fees.totals.concessionMinor)} />
-        <Amount label="Paid" value={rupees(fees.totals.paidMinor)} />
-        <Amount label="Outstanding" value={rupees(fees.totals.outstandingMinor)} warn={overdue} />
+        <Amount label="Total fees" value={rupees(fees.totals.grossMinor)} accent="from-sapphire/70 to-lagoon/60" />
+        <Amount label="Concession" value={rupees(fees.totals.concessionMinor)} accent="from-lavender to-mauve" />
+        <Amount label="Paid" value={rupees(fees.totals.paidMinor)} accent="from-emerald-400 to-teal" />
+        <Amount label="Outstanding" value={rupees(fees.totals.outstandingMinor)} warn={overdue} accent={overdue ? "from-amber-400 to-rose-500" : "from-amber-300 to-amber-500"} />
       </div>
       <Card>
         <CardHeader title="Installments" description={fees.academicYear} />
@@ -118,12 +117,12 @@ export function LiveFeesPanel({ fees, today = todayISO() }: { fees: LiveFees; to
               <thead><tr className="text-left text-[11.5px] uppercase tracking-wide text-ink-muted"><th className="py-2">Installment</th><th className="py-2 text-right">Amount</th><th className="py-2 text-right">Concession</th><th className="py-2 text-right">Paid</th><th className="py-2 text-right">Balance</th></tr></thead>
               <tbody>
                 {fees.obligations.map((o) => (
-                  <tr key={o.obligationId} className="border-t border-line/50">
+                  <tr key={o.obligationId} className="figures border-t border-line/50 transition-colors hover:bg-teal-soft/20">
                     <td className="py-2.5"><p className="font-semibold text-ink">{o.label}</p><p className="text-[12px] text-ink-muted">{o.outstandingMinor > 0 ? dueLabel(o.dueDate, today) : `Due ${formatDate(o.dueDate)}`}</p></td>
                     <td className="py-2.5 text-right">{rupees(o.amountMinor)}</td>
                     <td className="py-2.5 text-right">{o.concessionMinor ? `− ${rupees(o.concessionMinor)}` : "—"}</td>
                     <td className="py-2.5 text-right">{rupees(o.paidMinor)}</td>
-                    <td className="py-2.5 text-right">{o.outstandingMinor > 0 ? <span className="font-semibold text-ink">{rupees(o.outstandingMinor)}</span> : <StatusBadge status="paid" />}</td>
+                    <td className="py-2.5 text-right">{o.outstandingMinor > 0 ? <span className="inline-flex items-center gap-2"><span className="font-semibold text-ink">{rupees(o.outstandingMinor)}</span><StatusBadge status={o.dueDate < today ? "overdue" : "pending"} /></span> : <StatusBadge status="paid" />}</td>
                   </tr>
                 ))}
               </tbody>
@@ -136,9 +135,9 @@ export function LiveFeesPanel({ fees, today = todayISO() }: { fees: LiveFees; to
         {fees.payments.length === 0 ? <EmptyState title="No payments recorded" /> : (
           <ul className="divide-y divide-line/60">
             {fees.payments.map((p) => (
-              <li key={p.paymentId} className="flex items-center justify-between gap-3 px-5 py-3 text-sm">
-                <span><span className="font-mono font-semibold text-ink">{p.receiptNo ?? "—"}</span><span className="ml-2 text-ink-muted">{formatDate(p.paidOn)} · {METHOD[p.method] ?? p.method}</span></span>
-                <span className="font-semibold text-ink">{rupees(p.amountMinor)}</span>
+              <li key={p.paymentId} className="flex items-center justify-between gap-3 px-5 py-3 text-sm transition-colors hover:bg-teal-soft/20">
+                <span className="flex flex-wrap items-center gap-2"><BadgeChip tone="neutral">{p.receiptNo ?? "—"}</BadgeChip><span className="text-ink-muted">{formatDate(p.paidOn)} · {METHOD[p.method] ?? p.method}</span></span>
+                <span className="figures font-semibold text-ink">{rupees(p.amountMinor)}</span>
               </li>
             ))}
           </ul>
@@ -148,11 +147,13 @@ export function LiveFeesPanel({ fees, today = todayISO() }: { fees: LiveFees; to
   );
 }
 
-function Amount({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
+/** Split fee card: frosted surface with a gradient accent stripe and tabular amount. */
+function Amount({ label, value, warn, accent }: { label: string; value: string; warn?: boolean; accent: string }) {
   return (
-    <div className="solid-card p-4">
+    <div className="solid-card spatial relative overflow-hidden p-4 pl-5 transition-transform duration-200 hover:-translate-y-0.5">
+      <span aria-hidden className={cn("absolute inset-y-3 left-0 w-1 rounded-r-full bg-gradient-to-b", accent)} />
       <p className="text-[12px] font-medium uppercase tracking-wide text-ink-muted">{label}</p>
-      <p className={cn("mt-1 text-lg font-semibold", warn ? "text-plum" : "text-sapphire")}>{value}</p>
+      <p className={cn("figures mt-1 text-lg font-bold", warn ? "text-plum" : "text-sapphire")}>{value}</p>
     </div>
   );
 }

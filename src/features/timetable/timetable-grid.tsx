@@ -39,13 +39,14 @@ export interface GridLesson {
   conflictReason?: string;
 }
 
+// Soft per-subject colour accents (gradient wash + accent edge).
 const TINTS = [
-  "bg-teal-soft/60 border-l-teal",
-  "bg-sapphire/[0.05] border-l-sapphire/60",
-  "bg-lavender/35 border-l-purple/70",
-  "bg-blush/35 border-l-plum/40",
-  "bg-heather/20 border-l-heather",
-  "bg-alabaster border-l-lagoon/60",
+  "bg-gradient-to-br from-teal-soft/90 to-white/60 border-l-teal",
+  "bg-gradient-to-br from-sapphire/[0.07] to-white/60 border-l-sapphire/60",
+  "bg-gradient-to-br from-lavender/40 to-white/60 border-l-purple/70",
+  "bg-gradient-to-br from-blush/45 to-white/60 border-l-plum/40",
+  "bg-gradient-to-br from-cyan/[0.10] to-white/60 border-l-cyan",
+  "bg-gradient-to-br from-heather/30 to-white/60 border-l-lagoon/60",
 ];
 
 function tintMap(keys: Iterable<string>) {
@@ -167,8 +168,9 @@ export function TimetableGrid({
     );
 
     const cls = cn(
-      "flex h-full min-h-[88px] w-full min-w-0 flex-col gap-1 rounded-lg p-3 text-left transition-all",
-      l ? cn("border border-line/60 border-l-[3px]", tints.get(l.colorKey ?? l.subject)) : cn("border border-dashed border-line/70", HATCH),
+      "flex h-full min-h-[88px] w-full min-w-0 flex-col gap-1 rounded-xl p-3 text-left transition-all duration-200 ease-out",
+      // Spatial schedule card: subject tint + accent edge, soft depth, lift on hover.
+      l ? cn("border border-white/70 border-l-[3px] shadow-[inset_0_1px_0_rgb(255_255_255/0.7),0_1px_2px_rgb(6_49_84/0.05)] hover:-translate-y-0.5 hover:shadow-ambient-lg", tints.get(l.colorKey ?? l.subject)) : cn("border border-dashed border-line/70", HATCH),
       // Drag feedback only while dragging: the drop target lights up, the lesson being moved fades.
       isOver && "ring-2 ring-teal border-teal bg-teal-soft/60",
       isSource && "opacity-40",
@@ -189,7 +191,7 @@ export function TimetableGrid({
             onDragEnd={() => { setDragSource(null); setDragOverCell(null); }}
             onClick={() => onSlotClick(day, p)}
             aria-label={slotLabel?.(day, p, l) ?? `${WEEKDAY_NAMES[day]} ${p.label}: ${l ? l.subject : "empty"}`}
-            className={cn(cls, "hover:-translate-y-0.5 hover:shadow-soft focus:outline-none focus-visible:ring-2 focus-visible:ring-teal", !l && "hover:border-teal hover:bg-teal-soft/40")}
+            className={cn(cls, "hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal active:scale-[0.98]", !l && "hover:border-teal hover:bg-teal-soft/40")}
           >
             {body}
           </button>

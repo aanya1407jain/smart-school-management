@@ -17,3 +17,4 @@ export * from "./progress";
 export * from "./stat-card";
 export * from "./segmented";
 export * from "./query-view";
+export * from "./filter-pills";

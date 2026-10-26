@@ -5,8 +5,7 @@ import { services } from "@/lib/services";
 import { useQuery } from "@/lib/hooks/use-query";
 import { useActiveStudentId } from "@/features/auth/session-provider";
 import { Card, CardHeader, EmptyState, PageHeader, QueryView, StatusBadge } from "@/components/ui";
-import { ChartTooltip, axisProps } from "@/components/charts/chart-card";
-import { CHART, CHART_GRID } from "@/lib/constants/theme";
+import { ChartTooltip, axisProps, barCursor, barProps, gridProps } from "@/components/charts/chart-card";
 import { formatDate } from "@/lib/utils/dates";
 import { ResultCard } from "./result-card";
 
@@ -49,13 +48,13 @@ export function MyResults() {
                       <div className="h-64 px-3 pb-4">
                         <ResponsiveContainer width="100%" height="100%">
                           <BarChart data={compare} margin={{ top: 10, right: 8, left: 0, bottom: 0 }} barGap={2}>
-                            <CartesianGrid vertical={false} stroke={CHART_GRID} />
+                            <CartesianGrid {...gridProps} />
                             <XAxis dataKey="subject" {...axisProps} />
                             <YAxis domain={[0, 100]} {...axisProps} tickFormatter={(v) => `${v}%`} width={46} />
-                            <Tooltip content={<ChartTooltip format={(v) => `${v.toFixed(1)}%`} />} cursor={{ fill: "rgba(188,197,204,0.18)" }} />
+                            <Tooltip content={<ChartTooltip format={(v) => `${v.toFixed(1)}%`} />} cursor={barCursor} />
                             <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />
-                            {prev && <Bar dataKey={prev.examName} fill={CHART.secondary} radius={[4, 4, 0, 0]} maxBarSize={26} />}
-                            <Bar dataKey={latest.examName} fill={CHART.primary} radius={[4, 4, 0, 0]} maxBarSize={26} />
+                            {prev && <Bar dataKey={prev.examName} {...barProps("secondary")} maxBarSize={26} />}
+                            <Bar dataKey={latest.examName} {...barProps("primary")} maxBarSize={26} />
                           </BarChart>
                         </ResponsiveContainer>
                       </div>
