@@ -16,6 +16,7 @@ import { forbidden, invalid } from "./core/errors";
 import { requirePermission } from "./core/authorization";
 import { assertNonEmpty } from "./core/validators";
 import { isAccountantOnly } from "./core/permissions";
+import { isAccountantGrants } from "./core/grants";
 import { teacherDisplayName } from "./model/academics";
 import { writeAudit } from "./model/audit";
 
@@ -51,7 +52,7 @@ export const mine = schoolQuery({
       loginId: m.loginId ?? null,
       email: m.email ?? null,
       role: m.role,
-      accountantOnly: isAccountantOnly(m.role, m.permissionSets),
+      accountantOnly: isAccountantOnly(m.role, m.permissionSets) || (m.role === "admin" && isAccountantGrants(m.grants)),
       school: school.name,
       canRename: m.role === "admin",
       canEditPhone: !!teacher,

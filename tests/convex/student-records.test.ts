@@ -170,7 +170,7 @@ describe("student portal modules (live accounts)", () => {
     const { t, A } = await setup();
     const admin = await as(t, A.users.admin);
     const sid = await t.run(async (ctx) => {
-      const id = await ctx.db.insert("students", { schoolId: A.schoolId, admissionNo: "NEW-1", firstName: "Kabir", lastName: "Rao", status: "active", admissionDate: "2026-06-01" });
+      const id = await ctx.db.insert("students", { schoolId: A.schoolId, admissionNo: "NEW-1", scholarNo: "NEW-1", scholarNoKey: "NEW-1", firstName: "Kabir", lastName: "Rao", status: "active", admissionDate: "2026-06-01" });
       await ctx.db.insert("enrollments", { schoolId: A.schoolId, studentId: id, academicYearId: A.yearId, classId: A.classId, sectionId: A.sectionB, status: "active", startDate: "2026-06-01" });
       return id;
     });

@@ -245,14 +245,17 @@ async function main() {
 
   // Manual/bulk onboarding through the import pipeline (one row), then an account.
   const stamp = String(Date.now()).slice(-6);
-  const row = { rowNumber: 2, values: { fullName: "Ishita Menon", className: "10", section: "C", dateOfBirth: "14/05/2011", gender: "F", parentName: "Kavita Menon", parentPhone: `98450${stamp.slice(0, 5)}` } };
+  // A unique surname per run: the same child (name + date of birth) cannot be imported twice.
+  const surname = `Menon${[...stamp].map((d) => String.fromCharCode(97 + Number(d))).join("")}`;
+  const row = { rowNumber: 2, values: { fullName: `Ishita ${surname}`, className: "10", section: "C", dateOfBirth: "14/05/2011", gender: "F", parentName: "Kavita Menon", parentPhone: `98450${stamp.slice(0, 5)}` } };
   await expectCode("Teacher cannot import students", () => rahul.mutation(api.imports.commitStudentRows, { rows: [row], createAccounts: false, today: TODAY }), "FORBIDDEN");
   const bad = await admin.query(api.imports.previewStudents, { rows: [{ rowNumber: 2, values: { fullName: "No Class" } }, { rowNumber: 3, values: { fullName: "Bad Section", className: "10", section: "Z" } }], createAccounts: false, today: TODAY });
   check("Import preview reports per-row errors (missing class, unknown section)", bad.summary.invalid === 2 && bad.results.every((r) => r.errors.length > 0));
   await expectCode("Import with an invalid row imports nothing", () => admin.mutation(api.imports.commitStudentRows, { rows: [row, { rowNumber: 3, values: { fullName: "Bad Section", className: "10", section: "Z" } }], createAccounts: false, today: TODAY }), "INVALID_ARGUMENT");
   const imported = await admin.mutation(api.imports.commitStudentRows, { rows: [row], createAccounts: true, today: TODAY });
   const newStudent = imported.created[0];
-  check("Import creates the student with a pending account", imported.created.length === 1 && !!newStudent.membershipId && /^STU-\d{4}-\d{5}$/.test(newStudent.loginId ?? ""), newStudent.loginId);
+  check("Import creates the student with a pending account; Login ID = the scholar number", imported.created.length === 1 && !!newStudent.membershipId && /^[A-Z0-9][A-Z0-9._-]+$/.test(newStudent.loginId ?? "") && !/^STU-/.test(newStudent.loginId ?? ""), newStudent.loginId);
+  await expectCode("Importing the same child again is refused (duplicate name + date of birth)", () => admin.mutation(api.imports.commitStudentRows, { rows: [row], createAccounts: false, today: TODAY }), "INVALID_ARGUMENT");
   check("Pending account cannot sign in yet", (await signInFails(newStudent.loginId!, "anything-123")) !== null);
   try {
     await anon.action(api.auth.signIn, { provider: "password", params: { loginId: newStudent.loginId!, password: "Claim1234x", flow: "signUp" } });
@@ -261,12 +264,12 @@ async function main() {
     check("Public sign-up cannot claim a pending (reserved) Login ID", true, codeOf(e));
   }
   const [issued] = await admin.action(api.accounts.issuePendingCredentials, { targetMembershipIds: [newStudent.membershipId!] });
-  check("Admin issues a temporary password", issued.ok && issued.loginId === newStudent.loginId);
+  check("Admin issues the default student password", issued.ok && issued.loginId === newStudent.loginId && issued.temporaryPassword === "Aster@123");
   const temp = issued.ok ? issued.temporaryPassword : "";
   const ishita = await signIn(newStudent.loginId!.toLowerCase(), temp);
   const sIshita = await ishita.query(api.users.session, {});
   check("New student signs in; role and school come from the server; must change password",
-    sIshita.status === "signedIn" && sIshita.viewer.role === "student" && sIshita.viewer.school.slug === vAdmin.school.slug && sIshita.viewer.mustChangePassword === true && sIshita.viewer.student?.name === "Ishita Menon");
+    sIshita.status === "signedIn" && sIshita.viewer.role === "student" && sIshita.viewer.school.slug === vAdmin.school.slug && sIshita.viewer.mustChangePassword === true && sIshita.viewer.student?.name === `Ishita ${surname}`);
   await expectCode("Temporary password: school functions are refused until it is changed", () => ishita.query(api.users.viewer, {}), "PASSWORD_CHANGE_REQUIRED");
   await expectCode("Temporary password: student data is refused until it is changed", () => ishita.query(api.attendance.studentHistory, { studentId: newStudent.studentId }), "PASSWORD_CHANGE_REQUIRED");
   await ishita.action(api.account.changePassword, { currentPassword: temp, newPassword: "Ishita#2026" });
@@ -274,7 +277,7 @@ async function main() {
   // Student portal: the new account resolves ITS OWN student record server-side.
   const pIshita = await ishita.query(api.studentPortal.myProfile, {});
   check("Student portal: new account resolves its own record, class, section and year",
-    pIshita.state === "ok" && pIshita.student.studentId === newStudent.studentId && pIshita.student.name === "Ishita Menon" &&
+    pIshita.state === "ok" && pIshita.student.studentId === newStudent.studentId && pIshita.student.name === `Ishita ${surname}` &&
     pIshita.enrollment?.sectionDisplayName === "10-C" && pIshita.enrollmentState === "active" && pIshita.academicYear?.academicYearId === currentYear._id,
     pIshita.state === "ok" ? `${pIshita.enrollment?.sectionDisplayName} ${pIshita.academicYear?.name}` : pIshita.state);
   await expectCode("Student portal: another student's profile is NOT_FOUND", () => ishita.query(api.studentPortal.myProfile, { studentId: aaravId }), "NOT_FOUND");

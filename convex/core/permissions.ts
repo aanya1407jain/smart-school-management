@@ -25,6 +25,8 @@ export const PERMISSIONS = [
   "students:read:all", "students:write", "students:read:assigned",
   // Student lifecycle: promotion, transfer certificates, pass-out (convex/studentLifecycle.ts)
   "students:lifecycle",
+  // Download the admission register (convex/admissionRegister.ts → exportPage). Always paired with students:read:all.
+  "students:export",
   // Academics & staff
   "academics:manage", "staff:manage",
   // Attendance — VIEW is separate from MARK (create) and EDIT (correct).

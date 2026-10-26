@@ -28,6 +28,8 @@ export const counterKeys = {
   receipt: (academicYearId: Id<"academicYears">) => `receipt:${academicYearId}`,
   /** Transfer certificate numbers restart each academic year: TC/AA/26-27/0001. */
   transferCertificate: (academicYearId: Id<"academicYears">) => `tc:${academicYearId}`,
+  /** Scholar numbers are one running sequence per school: <prefix>0001 (model/scholarNumbers.ts). */
+  scholar: () => "scholar",
 };
 
 function assertKey(key: string) {

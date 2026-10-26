@@ -53,7 +53,8 @@ describe("createStudentWithEnrollment", () => {
       { name: "Zoya Khan", rollNo: 3, studentId: z.studentId },
     ]);
     expect(a).toMatchObject({ section: "8-A", rollNo: 1, classTeacher: "Class T" });
-    expect(Object.keys(a).sort()).toEqual(["admissionNo", "classTeacher", "rollNo", "section", "studentId", "warnings"]);
+    expect(Object.keys(a).sort()).toEqual(["admissionNo", "classTeacher", "rollNo", "scholarNo", "section", "studentId", "warnings"]);
+    expect(a.scholarNo).toBeNull(); // this school has no automatic scholar numbering
     expect(JSON.stringify(a)).not.toMatch(/password/i);
     const enr = await t.run(async (ctx) => ctx.db.query("enrollments").withIndex("by_student_year", (q) => q.eq("studentId", a.studentId).eq("academicYearId", A.yearId)).unique());
     expect(enr).toMatchObject({ sectionId: A.sectionA, classId: A.classId, status: "active", startDate: "2026-06-10" });
@@ -122,11 +123,11 @@ describe("createStudentWithEnrollment", () => {
 
   test("an admitted student later gets an account through the existing account path — linked to the same record, no duplicates", async () => {
     const { t, A, admin } = await setup();
-    const r = await admin.mutation(api.academics.createStudentWithEnrollment, form(A, { firstName: "Neel" }));
+    const r = await admin.mutation(api.academics.createStudentWithEnrollment, { ...form(A, { firstName: "Neel" }), scholarNo: "SR 501" });
     const students = await count(t, "students");
     const acc = await admin.action(api.accounts.create, { person: { kind: "student", studentId: r.studentId } });
     const m = await t.run((ctx) => ctx.db.get(acc.membershipId));
-    expect(m).toMatchObject({ role: "student", studentId: r.studentId });
+    expect(m).toMatchObject({ role: "student", studentId: r.studentId, loginId: "SR501" }); // Login ID = scholar number
     const me = await as(t, m!.userId!);
     await me.action(api.account.changePassword, { currentPassword: acc.temporaryPassword, newPassword: "Neel#2026x" });
     const p = await me.query(api.studentPortal.myProfile, {});

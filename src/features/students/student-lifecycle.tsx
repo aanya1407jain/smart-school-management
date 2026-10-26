@@ -148,7 +148,7 @@ function StudentChecklist({ rows, picked, setPicked }: { rows: CheckRow[]; picke
               checked={picked.has(r.studentId)}
               onChange={(e) => { const next = new Set(picked); if (e.target.checked) next.add(r.studentId); else next.delete(r.studentId); setPicked(next); }}
               label={r.name}
-              description={`${r.admissionNo}${r.scholarNo ? ` · Scholar no. ${r.scholarNo}` : ""}${r.disabledReason ? ` · ${r.disabledReason}` : ""}`}
+              description={`Scholar No: ${r.scholarNo ?? "—"}${r.disabledReason ? ` · ${r.disabledReason}` : ""}`}
             />
           </li>
         ))}
@@ -301,7 +301,7 @@ function IssueTcModal({ onClose, onIssued }: { onClose: () => void; onIssued: (i
         {lookupKey && found === null && <p className="text-[13px] text-plum">No student has scholar number “{lookupKey}”. Add the scholar number on the student&apos;s profile first.</p>}
         {student && (
           <div className="rounded-xl bg-teal-soft/30 px-3 py-2.5 text-sm">
-            <span className="font-semibold text-ink">{student.name}</span> · {student.admissionNo} · Scholar no. {student.scholarNo} · <Badge tone={student.status === "active" ? "teal" : "neutral"}>{student.status}</Badge>
+            <span className="font-semibold text-ink">{student.name}</span> · Scholar No: {student.scholarNo} · <Badge tone={student.status === "active" ? "teal" : "neutral"}>{student.status}</Badge>
             {student.status === "transferred" && <span className="block text-[13px] text-plum">This student has already left the school.</span>}
           </div>
         )}

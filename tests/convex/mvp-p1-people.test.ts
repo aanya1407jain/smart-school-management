@@ -8,6 +8,7 @@ import { describe, expect, test } from "vitest";
 import { api, internal } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { resolvePermissions, ROLE_PERMISSIONS, PERMISSION_SETS } from "../../convex/core/permissions";
+import { ACCOUNTANT_ACCESS } from "../../convex/core/grants";
 import { as, createSchool, errorCode, makeTest, type T } from "./fixtures";
 
 const audits = (t: T, action: string) => t.run(async (ctx) => (await ctx.db.query("auditLogs").collect()).filter((a) => a.action === action));
@@ -36,7 +37,10 @@ describe("restricted-admin accountant", () => {
     // Full admin until restricted.
     expect(await errorCode(accountant.query(api.audit.list, {}))).toBe("NO_ERROR");
     await admin.mutation(api.memberships.updateAccess, { targetMembershipId: acc.membershipId, permissionSets: ["accountant"] });
-    expect((await audits(t, "membership.access_changed")).at(-1)?.metadata).toMatchObject({ to: { permissionSets: ["accountant"] } });
+    // "Accountant only" is stored as the Accountant grants preset, not the legacy permission set.
+    expect((await audits(t, "membership.access_changed")).at(-1)?.metadata).toMatchObject({ to: { permissionSets: [], grants: ACCOUNTANT_ACCESS.grants } });
+    expect(await t.run((ctx) => ctx.db.get(acc.membershipId))).toMatchObject({ permissionSets: [], grants: ACCOUNTANT_ACCESS.grants, accessProfile: "Accountant" });
+    expect((await admin.query(api.accounts.listStaffAccounts, {})).find((r) => r.membershipId === acc.membershipId)).toMatchObject({ accountantOnly: true, customAccess: null });
 
     const { structureId } = await accountant.mutation(api.fees.createStructure, { name: "Tuition", classIds: [A.classId], components: [{ label: "Tuition", amountMinor: 1000 }], installments: [{ label: "T1", dueDate: "2026-06-01", amountMinor: 1000 }], activate: true });
     await accountant.mutation(api.fees.assignStructure, { structureId, target: { kind: "students", studentIds: [A.studentA] } });
@@ -89,7 +93,7 @@ describe("restricted-admin accountant", () => {
     const r = await admin.mutation(internal.accounts.reserveForPerson, { callerMembershipId: A.memberships.admin, person: { kind: "staff", displayName: "Meera (Accounts)", accountantOnly: true } });
     expect(r.loginId).toMatch(/^ADMIN-\d{3}$/);
     const m = await t.run((ctx) => ctx.db.get(r.membershipId));
-    expect(m).toMatchObject({ role: "admin", permissionSets: ["accountant"], status: "invited", displayName: "Meera (Accounts)" });
+    expect(m).toMatchObject({ role: "admin", permissionSets: [], grants: ACCOUNTANT_ACCESS.grants, accessProfile: "Accountant", status: "invited", displayName: "Meera (Accounts)" });
     expect(await errorCode(admin.mutation(internal.accounts.reserveForPerson, { callerMembershipId: A.memberships.admin, person: { kind: "staff", displayName: "  ", accountantOnly: false } }))).toBe("INVALID_ARGUMENT");
     const ct = await as(t, A.users.classTeacher);
     expect(await errorCode(ct.mutation(internal.accounts.reserveForPerson, { callerMembershipId: A.memberships.classTeacher, person: { kind: "staff", displayName: "X", accountantOnly: false } }))).toBe("FORBIDDEN");

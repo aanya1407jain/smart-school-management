@@ -394,9 +394,10 @@ describe("source inventory: every public function is classified", () => {
     "notices.ts": { module: "administration" },
     "events.ts": { module: "administration" },
     "reports.ts": { module: "administration", core: ["adminDashboard"] },
-    "academics.ts": { module: "students", only: ["listUnenrolledStudents", "enrollStudent", "endEnrollment", "createStudentWithEnrollment", "updateStudentProfile", "enrollmentHistory", "studentCounts"] },
+    "academics.ts": { module: "students", only: ["listUnenrolledStudents", "enrollStudent", "endEnrollment", "createStudentWithEnrollment", "updateStudentProfile", "enrollmentHistory", "rollNumberHistory", "studentCounts"] },
     "imports.ts": { module: "students", only: ["previewStudents", "commitStudentRows"] },
     "studentLifecycle.ts": { module: "students" },
+    "admissionRegister.ts": { module: "students" },
   };
   // studentPortal.ts maps functions to several modules.
   const PORTAL: Record<string, ModuleKey | "core"> = { myProfile: "core", myCertificates: "core", myTimetable: "academics", myHomework: "academics", myResults: "academics", myFees: "finance", myNotices: "administration" };

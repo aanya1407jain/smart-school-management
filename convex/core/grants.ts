@@ -47,6 +47,8 @@ export type Cell =
       sectionScoped?: readonly Permission[];
       /** Cells with the same `link` in a module share one server control and are granted together. */
       link?: string;
+      /** Another action of the same module that must also be granted (e.g. Export needs View). */
+      requires?: Action;
       /** What the cell lets the person do, in plain words. */
       description: string;
     }
@@ -61,7 +63,7 @@ export const CAPABILITIES: Record<ModuleKey, Record<Action, Cell>> = {
     edit: { kind: "grantable", permissions: ["students:write", "files:upload"], link: "write", description: "Edit student details, scholar numbers and enrolments" },
     delete: { kind: "unavailable", reason: "Student records are never deleted. Use a transfer certificate or pass-out instead." },
     approve: { kind: "grantable", permissions: ["students:lifecycle"], description: "Promote classes, issue transfer certificates, pass students out" },
-    export: { kind: "unavailable", reason: NO_EXPORT },
+    export: { kind: "grantable", permissions: ["students:export"], requires: "view", description: "Download the admission register (needs View)" },
   },
   academics: {
     view: { kind: "grantable", permissions: ["homework:read:all"], description: "See homework across the school" },
@@ -124,6 +126,20 @@ export const GRANT_PRESETS: { key: string; label: string; grants: Grant[] }[] = 
   { key: "office_viewer", label: "Office (view only)", grants: [{ module: "students", actions: ["view"] }, { module: "attendance", actions: ["view"] }, { module: "administration", actions: ["view"] }] },
 ];
 
+/**
+ * "Accountant only" office logins (Accounts & Import, memberships.updateAccess):
+ * the Accountant preset as grants, replacing the legacy `permissionSets: ["accountant"]`.
+ */
+export const ACCOUNTANT_ACCESS: { grants: Grant[]; accessProfile: string } = {
+  grants: GRANT_PRESETS.find((p) => p.key === "accountant")!.grants,
+  accessProfile: "Accountant",
+};
+
+/** True when stored grants are exactly the Accountant preset (shown as "Accountant only"). */
+export function isAccountantGrants(grants: readonly { module: string; actions: readonly string[] }[] | undefined): boolean {
+  return grants !== undefined && JSON.stringify(normalizeGrants(grants)) === JSON.stringify(normalizeGrants(ACCOUNTANT_ACCESS.grants));
+}
+
 export function isAction(value: unknown): value is Action {
   return typeof value === "string" && (ACTIONS as readonly string[]).includes(value);
 }
@@ -161,6 +177,7 @@ export function grantProblems(role: string, grants: readonly { module: string; a
     for (const a of g.actions) {
       const cell = caps[a];
       if (cell.kind === "unavailable") problems.push(`${ACTION_LABELS[a]} in ${labelOf(g.module)} cannot be granted: ${cell.reason}`);
+      else if (cell.requires && !g.actions.includes(cell.requires)) problems.push(`${labelOf(g.module)}: ${ACTION_LABELS[a]} needs ${ACTION_LABELS[cell.requires]} as well.`);
     }
     const links = new Set(g.actions.map((a) => caps[a]).flatMap((c) => (c.kind === "grantable" && c.link ? [c.link] : [])));
     for (const link of links) {
@@ -189,6 +206,7 @@ export function permissionsFromGrants(grants: readonly { module: string; actions
     for (const a of g.actions) {
       const cell = caps[a];
       if (cell.kind !== "grantable") continue;
+      if (cell.requires && !g.actions.includes(cell.requires)) continue; // malformed: dependent cell without its prerequisite
       if (cell.link) {
         const members = ACTIONS.filter((x) => { const c = caps[x]; return c.kind === "grantable" && c.link === cell.link; });
         if (!members.every((x) => g.actions.includes(x))) continue;

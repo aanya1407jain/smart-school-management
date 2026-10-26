@@ -35,7 +35,7 @@ import { internalAction, internalMutation, internalQuery, type QueryCtx } from "
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { AppError } from "./core/errors";
-import { planSectionRoster, nameSortKey, type RosterPlanRow } from "./model/rollNumbers";
+import { applyRollNo, planSectionRoster, nameSortKey, type RosterPlanRow } from "./model/rollNumbers";
 import { fullName } from "./model/academics";
 import { writeAudit } from "./model/audit";
 import { getSchoolSettings } from "./core/authorization";
@@ -182,7 +182,7 @@ export const applySection = internalMutation({
     if (rosterFingerprint(rows) !== fingerprint) {
       return { sectionId, section: section.displayName, status: "stale" as const, changed: 0, message: "The roster changed since the dry run. Nothing was written; run the dry run again and review it." };
     }
-    for (const r of changes) await ctx.db.patch(r.enrollment._id, { rollNo: r.proposedRollNo });
+    for (const r of changes) await applyRollNo(ctx, r, "reconciliation");
     await writeAudit(ctx, {
       schoolId: school._id,
       action: "enrollment.roll_numbers_reconciled",

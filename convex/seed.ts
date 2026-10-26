@@ -236,7 +236,8 @@ export const createStructure = internalMutation({
     // `demo` then creates the Convex Auth accounts, which activates them.
     await reserveAccount(ctx, { schoolId, role: "admin", kind: "admin", loginId: ds.admin.login.loginId, displayName: ds.admin.displayName, email: ds.admin.email });
     for (const t of ds.teachers) if (t.login) await reserveAccount(ctx, { schoolId, role: "teacher", kind: "teacher", loginId: t.login.loginId, displayName: `${t.firstName} ${t.lastName}`, email: t.email, teacherId: teacherIds[t.key] });
-    for (const s of ds.students) if (s.login) await reserveAccount(ctx, { schoolId, role: "student", kind: "student", loginId: s.login.loginId, displayName: `${s.firstName} ${s.lastName}`, email: s.email, studentId: studentIds[s.key] });
+    // Demo personas keep their documented Login IDs (login screen helper, README); real students use their scholar number.
+    for (const s of ds.students) if (s.login) await reserveAccount(ctx, { schoolId, role: "student", kind: "student", loginId: s.login.loginId, displayName: `${s.firstName} ${s.lastName}`, email: s.email, studentId: studentIds[s.key], seedStudentLoginId: true });
 
     // Fee structures + per-student obligations (amounts in minor units).
     for (const fs of ds.feeStructures) {

@@ -193,7 +193,7 @@ async function serverAnswer(ctx, path) {
   check("W1 Admin adds student", await waitText(page, /Student enrolled/i));
   const dialogText = await page.getByRole("dialog").innerText();
   check("W1 No password is generated or shown here (accounts are created in Accounts & Import)", /Accounts & Import/i.test(dialogText) && !/Welcome@123/.test(dialogText));
-  check("W1 Enrolled in the selected section (10-A) with a system roll number", /10-A · Roll \d+/.test(await page.getByTestId("created-section").innerText()) && /^AA-\d{4}-\d+$/.test((await page.getByTestId("created-admission").innerText()).trim()));
+  check("W1 Enrolled in the selected section (10-A) with a system roll number", /10-A · Roll \d+/.test(await page.getByTestId("created-section").innerText()) && /^(?!AA-)[A-Z0-9][A-Z0-9 ./_-]*$/.test((await page.getByTestId("created-scholar").innerText()).trim()));
   await page.getByRole("button", { name: /open profile/i }).click();
   await page.waitForURL(/\/admin\/students\/[a-z0-9]{20,}$/);
   const newStudentPath = new URL(page.url()).pathname;
@@ -488,7 +488,7 @@ async function serverAnswer(ctx, path) {
   await page.getByTestId("issued-login-id").first().waitFor();
   const newId = (await page.getByTestId("issued-login-id").first().innerText()).trim();
   const tempPw = (await page.getByTestId("issued-password").first().innerText()).trim();
-  check("ACC Admin creates an account: Login ID + one-time temporary password shown", /^STU-\d{4}-\d{5}$/.test(newId) && /^[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}$/.test(tempPw), `${personName} ${newId}`);
+  check("ACC Admin creates an account: Login ID = scholar number, default password shown", /^[A-Z0-9][A-Z0-9._-]+$/.test(newId) && !/^STU-/.test(newId) && tempPw === "Aster@123", `${personName} ${newId}`);
   await page.getByRole("button", { name: /^done$/i }).click();
   const personRow = page.locator("tr", { hasText: personName });
   check("ACC Account shows as Active with its Login ID", await personRow.getByText("Active").first().waitFor().then(() => true, () => false) && (await personRow.innerText()).includes(newId));
@@ -510,8 +510,8 @@ async function serverAnswer(ctx, path) {
   check("LIVE After the password change the student lands on the student dashboard", await page.waitForURL(/\/student\/dashboard/).then(() => true, () => false), page.url());
   await page.getByTestId("live-student-dashboard").waitFor();
   check("LIVE No 'records aren't available in this preview' message", !(await text(page)).includes("aren't available in this preview"));
-  check("LIVE Dashboard shows the student's own name, admission no., class-section and year",
-    (await page.getByTestId("dash-name").innerText()).trim() === personName && (await page.getByTestId("dash-admission").innerText()).trim().length > 0 &&
+  check("LIVE Dashboard shows the student's own name, scholar no. (= Login ID), class-section and year",
+    (await page.getByTestId("dash-name").innerText()).trim() === personName && (await page.getByTestId("dash-scholar").innerText()).trim().replace(/\s+/g, "").toUpperCase() === newId &&
     /^\d+-[A-Z]$/.test((await page.getByTestId("dash-class").innerText()).trim()) && /^\d{4}-\d{2}$/.test((await page.getByTestId("dash-year").innerText()).trim()),
     `${await page.getByTestId("dash-class").innerText()} ${await page.getByTestId("dash-year").innerText()}`);
   check("LIVE No demo persona data is shown to a real account", !/Aarav Sharma|Priya Sharma/.test(await page.locator("body").innerText()));
@@ -557,16 +557,19 @@ async function serverAnswer(ctx, path) {
   // A unique surname per run, so repeated runs against the same deployment stay unambiguous.
   const IRA = `Ira Kulkarni${Array.from({ length: 5 }, () => String.fromCharCode(97 + Math.floor(Math.random() * 26))).join("")}`;
   const good = `${IRA},10,C,03/09/2011,F,Meena Kulkarni,98450 66001`;
+  // A second new student without an account, so the bulk-account step never depends on leftovers from earlier runs.
+  const RAVI = `Ravi Joshi${Array.from({ length: 5 }, () => String.fromCharCode(97 + Math.floor(Math.random() * 26))).join("")}`;
+  const good2 = `${RAVI},10,C,11/02/2011,M,Anil Joshi,98450 66002`;
   await page.getByLabel(/upload students file/i).setInputFiles(csv([header, good, "Bad Section,10,Z,03/09/2011,F,,"]));
   check("ACC Import explains that roll numbers are system-assigned", await waitText(page, /Roll numbers are assigned automatically based on the complete class roster/));
   await page.getByRole("button", { name: /validate 2 row/i }).click();
   check("ACC Import preview reports the invalid row (row 3) and blocks import",
     await waitText(page, /1 row\(s\) have errors/) && await waitText(page, /Section "?Z"?|section/i) && await page.getByRole("button", { name: /^import 2 student/i }).isDisabled());
   await page.getByRole("button", { name: /upload corrected file/i }).click();
-  await page.getByLabel(/upload students file/i).setInputFiles(csv([header, good]));
-  await page.getByRole("button", { name: /validate 1 row/i }).click();
-  await page.getByRole("button", { name: /^import 1 student/i }).click();
-  check("ACC Corrected file imports", await waitText(page, /Imported 1 student\(s\) from students\.csv/));
+  await page.getByLabel(/upload students file/i).setInputFiles(csv([header, good, good2]));
+  await page.getByRole("button", { name: /validate 2 row/i }).click();
+  await page.getByRole("button", { name: /^import 2 student/i }).click();
+  check("ACC Corrected file imports", await waitText(page, /Imported 2 student\(s\) from students\.csv/));
 
   // Roll numbers: 10-C is numbered 1..n after the import (Ira included); bulk account creation for selected students.
   await page.getByRole("tab", { name: /^students$/i }).click();
@@ -577,7 +580,7 @@ async function serverAnswer(ctx, path) {
   const eligibleBoxes = page.locator("tbody").getByRole("checkbox");
   const nEligible = await eligibleBoxes.count();
   await page.locator("tr", { hasText: IRA }).getByRole("checkbox").check();
-  const other = page.locator("tbody tr", { hasNot: page.getByText(IRA) }).filter({ has: page.getByRole("checkbox") }).first();
+  const other = page.locator("tbody tr", { hasText: RAVI });
   const otherName = (await other.locator("td").nth(1).locator("p").first().innerText()).trim();
   await other.getByRole("checkbox").check();
   check("BULK Toolbar shows the selection", (await page.getByTestId("selection-summary").innerText()).startsWith("2 students selected"));
@@ -596,7 +599,7 @@ async function serverAnswer(ctx, path) {
   check("BULK Run completes with an accurate summary", /2 accounts created · 0 skipped · 0 failed/.test(await page.getByTestId("bulk-summary").innerText()));
   const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: /download 2 credentials/i }).click()]);
   const csvText = await (await download.createReadStream()).toArray().then((chunks) => Buffer.concat(chunks).toString("utf8"));
-  check("BULK Credential CSV lists exactly the new accounts", csvText.split(/\r?\n/).length === 3 && csvText.includes(IRA) && /STU-\d{4}-\d{5}/.test(csvText));
+  check("BULK Credential CSV lists exactly the new accounts", csvText.split(/\r?\n/).length === 3 && csvText.includes(IRA) && csvText.includes("Aster@123") && !/STU-\d{4}-\d{5}/.test(csvText));
   await page.getByRole("dialog").getByRole("button", { name: /^close$/i }).click();
   check("BULK Selected students now show Active accounts", await page.locator("tr", { hasText: IRA }).getByText("Active").waitFor().then(() => true, () => false));
   // Cross-page selection: "select all matching" covers every student without an account (server-side), and a filter change clears it.
@@ -630,7 +633,7 @@ async function serverAnswer(ctx, path) {
     await page.waitForURL(/\/student\/dashboard/);
     await page.getByTestId("live-student-dashboard").waitFor();
     check("LIVE Bulk-created account resolves its own record (name, admission no., 10-C)",
-      (await page.getByTestId("dash-name").innerText()).trim() === IRA && (await page.getByTestId("dash-admission").innerText()).trim() === admission &&
+      (await page.getByTestId("dash-name").innerText()).trim() === IRA && (await page.getByTestId("dash-scholar").innerText()).trim() === admission &&
       (await page.getByTestId("dash-class").innerText()).trim() === "10-C" && cls.includes("10-C"), `${loginId} ${cls}`);
     await logout(page);
     // The class teacher of 10-C marks the register; the live student sees it and is notified.

@@ -12,7 +12,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import readXlsxFile from "read-excel-file/node";
-import { api } from "../../convex/_generated/api";
+import { api, internal } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { STUDENT_IMPORT, bestSheetIndex, matchColumns, missingRequiredFields } from "../../convex/model/importSpecs";
 import { sheetFromMatrix, type ParsedSheet } from "../../src/features/imports/spreadsheet";
@@ -151,16 +151,18 @@ describe("student workbook import (student_import_test_data.xlsx)", () => {
     const { A } = await school(t);
     const { sheet, mapping } = await loadWorkbook();
     const admin = await as(t, A.users.admin);
+    // Students sign in with their scholar number: the school numbers them automatically (<prefix>NNNN).
+    await t.mutation(internal.scholarNumberMaintenance.configure, { schoolSlug: "alpha", prefix: "0246CBSE" });
     const result = await admin.mutation(api.imports.commitStudentRows, { rows: rowsFor(sheet, mapping), createAccounts: true, today: TODAY });
     expect(result.created).toHaveLength(25);
-    expect(result.created.every((c) => /^STU-2026-\d{5}$/.test(c.loginId ?? ""))).toBe(true);
-    const pending = await t.run(async (ctx) => (await ctx.db.query("schoolMemberships").collect()).filter((m) => m.loginId?.startsWith("STU-2026-")));
+    expect(result.created.every((c) => /^0246CBSE\d{4}$/.test(c.loginId ?? ""))).toBe(true);
+    const pending = await t.run(async (ctx) => (await ctx.db.query("schoolMemberships").collect()).filter((m) => m.loginId?.startsWith("0246CBSE")));
     expect(pending).toHaveLength(25);
     expect(pending.every((m) => m.status === "invited" && !m.userId && m.role === "student")).toBe(true);
     // Credentials are issued explicitly; only then does a sign-in identity exist.
     const issued = await admin.action(api.accounts.issuePendingCredentials, { targetMembershipIds: [result.created[0].membershipId as Id<"schoolMemberships">] });
     expect(issued[0].ok).toBe(true);
-    const users = await t.run(async (ctx) => (await ctx.db.query("users").collect()).filter((u) => u.loginId?.startsWith("STU-2026-")));
+    const users = await t.run(async (ctx) => (await ctx.db.query("users").collect()).filter((u) => u.loginId?.startsWith("0246CBSE")));
     expect(users).toHaveLength(1);
   });
 

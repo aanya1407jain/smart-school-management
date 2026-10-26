@@ -46,9 +46,9 @@ import { internalMutation, type MutationCtx, type QueryCtx } from "./_generated/
 import { schoolAction, schoolMutation, schoolQuery } from "./core/functions";
 import { requireActor, type Actor } from "./core/actor";
 import { getCurrentAcademicYearId, getInSchool, requirePermission } from "./core/authorization";
-import { conflict, forbidden, invalid } from "./core/errors";
+import { AppError, conflict, forbidden, invalid } from "./core/errors";
 import { fullName } from "./model/academics";
-import { existingAccountFor, generateTemporaryPassword, provisionAccount, reserveAccount } from "./model/accounts";
+import { existingAccountFor, initialPasswordFor, isLoginIdTaken, provisionAccount, renameLoginId, reserveAccount, studentLoginId } from "./model/accounts";
 import { writeAudit } from "./model/audit";
 
 /**
@@ -193,7 +193,7 @@ export const jobItems = schoolQuery({
     for (const it of items) {
       if (undeliveredOnly && it.delivered) continue;
       const s = await ctx.db.get(it.studentId);
-      out.push({ itemId: it._id, name: s ? fullName(s) : "", admissionNo: s?.admissionNo ?? "", reason: it.reason ?? null, loginId: it.loginId ?? null, membershipId: it.membershipId ?? null });
+      out.push({ itemId: it._id, name: s ? fullName(s) : "", admissionNo: s ? s.scholarNo ?? "no scholar no." : "", reason: it.reason ?? null, loginId: it.loginId ?? null, membershipId: it.membershipId ?? null });
       if (out.length >= 500) break;
     }
     return out;
@@ -379,10 +379,25 @@ export const beginItem = internalMutation({
       }
       return { provision: false };
     }
+    // Students sign in with their scholar number: without a usable one the item fails (others continue).
+    let scholarLogin: string;
+    try {
+      scholarLogin = await studentLoginId(ctx, actor.schoolId, student._id);
+    } catch (e) {
+      await transition(ctx, item, "failed", { reason: e instanceof AppError ? e.data.message : "No usable scholar number" });
+      return { provision: false };
+    }
     let membershipId: Id<"schoolMemberships">, loginId: string;
     if (existing) {
       if (!existing.loginId) { await transition(ctx, item, "failed", { reason: "Pending account has no Login ID" }); return { provision: false }; }
-      membershipId = existing._id; loginId = existing.loginId;
+      if (existing.loginId !== scholarLogin) {
+        if (await isLoginIdTaken(ctx, scholarLogin)) { await transition(ctx, item, "failed", { reason: `Login ID ${scholarLogin} (the scholar number) is already in use` }); return { provision: false }; }
+        await renameLoginId(ctx, existing, scholarLogin);
+      }
+      membershipId = existing._id; loginId = scholarLogin;
+    } else if (await isLoginIdTaken(ctx, scholarLogin)) {
+      await transition(ctx, item, "failed", { reason: `Login ID ${scholarLogin} (the scholar number) is already in use` });
+      return { provision: false };
     } else {
       const yearId = await getCurrentAcademicYearId(ctx, actor.schoolId);
       const year = await ctx.db.get(yearId);
@@ -393,7 +408,8 @@ export const beginItem = internalMutation({
       membershipId = reserved.membershipId; loginId = reserved.loginId;
     }
     await ctx.db.patch(item._id, { membershipId, loginId });
-    return { provision: true, loginId, displayName: fullName(student), admissionNo: student.admissionNo, section: await currentSectionLabel(ctx, actor.schoolId, student._id) };
+    // `admissionNo` in the credential sheet now carries the scholar number (the student's identifier everywhere in the UI).
+    return { provision: true, loginId, displayName: fullName(student), admissionNo: student.scholarNo ?? student.admissionNo, section: await currentSectionLabel(ctx, actor.schoolId, student._id) };
   },
 });
 
@@ -423,9 +439,9 @@ export const processBatch = schoolAction({
     for (const { itemId } of claim.items) {
       const begin: Infer<typeof vBegin> = await ctx.runMutation(internal.bulkAccounts.beginItem, { callerMembershipId: ctx.membershipId, itemId });
       if (!begin.provision) continue;
-      const temporaryPassword = generateTemporaryPassword();
+      const { password: temporaryPassword, defaultPassword } = initialPasswordFor("student");
       try {
-        await provisionAccount(ctx, { loginId: begin.loginId, password: temporaryPassword, mustChangePassword: true });
+        await provisionAccount(ctx, { loginId: begin.loginId, password: temporaryPassword, mustChangePassword: true, defaultPassword });
       } catch (e) {
         const msg = e instanceof Error && /already exists/i.test(e.message) ? "A sign-in account with this Login ID already exists" : "Could not create the account — retry later";
         await ctx.runMutation(internal.bulkAccounts.finishItem, { callerMembershipId: ctx.membershipId, itemId, ok: false, reason: msg });

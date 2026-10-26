@@ -51,7 +51,7 @@ export function LiveStudentsList() {
           <option value="">All sections</option>
           {(sections ?? []).map((s) => <option key={s._id} value={s._id}>{s.displayName}</option>)}
         </Select>
-        <SearchInput value={search} onChange={setSearch} placeholder="Search name or admission no." label="Filter students by name or admission no." className="sm:w-72" />
+        <SearchInput value={search} onChange={setSearch} placeholder="Search name or scholar no." label="Filter students by name or scholar no." className="sm:w-72" />
       </Card>
       <Card>
         {list.status === "LoadingFirstPage" ? <LoadingState variant="table" /> : list.results.length === 0 ? (
@@ -64,7 +64,7 @@ export function LiveStudentsList() {
                 <Avatar name={p.name} size="sm" />
                 <Link href={`/admin/students/${p.personId}`} className="min-w-0 flex-1 hover:text-lagoon">
                   <span className="block font-semibold text-ink">{p.name}</span>
-                  <span className="block text-[12px] text-ink-muted">{p.number} · {p.detail}</span>
+                  <span className="block text-[12px] text-ink-muted">Scholar No: {p.number} · {p.detail}</span>
                 </Link>
                 {canWrite && <Link href={`/admin/students/${p.personId}/edit`} className="text-[13px] font-medium text-lagoon hover:underline">Edit</Link>}
               </li>
@@ -130,7 +130,7 @@ export function LiveStudentEdit({ studentId }: { studentId: string }) {
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [k]: e.target.value });
   return (
     <div className="mx-auto max-w-3xl">
-      <PageHeader title={`Edit ${s.firstName} ${s.lastName}`} description={`Admission no. ${s.admissionNo}. Class, admission number and status are changed through enrollment and accounts, not here.`} />
+      <PageHeader title={`Edit ${s.firstName} ${s.lastName}`} description={`${s.scholarNo ? `Scholar No: ${s.scholarNo}. ` : ""}Class and status are changed through enrollment and accounts, not here.`} />
       <Card className="space-y-4 p-6">
         <div className="grid gap-4 sm:grid-cols-2">
           <FormField label="First name" required><Input value={form.firstName} onChange={set("firstName")} /></FormField>
@@ -140,7 +140,7 @@ export function LiveStudentEdit({ studentId }: { studentId: string }) {
           <FormField label="Email"><Input type="email" value={form.email} onChange={set("email")} /></FormField>
           <FormField label="Phone"><Input value={form.phone} onChange={set("phone")} /></FormField>
           <FormField label="Blood group"><Select value={form.bloodGroup} onChange={set("bloodGroup")}>{BLOOD.map((b) => <option key={b} value={b}>{b || "—"}</option>)}</Select></FormField>
-          <FormField label="Scholar number" hint="The school's register number. Must be unique; leave empty if not used."><Input value={form.scholarNo} onChange={set("scholarNo")} maxLength={30} /></FormField>
+          <FormField label="Scholar number" hint="The school's register number and the student's sign-in Login ID. Must be unique; changing it changes how the student signs in."><Input value={form.scholarNo} onChange={set("scholarNo")} maxLength={30} /></FormField>
         </div>
         <FormField label="Address"><Textarea rows={2} value={form.address} onChange={set("address")} /></FormField>
         {error && <p role="alert" className="text-[13px] text-plum">{error}</p>}

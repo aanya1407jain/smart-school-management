@@ -18,7 +18,7 @@ async function setup() {
   const admin = await as(t, A.users.admin);
   // A student with a real class placement and no account yet.
   const studentId = await t.run(async (ctx) => {
-    const id = await ctx.db.insert("students", { schoolId: A.schoolId, admissionNo: "ADM-777", firstName: "Meera", lastName: "Nair", status: "active", admissionDate: "2026-04-01", dateOfBirth: "2013-02-03", gender: "female" });
+    const id = await ctx.db.insert("students", { schoolId: A.schoolId, admissionNo: "ADM-777", scholarNo: "ADM-777", scholarNoKey: "ADM-777", firstName: "Meera", lastName: "Nair", status: "active", admissionDate: "2026-04-01", dateOfBirth: "2013-02-03", gender: "female" });
     await ctx.db.insert("enrollments", { schoolId: A.schoolId, studentId: id, academicYearId: A.yearId, classId: A.classId, sectionId: A.sectionB, rollNo: 9, status: "active", startDate: "2026-04-01" });
     return id;
   });
@@ -55,7 +55,7 @@ describe("student portal: identity resolution after account creation", () => {
     const s = await me.query(api.users.session, {});
     expect(s.status === "signedIn" && !s.viewer.mustChangePassword && s.viewer.student?.studentId === studentId).toBe(true);
     const p = expectOwnRecord(await myProfileOf(me), studentId);
-    expect(p.student).toMatchObject({ name: "Meera Nair", admissionNo: "ADM-777", dateOfBirth: "2013-02-03", gender: "female", status: "active" });
+    expect(p.student).toMatchObject({ name: "Meera Nair", admissionNo: "ADM-777", scholarNo: "ADM-777", dateOfBirth: "2013-02-03", gender: "female", status: "active" });
     expect(p.academicYear).toMatchObject({ academicYearId: A.yearId, name: "2026-27" });
     expect(p.enrollmentState).toBe("active");
     expect(p.enrollment).toMatchObject({ className: "Grade 8", sectionName: "B", sectionDisplayName: "8-B", status: "active", rollNo: 9 });
@@ -79,7 +79,7 @@ describe("student portal: identity resolution after account creation", () => {
   test("a student imported without an account later gets one and resolves the SAME student record", async () => {
     const { t, A, admin } = await setup();
     const imp = await admin.mutation(api.imports.commitStudentRows, {
-      rows: [{ rowNumber: 2, values: { fullName: "Zoya Khan", className: "Grade 8", section: "A", admissionNo: "IMP-1" } }],
+      rows: [{ rowNumber: 2, values: { fullName: "Zoya Khan", className: "Grade 8", section: "A", admissionNo: "IMP-1", scholarNo: "IMP-1" } }],
       createAccounts: false, today: "2026-07-01",
     });
     const importedId = imp.created[0].studentId;

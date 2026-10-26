@@ -34,7 +34,6 @@ export function AcademicsWorkspace() {
   return (
     <div className="space-y-6">
       {dataSource === "live" ? <LiveAcademicsWorkspace /> : <DemoAcademicsWorkspace />}
-      <SyllabusProgressTracker />
     </div>
   );
 }
@@ -91,10 +90,10 @@ function LiveAcademicsWorkspace() {
         actions={years.length > 0 && (
           <div className="flex items-center gap-2">
             <label htmlFor="ay" className="text-[13px] text-ink-muted">Academic year</label>
-           <Select id="ay" value={activeYear?._id ?? ""} onChange={(e) => setSelectedYearId(e.target.value)} className="w-52">
-            {!activeYear && <option value="">Choose a year</option>}
-            {years.map((y) => <option key={y._id} value={y._id}>{y.name}{y.isCurrent ? " (current)" : ""}</option>)}
-          </Select>
+            <Select id="ay" value={activeYear?._id ?? ""} onChange={(e) => setSelectedYearId(e.target.value)} className="w-52">
+              {!activeYear && <option value="">Choose a year</option>}
+              {years.map((y) => <option key={y._id} value={y._id}>{y.name}{y.isCurrent ? " (current)" : ""}</option>)}
+            </Select>
           </div>
         )}
       />
@@ -106,9 +105,11 @@ function LiveAcademicsWorkspace() {
             : "The school has no current academic year. Choose a year above, or make one current in Academic years."}
         </div>
       )}
-        <div className="mt-6">
-          <SyllabusProgressTracker />
-        </div>
+
+      {/* Syllabus Progress Tracker - Principal View Only */}
+      <div className="mb-6 mt-4">
+        <SyllabusProgressTracker readOnly={true} />
+      </div>
 
       <Tabs value={tab} onValueChange={changeTab}>
         <TabsList

@@ -35,7 +35,9 @@ import { writeAudit } from "./model/audit";
 import { compareRosterEntries, renumberSections } from "./model/rollNumbers";
 import { notifyUsers } from "./model/notifications";
 import { nextAdmissionNumber } from "./model/counters";
-import { assertScholarNoAvailable, parseScholarNo, possibleDuplicates } from "./model/scholarNumbers";
+import { assertScholarNoAvailable, parseScholarNo, possibleDuplicates, scholarForNewStudent, syncScholarCounter } from "./model/scholarNumbers";
+import { renameLoginId } from "./model/accounts";
+import { canonicalLoginId } from "./model/loginIds";
 import { activeStudentRecordIds, enrolledInSection, enrolledStudents } from "./model/studentCounts";
 import { enabledList, moduleStateOf } from "./model/modules";
 import type { ModuleKey } from "./core/modules";
@@ -612,12 +614,15 @@ export const createStudentWithEnrollment = studentsMutation({
     // The same child must not be admitted twice (same name + date of birth, any status).
     const duplicates = await possibleDuplicates(ctx, school._id, { firstName, lastName, dateOfBirth: a.dateOfBirth });
     if (duplicates.length && a.confirmNotDuplicate !== true) {
-      throw new AppError("CONFLICT", `A student named ${firstName} ${lastName} with the same date of birth already exists (admission no. ${duplicates.map((d) => d.admissionNo).join(", ")}). Re-enrol that student instead, or confirm this is a different child.`, { duplicateOf: duplicates.map((d) => d._id).join(",") });
+      throw new AppError("CONFLICT", `A student named ${firstName} ${lastName} with the same date of birth already exists (${duplicates.map((d) => d.scholarNo ? `scholar no. ${d.scholarNo}` : d.admissionNo).join(", ")}). Re-enrol that student instead, or confirm this is a different child.`, { duplicateOf: duplicates.map((d) => d._id).join(",") });
     }
-    const admissionNo = await nextAdmissionNumber(ctx, school, a.admissionDate.slice(0, 4));
+    // The typed scholar number, or the school's next automatic one (model/scholarNumbers.ts).
+    const scholarNo = await scholarForNewStudent(ctx, school._id, scholar);
+    // The scholar number IS the student's identifier: no legacy <code>-<year>-NNNN number when there is one.
+    const admissionNo = scholarNo?.scholarNo ?? await nextAdmissionNumber(ctx, school, a.admissionDate.slice(0, 4));
     const studentId = await ctx.db.insert("students", {
       schoolId: school._id, admissionNo, firstName, lastName, status: "active", admissionDate: a.admissionDate, dateOfBirth: a.dateOfBirth, address,
-      ...(scholar ?? {}),
+      ...(scholarNo ?? {}),
       ...(a.gender ? { gender: a.gender } : {}), ...(email ? { email } : {}), ...(phone ? { phone } : {}),
       ...(a.bloodGroup?.trim() ? { bloodGroup: a.bloodGroup.trim() } : {}),
     });
@@ -649,12 +654,13 @@ export const createStudentWithEnrollment = studentsMutation({
     await writeAudit(ctx, {
       schoolId: school._id, actor: ctx.actor, action: "student.admitted", entity: { table: "students", id: studentId },
       summary: `Admitted ${fullName({ firstName, lastName })} (${admissionNo}) to ${section.displayName} (${year.name})`,
-      metadata: { enrollmentId, sectionId: section._id, parentContactReused: !!existingContact, ...(scholar ? { scholarNo: scholar.scholarNo } : {}), ...(duplicates.length ? { confirmedNotDuplicateOf: duplicates.map((d) => d.admissionNo) } : {}) },
+      metadata: { enrollmentId, sectionId: section._id, parentContactReused: !!existingContact, ...(scholarNo ? { scholarNo: scholarNo.scholarNo, scholarNoAutomatic: !scholar } : {}), ...(duplicates.length ? { confirmedNotDuplicateOf: duplicates.map((d) => d.admissionNo) } : {}) },
     });
     const rollNo = (await ctx.db.get(enrollmentId))?.rollNo ?? null;
     return {
       studentId,
       admissionNo,
+      scholarNo: scholarNo?.scholarNo ?? null,
       section: section.displayName,
       rollNo,
       classTeacher: classTeacher && classTeacher.schoolId === school._id ? teacherDisplayName(classTeacher) : null,
@@ -708,7 +714,19 @@ export const updateStudentProfile = studentsMutation({
     const patch: Partial<Doc<"students">> = {};
     if (a.scholarNo !== undefined) {
       const scholar = parseScholarNo(a.scholarNo);
-      if (scholar) await assertScholarNoAvailable(ctx, ctx.actor.schoolId, scholar.scholarNoKey, student._id);
+      if (scholar) {
+        await assertScholarNoAvailable(ctx, ctx.actor.schoolId, scholar.scholarNoKey, student._id);
+        await syncScholarCounter(ctx, ctx.actor.schoolId, scholar.scholarNoKey);
+      }
+      // A student with a sign-in account signs in with the scholar number: keep the Login ID in step.
+      const account = (await ctx.db.query("schoolMemberships").withIndex("by_student", (q) => q.eq("studentId", student._id)).collect())
+        .find((m) => m.schoolId === ctx.actor.schoolId && m.role === "student");
+      if (account && scholar?.scholarNoKey !== student.scholarNoKey) {
+        if (!scholar) throw invalid("This student signs in with their scholar number, so it cannot be removed.", { scholarNo: "Required: used to sign in" });
+        const login = canonicalLoginId(scholar.scholarNoKey);
+        if (!login) throw invalid("This scholar number cannot be used to sign in (letters, digits, . _ - only).", { scholarNo: "Not usable as a Login ID" });
+        await renameLoginId(ctx, account, login);
+      }
       patch.scholarNo = scholar?.scholarNo;
       patch.scholarNoKey = scholar?.scholarNoKey;
     }
@@ -780,6 +798,35 @@ export const enrollmentHistory = studentsQuery({
       }
     }
     return out.sort((a, b) => b.yearStart.localeCompare(a.yearStart) || b.startDate.localeCompare(a.startDate) || (a.status === "active" ? -1 : 1));
+  },
+});
+
+/**
+ * Every roll number a student has been given (newest first, at most 200):
+ * section, year, from → to and why. Complements `enrollmentHistory`, which
+ * shows only each enrollment's last number. Same access rule.
+ */
+export const rollNumberHistory = studentsQuery({
+  args: { studentId: v.id("students") },
+  handler: async (ctx, { studentId }) => {
+    const student = await requireStudentAccess(ctx, studentId, { all: "students:read:all", own: "profile:read:own" });
+    const rows = await ctx.db.query("rollNumberHistory").withIndex("by_school_student", (q) => q.eq("schoolId", ctx.actor.schoolId).eq("studentId", student._id)).order("desc").take(200);
+    const names = new Map<string, string>();
+    const nameOf = async (id: Id<"sections"> | Id<"academicYears">) => {
+      if (!names.has(id)) {
+        const doc = await ctx.db.get(id);
+        names.set(id, doc ? ("displayName" in doc ? doc.displayName : doc.name) : "");
+      }
+      return names.get(id)!;
+    };
+    const out = [];
+    for (const r of rows) {
+      out.push({
+        enrollmentId: r.enrollmentId, academicYear: await nameOf(r.academicYearId), section: await nameOf(r.sectionId),
+        fromRollNo: r.fromRollNo ?? null, toRollNo: r.toRollNo, changedAt: r.changedAt, reason: r.reason,
+      });
+    }
+    return out;
   },
 });
 
