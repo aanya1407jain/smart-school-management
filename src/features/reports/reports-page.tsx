@@ -15,7 +15,7 @@ import {
   Avatar, Badge, Button, Card, CardHeader, DataTable, EmptyState, FilterBar, FilterSelect,
   Input, PageHeader, QueryView, SearchInput, Select, StatCard, StatusBadge, Tabs, TabsContent, TabsList,
 } from "@/components/ui";
-import { ChartCard, ChartTooltip, axisProps } from "@/components/charts/chart-card";
+import { ChartCard, ChartTooltip, axisProps, barCursor, barProps, gridProps } from "@/components/charts/chart-card";
 import { CHART, CHART_GRID } from "@/lib/constants/theme";
 import { formatCurrency, formatPercent } from "@/lib/utils/format";
 import { formatDate, todayISO } from "@/lib/utils/dates";
@@ -60,7 +60,6 @@ export function ReportsPage() {
 }
 
 const pctTick = (v: number) => `${v}%`;
-const barCursor = { fill: "rgba(188,197,204,0.18)" };
 
 function StudentStats() {
   const { dataSource } = useSession();
@@ -99,24 +98,24 @@ function StudentStats() {
             <ChartCard title="Students by class" description="Split by gender">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={d.byClass} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid vertical={false} stroke={CHART_GRID} />
+                  <CartesianGrid {...gridProps} />
                   <XAxis dataKey="name" {...axisProps} />
                   <YAxis {...axisProps} width={32} allowDecimals={false} />
                   <Tooltip content={<ChartTooltip />} cursor={barCursor} />
                   <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="female" name="Girls" stackId="g" fill={CHART.primary} maxBarSize={40} stroke="#fff" strokeWidth={1} />
-                  <Bar dataKey="male" name="Boys" stackId="g" fill={CHART.secondary} radius={[4, 4, 0, 0]} maxBarSize={40} stroke="#fff" strokeWidth={1} />
+                  <Bar dataKey="female" name="Girls" stackId="g" {...barProps("primary", { top: false })} maxBarSize={40} stroke="#fff" strokeWidth={1} />
+                  <Bar dataKey="male" name="Boys" stackId="g" {...barProps("secondary")} maxBarSize={40} stroke="#fff" strokeWidth={1} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
             <ChartCard title="Section strength" description="Students per section (capacity 40)">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={d.bySection} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid vertical={false} stroke={CHART_GRID} />
+                  <CartesianGrid {...gridProps} />
                   <XAxis dataKey="label" {...axisProps} interval={0} fontSize={11} />
                   <YAxis {...axisProps} width={32} allowDecimals={false} />
                   <Tooltip content={<ChartTooltip />} cursor={barCursor} />
-                  <Bar dataKey="students" name="Students" fill={CHART.single} radius={[4, 4, 0, 0]} maxBarSize={28} />
+                  <Bar dataKey="students" name="Students" {...barProps("single")} maxBarSize={28} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
@@ -163,7 +162,7 @@ function AttendanceReport() {
             <ChartCard title="Monthly attendance" description={`School-wide · dashed line = ${d.threshold}% requirement`}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={d.monthly} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                  <CartesianGrid vertical={false} stroke={CHART_GRID} />
+                  <CartesianGrid {...gridProps} />
                   <XAxis dataKey="month" {...axisProps} />
                   <YAxis domain={live ? [0, 100] : [80, 100]} {...axisProps} tickFormatter={pctTick} width={46} />
                   <Tooltip content={<ChartTooltip format={(v) => `${v.toFixed(1)}%`} />} />
@@ -178,11 +177,11 @@ function AttendanceReport() {
             <ChartCard title="Students by attendance band" description="How many students fall in each range">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={d.bands} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid vertical={false} stroke={CHART_GRID} />
+                  <CartesianGrid {...gridProps} />
                   <XAxis dataKey="band" {...axisProps} />
                   <YAxis {...axisProps} width={32} allowDecimals={false} />
                   <Tooltip content={<ChartTooltip />} cursor={barCursor} />
-                  <Bar dataKey="students" name="Students" fill={CHART.secondary} radius={[4, 4, 0, 0]} maxBarSize={48} />
+                  <Bar dataKey="students" name="Students" {...barProps("secondary")} maxBarSize={48} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
@@ -191,11 +190,11 @@ function AttendanceReport() {
           <ChartCard title="Attendance by section" description="Year to date" height={280}>
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={d.bySection} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid vertical={false} stroke={CHART_GRID} />
+                <CartesianGrid {...gridProps} />
                 <XAxis dataKey="label" {...axisProps} interval={0} fontSize={11} />
                 <YAxis domain={live ? [0, 100] : [80, 100]} {...axisProps} tickFormatter={pctTick} width={46} />
                 <Tooltip content={<ChartTooltip format={(v) => `${v.toFixed(1)}%`} />} cursor={barCursor} />
-                <Bar dataKey="percentage" name="Attendance" fill={CHART.single} radius={[4, 4, 0, 0]} maxBarSize={28} />
+                <Bar dataKey="percentage" name="Attendance" {...barProps("single")} maxBarSize={28} />
               </BarChart>
             </ResponsiveContainer>
           </ChartCard>
@@ -441,24 +440,24 @@ function FeeReport() {
             <ChartCard title="Collected vs outstanding by class">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={s.byClass} margin={{ top: 8, right: 8, left: 4, bottom: 0 }}>
-                  <CartesianGrid vertical={false} stroke={CHART_GRID} />
+                  <CartesianGrid {...gridProps} />
                   <XAxis dataKey="name" {...axisProps} />
                   <YAxis {...axisProps} tickFormatter={(v) => `₹${Math.round(v / 1000)}k`} width={52} />
                   <Tooltip content={<ChartTooltip format={(v) => formatCurrency(v)} />} cursor={barCursor} />
                   <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="collected" name="Collected" stackId="f" fill={CHART.primary} maxBarSize={40} stroke="#fff" strokeWidth={1} />
-                  <Bar dataKey="outstanding" name="Outstanding" stackId="f" fill={CHART.secondary} radius={[4, 4, 0, 0]} maxBarSize={40} stroke="#fff" strokeWidth={1} />
+                  <Bar dataKey="collected" name="Collected" stackId="f" {...barProps("collected", { top: false })} maxBarSize={40} stroke="#fff" strokeWidth={1} />
+                  <Bar dataKey="outstanding" name="Outstanding" stackId="f" {...barProps("outstanding")} maxBarSize={40} stroke="#fff" strokeWidth={1} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
             <ChartCard title="Collections by payment method">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={byMethod} layout="vertical" margin={{ top: 8, right: 16, left: 8, bottom: 0 }}>
-                  <CartesianGrid horizontal={false} stroke={CHART_GRID} />
+                  <CartesianGrid horizontal={false} stroke={CHART_GRID} strokeDasharray="3 3" />
                   <XAxis type="number" {...axisProps} tickFormatter={(v) => `₹${Math.round(v / 1000)}k`} />
                   <YAxis type="category" dataKey="method" {...axisProps} width={96} />
                   <Tooltip content={<ChartTooltip format={(v) => formatCurrency(v)} />} cursor={barCursor} />
-                  <Bar dataKey="amount" name="Collected" fill={CHART.single} radius={[0, 4, 4, 0]} maxBarSize={24} />
+                  <Bar dataKey="amount" name="Collected" {...barProps("single", { horizontal: true })} maxBarSize={24} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
@@ -677,11 +676,11 @@ function LiveExamReport() {
         <ChartCard title="Average by section" description="Percentage of total marks">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={perf.sections.map((x) => ({ name: x.section, average: x.averagePercentage ?? 0 }))} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-              <CartesianGrid vertical={false} stroke={CHART_GRID} />
+              <CartesianGrid {...gridProps} />
               <XAxis dataKey="name" {...axisProps} />
               <YAxis domain={[0, 100]} {...axisProps} tickFormatter={pctTick} width={46} />
               <Tooltip content={<ChartTooltip format={(v) => `${v.toFixed(1)}%`} />} cursor={barCursor} />
-              <Bar dataKey="average" name="Average" fill={CHART.single} radius={[4, 4, 0, 0]} maxBarSize={36} />
+              <Bar dataKey="average" name="Average" {...barProps("single")} maxBarSize={36} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -720,24 +719,24 @@ function DemoExamReport() {
             <ChartCard title="Average by class" description="Class average vs highest score">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={d.byClass} margin={{ top: 8, right: 8, left: 0, bottom: 0 }} barGap={2}>
-                  <CartesianGrid vertical={false} stroke={CHART_GRID} />
+                  <CartesianGrid {...gridProps} />
                   <XAxis dataKey="name" {...axisProps} />
                   <YAxis domain={[0, 100]} {...axisProps} tickFormatter={pctTick} width={46} />
                   <Tooltip content={<ChartTooltip format={(v) => `${v.toFixed(1)}%`} />} cursor={barCursor} />
                   <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="average" name="Average" fill={CHART.primary} radius={[4, 4, 0, 0]} maxBarSize={28} />
-                  <Bar dataKey="highest" name="Highest" fill={CHART.secondary} radius={[4, 4, 0, 0]} maxBarSize={28} />
+                  <Bar dataKey="average" name="Average" {...barProps("primary")} maxBarSize={28} />
+                  <Bar dataKey="highest" name="Highest" {...barProps("secondary")} maxBarSize={28} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
             <ChartCard title="Grade distribution" description="Students by overall grade">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={d.gradeDistribution} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid vertical={false} stroke={CHART_GRID} />
+                  <CartesianGrid {...gridProps} />
                   <XAxis dataKey="grade" {...axisProps} />
                   <YAxis {...axisProps} width={32} allowDecimals={false} />
                   <Tooltip content={<ChartTooltip />} cursor={barCursor} />
-                  <Bar dataKey="students" name="Students" fill={CHART.single} radius={[4, 4, 0, 0]} maxBarSize={40} />
+                  <Bar dataKey="students" name="Students" {...barProps("single")} maxBarSize={40} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
@@ -746,11 +745,11 @@ function DemoExamReport() {
             <ChartCard title="Subject averages" description="All classes combined">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={d.bySubject} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 0 }}>
-                  <CartesianGrid horizontal={false} stroke={CHART_GRID} />
+                  <CartesianGrid horizontal={false} stroke={CHART_GRID} strokeDasharray="3 3" />
                   <XAxis type="number" domain={[0, 100]} {...axisProps} tickFormatter={pctTick} />
                   <YAxis type="category" dataKey="subject" {...axisProps} width={118} />
                   <Tooltip content={<ChartTooltip format={(v) => `${v.toFixed(1)}%`} />} cursor={barCursor} />
-                  <Bar dataKey="average" name="Average" fill={CHART.secondary} radius={[0, 4, 4, 0]} maxBarSize={20} />
+                  <Bar dataKey="average" name="Average" {...barProps("secondary", { horizontal: true })} maxBarSize={20} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
@@ -800,7 +799,7 @@ function DemoAcademicReport() {
                 <ChartCard key={s} title={s} description={data.length > 1 ? `${last >= first ? "+" : ""}${(last - first).toFixed(1)} pts since ${data[0].exam}` : data[0]?.exam} height={170}>
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={data} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
-                      <CartesianGrid vertical={false} stroke={CHART_GRID} />
+                      <CartesianGrid {...gridProps} />
                       <XAxis dataKey="exam" {...axisProps} fontSize={11} />
                       <YAxis domain={[50, 90]} {...axisProps} tickFormatter={pctTick} width={42} />
                       <Tooltip content={<ChartTooltip format={(v) => `${v.toFixed(1)}%`} />} />

@@ -28,7 +28,7 @@ export function FeeObligationsTable({ obligations }: { obligations: ObligationVi
         { key: "amount", header: "Amount", align: "right", cell: (o) => formatCurrency(o.amount) },
         { key: "concession", header: "Concession", align: "right", cell: (o) => (o.concession ? `− ${formatCurrency(o.concession)}` : "—") },
         { key: "paid", header: "Paid", align: "right", cell: (o) => formatCurrency(o.paid) },
-        { key: "outstanding", header: "Balance", align: "right", cell: (o) => <span className={o.outstanding > 0 ? "font-semibold text-ink" : "text-ink-muted"}>{formatCurrency(o.outstanding)}</span> },
+        { key: "outstanding", header: "Balance", align: "right", cell: (o) => <span className={o.outstanding > 0 ? "figures font-semibold text-ink" : "figures text-ink-muted"}>{formatCurrency(o.outstanding)}</span> },
         { key: "status", header: "Status", cell: (o) => <div className="space-y-0.5"><StatusBadge status={o.status} />{o.outstanding > 0 && <p className="text-[11.5px] text-ink-muted">{dueLabel(o.dueDate)}</p>}</div> },
       ]}
     />
@@ -49,7 +49,7 @@ export function PaymentsTable({ payments }: { payments: PaymentRow[] }) {
         empty={<EmptyState title="No payments yet" description="Payments recorded by the school office appear here with their receipts." />}
         columns={[
           { key: "receipt", header: "Receipt", primary: true, cell: (p) => <div><p className="font-mono text-[13px] font-semibold text-ink">{p.receiptNo}</p><p className="text-[12px] text-ink-muted">{formatDate(p.paidOn)}</p></div> },
-          { key: "amount", header: "Amount", align: "right", cell: (p) => <span className="font-semibold text-ink">{formatCurrency(p.amount)}</span> },
+          { key: "amount", header: "Amount", align: "right", cell: (p) => <span className="figures font-semibold text-ink">{formatCurrency(p.amount)}</span> },
           { key: "method", header: "Method", cell: (p) => PAYMENT_METHOD_LABELS[p.method] },
           { key: "ref", header: "Reference", cell: (p) => <span className="font-mono text-[12.5px]">{p.reference}</span> },
         ]}
@@ -198,9 +198,9 @@ export function ReceiptModal({ receiptId, onClose }: { receiptId: string | null;
                 <dt className="text-ink-muted">Recorded by</dt>
                 <dd className="text-right text-ink">{r.recordedBy}</dd>
               </dl>
-              <div className="flex items-center justify-between rounded-xl bg-teal-soft px-4 py-3">
+              <div className="flex items-center justify-between rounded-xl bg-gradient-to-r from-teal-soft to-cyan/10 px-4 py-3 ring-1 ring-inset ring-teal/20">
                 <span className="font-medium text-lagoon">Amount received</span>
-                <span className="text-xl font-semibold text-sapphire">{formatCurrency(r.receipt.amount)}</span>
+                <span className="figures text-xl font-bold text-sapphire">{formatCurrency(r.receipt.amount)}</span>
               </div>
               <p className="mt-3 text-[12px] text-ink-muted">
                 {r.balanceNow !== null && <>Current outstanding balance: <span className="font-semibold text-ink">{formatCurrency(r.balanceNow)}</span> · </>}Issued {formatDateTime(r.receipt.issuedAt)}

@@ -1,4 +1,6 @@
+import Link from "next/link";
 import type { ReactNode } from "react";
+import { ArrowRight } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 
 export type Tone = "teal" | "sapphire" | "lavender" | "plum" | "neutral" | "blush" | "outline";
@@ -13,13 +15,58 @@ const tones: Record<Tone, string> = {
   outline: "bg-white/60 text-ink-soft ring-line",
 };
 
-export function Badge({ tone = "neutral", children, className, dot }: { tone?: Tone; children: ReactNode; className?: string; dot?: boolean }) {
+/**
+ * Monospace pill for identifiers: scholar numbers, roll numbers, serials,
+ * codes. Teal by default; `tone="neutral"` / `"sapphire"` for secondary ids.
+ */
+export function BadgeChip({ children, tone = "teal", className, title }: { children: ReactNode; tone?: "teal" | "neutral" | "sapphire"; className?: string; title?: string }) {
+  const tones = {
+    teal: "bg-teal-soft/80 text-lagoon border-teal/25",
+    neutral: "bg-alabaster text-ink-soft border-line",
+    sapphire: "bg-sapphire/[0.05] text-sapphire border-sapphire/15",
+  };
   return (
-    <span className={cn("inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-[12px] font-medium ring-1 ring-inset", tones[tone], className)}>
-      {dot && <span className="h-1.5 w-1.5 rounded-full bg-current opacity-80" aria-hidden />}
+    <span title={title} className={cn("figures inline-flex items-center whitespace-nowrap rounded-full border px-2.5 py-1 font-mono text-[11.5px] font-semibold leading-none", tones[tone], className)}>
       {children}
     </span>
   );
+}
+
+export function Badge({ tone = "neutral", children, className, dot, pulse }: { tone?: Tone; children: ReactNode; className?: string; dot?: boolean; pulse?: boolean }) {
+  return (
+    <span className={cn("inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-[12px] font-semibold ring-1 ring-inset shadow-[inset_0_1px_0_rgb(255_255_255/0.6)] backdrop-blur-sm", tones[tone], className)}>
+      {dot && (
+        <span className="relative grid h-1.5 w-1.5 place-items-center" aria-hidden>
+          {pulse && <span className="absolute h-1.5 w-1.5 animate-ping rounded-full bg-current opacity-50 motion-reduce:hidden" />}
+          <span className="h-1.5 w-1.5 rounded-full bg-current" />
+        </span>
+      )}
+      {children}
+    </span>
+  );
+}
+
+const ALERT_TINT = { teal: "var(--c-teal)", plum: "var(--c-plum)", lavender: "var(--c-purple)", sapphire: "var(--c-sapphire)" } as const;
+
+/**
+ * Action banner as a refined status pill: tinted glass border, icon, message
+ * and an arrow that slides on hover. Renders a link when `href` is given.
+ */
+export function AlertPill({ href, icon, children, tone = "teal", className }: { href?: string; icon?: ReactNode; children: ReactNode; tone?: keyof typeof ALERT_TINT; className?: string }) {
+  const cls = cn(
+    "tint-glass group flex items-center gap-3 rounded-full px-4 py-2.5 text-sm text-ink-soft transition-all duration-200 ease-out",
+    href && "hover:-translate-y-0.5 hover:shadow-ambient-lg focus-visible:outline-none focus-visible:shadow-focus",
+    className,
+  );
+  const body = (
+    <>
+      {icon && <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-white/80 shadow-sm ring-1 ring-inset ring-[rgb(var(--tint)/0.25)] [color:rgb(var(--tint))]">{icon}</span>}
+      <span className="min-w-0 flex-1">{children}</span>
+      {href && <ArrowRight className="h-4 w-4 shrink-0 text-ink-muted transition-transform duration-200 group-hover:translate-x-1 group-hover:text-ink" aria-hidden />}
+    </>
+  );
+  const style = { ["--tint" as string]: ALERT_TINT[tone] };
+  return href ? <Link href={href} className={cls} style={style}>{body}</Link> : <div className={cls} style={style}>{body}</div>;
 }
 
 /**
@@ -70,5 +117,5 @@ const STATUS: Record<string, { label: string; tone: Tone }> = {
 
 export function StatusBadge({ status, label, className }: { status: string; label?: string; className?: string }) {
   const s = STATUS[status] ?? { label: status, tone: "neutral" as Tone };
-  return <Badge tone={s.tone} dot className={className}>{label ?? s.label}</Badge>;
+  return <Badge tone={s.tone} dot pulse={status === "overdue" || status === "urgent"} className={className}>{label ?? s.label}</Badge>;
 }

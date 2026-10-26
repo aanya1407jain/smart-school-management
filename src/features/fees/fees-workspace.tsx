@@ -17,8 +17,7 @@ import {
   Badge, Button, Card, CardHeader, Checkbox, ConfirmDialog, DataTable, EmptyState, FilterBar, FilterSelect, FormField, Input, Modal,
   PageHeader, QueryView, SearchInput, StatCard, StatusBadge, Tabs, TabsContent, TabsList, useToast, Avatar,
 } from "@/components/ui";
-import { ChartCard, ChartTooltip, axisProps } from "@/components/charts/chart-card";
-import { CHART, CHART_GRID } from "@/lib/constants/theme";
+import { ChartCard, ChartTooltip, axisProps, barCursor, barProps, gridProps } from "@/components/charts/chart-card";
 import { useAcademicOptions } from "@/features/shared/use-academic-options";
 import { FormError } from "@/features/shared/form-error";
 import { formatCurrency, formatPercent } from "@/lib/utils/format";
@@ -102,11 +101,11 @@ function Overview() {
             <ChartCard className="lg:col-span-2" title="Monthly collections" description={`Payments received per month, ${s.yearLabel ?? "2026–27"}`}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={s.monthly} margin={{ top: 8, right: 8, left: 4, bottom: 0 }}>
-                  <CartesianGrid vertical={false} stroke={CHART_GRID} />
+                  <CartesianGrid {...gridProps} />
                   <XAxis dataKey="label" {...axisProps} />
                   <YAxis {...axisProps} tickFormatter={(v) => `₹${Math.round(v / 1000)}k`} width={52} />
-                  <Tooltip content={<ChartTooltip format={(v) => formatCurrency(v)} />} cursor={{ fill: "rgba(188,197,204,0.18)" }} />
-                  <Bar dataKey="amount" name="Collected" fill={CHART.single} radius={[4, 4, 0, 0]} maxBarSize={40} />
+                  <Tooltip content={<ChartTooltip format={(v) => formatCurrency(v)} />} cursor={barCursor} />
+                  <Bar dataKey="amount" name="Collected" {...barProps("single")} maxBarSize={40} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>

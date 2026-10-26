@@ -53,7 +53,7 @@ export function MyFees() {
             ) : (
               <>
                 <div className="grid gap-4 lg:grid-cols-3">
-                  <GlassCard className="flex items-center gap-5 p-6 lg:col-span-2">
+                  <GlassCard className="spatial flex flex-col items-center gap-5 p-6 sm:flex-row lg:col-span-2">
                     <ProgressRing
                       value={l.totals.net ? (l.totals.paid / l.totals.net) * 100 : 0}
                       size={120}
@@ -63,7 +63,7 @@ export function MyFees() {
                     <dl className="grid flex-1 grid-cols-2 gap-x-6 gap-y-3">
                       <div>
                         <dt className="text-[12px] uppercase tracking-wide text-ink-muted">Total</dt>
-                        <dd className="text-xl font-semibold text-sapphire">{formatCurrency(l.totals.net)}</dd>
+                        <dd className="figures text-xl font-bold text-sapphire">{formatCurrency(l.totals.net)}</dd>
                         {l.totals.concession > 0 && (
                           <p className="text-[12px] text-ink-muted">
                             after {formatCurrency(l.totals.concession)} concession
@@ -72,11 +72,11 @@ export function MyFees() {
                       </div>
                       <div>
                         <dt className="text-[12px] uppercase tracking-wide text-ink-muted">Paid</dt>
-                        <dd className="text-xl font-semibold text-lagoon">{formatCurrency(l.totals.paid)}</dd>
+                        <dd className="figures text-xl font-bold text-lagoon">{formatCurrency(l.totals.paid)}</dd>
                       </div>
                       <div>
                         <dt className="text-[12px] uppercase tracking-wide text-ink-muted">Pending</dt>
-                        <dd className="text-xl font-semibold text-sapphire">{formatCurrency(l.totals.outstanding)}</dd>
+                        <dd className="figures text-xl font-bold text-sapphire">{formatCurrency(l.totals.outstanding)}</dd>
                       </div>
                       <div>
                         <dt className="text-[12px] uppercase tracking-wide text-ink-muted">Status</dt>
@@ -86,13 +86,14 @@ export function MyFees() {
                       </div>
                     </dl>
                   </GlassCard>
-                  <Card className="p-6">
+                  <Card className="spatial relative overflow-hidden p-6">
+                    <span aria-hidden className={l.nextDue?.status === "overdue" ? "absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-amber-400 to-rose-500" : "absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-400 to-teal"} />
                     <p className="flex items-center gap-2 text-[13px] font-medium text-ink-muted">
                       <CalendarClock className="h-4 w-4" /> Next due
                     </p>
                     {l.nextDue ? (
                       <>
-                        <p className="mt-2 text-2xl font-semibold text-sapphire">
+                        <p className="figures mt-2 text-2xl font-bold text-sapphire">
                           {formatCurrency(l.nextDue.outstanding)}
                         </p>
                         <p className="text-sm text-ink-soft">
@@ -136,7 +137,7 @@ export function MyFees() {
                               Approved on {formatDate(c.createdAt.slice(0, 10))}
                             </p>
                           </div>
-                          <span className="font-semibold text-plum">− {formatCurrency(c.amount)}</span>
+                          <span className="figures font-semibold text-plum">− {formatCurrency(c.amount)}</span>
                         </li>
                       ))}
                     </ul>

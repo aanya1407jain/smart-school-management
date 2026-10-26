@@ -14,7 +14,7 @@ import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { useSchoolMutation, useSchoolQuery } from "@/lib/convex/membership";
 import {
-  Badge, Button, Card, CardHeader, Checkbox, DataTable, EmptyState, FormField, Input, LinkButton, LoadingState, Modal, PageHeader, Select, StatCard, StatusBadge, Textarea, useToast,
+  Badge, Button, Card, CardHeader, Checkbox, DataTable, EmptyState, FormField, Input, LinkButton, LoadingState, Modal, PageHeader, ProgressBar, Select, StatCard, StatusBadge, Textarea, useToast,
 } from "@/components/ui";
 import { formatDate, formatLongDate, greeting, todayISO } from "@/lib/utils/dates";
 import { useSession } from "@/features/auth/session-provider";
@@ -370,15 +370,27 @@ function MarksSheet({ examSubjectId, sectionId }: { examSubjectId: Id<"examSubje
       <CardHeader title={`${sheet.section.displayName} · ${sheet.paper.subject}`} description={`Maximum ${max} · pass ${sheet.paper.passMarks}${sheet.canEnter ? "" : " · read-only (entry not open or not your subject)"}`}
         action={sheet.canEnter && <Button loading={busy} onClick={submit}><Save className="h-4 w-4" /> Save marks</Button>} />
       <div className="p-5">
+        {sheet.students.length > 0 && (() => {
+          // Class grading completion: a mark or "absent" counts as entered.
+          const done = sheet.students.filter((s) => { const r = rows[s.studentId]; return !!r && (r.absent || r.marks !== ""); }).length;
+          const pct = (done / sheet.students.length) * 100;
+          return (
+            <div className="mb-3 flex items-center gap-3 rounded-xl bg-white/50 px-3 py-2 ring-1 ring-inset ring-line/60">
+              <span className="figures text-[12.5px] font-semibold text-ink-soft">{done}/{sheet.students.length} graded</span>
+              <ProgressBar value={pct} label="Grading completion" className="flex-1" />
+              <span className="figures w-10 text-right text-[12px] font-semibold text-lagoon">{Math.round(pct)}%</span>
+            </div>
+          );
+        })()}
         {sheet.students.length === 0 ? <EmptyState title="No students in this section" /> : (
           <ul className="divide-y divide-line/60">
             {sheet.students.map((s) => {
               const r = rows[s.studentId] ?? { marks: "", absent: false };
               return (
-                <li key={s.studentId} className="flex flex-wrap items-center gap-3 py-2.5">
-                  <span className="w-8 text-center text-sm font-bold text-sapphire">{s.rollNo ?? "—"}</span>
+                <li key={s.studentId} className="-mx-2 flex flex-wrap items-center gap-3 rounded-xl px-2 py-2.5 transition-colors focus-within:bg-teal-soft/40 hover:bg-teal-soft/25">
+                  <span className="mono-id w-8 text-center font-bold text-sapphire">{s.rollNo ?? "—"}</span>
                   <span className="min-w-40 flex-1 font-medium text-ink">{s.name}</span>
-                  <Input aria-label={`Marks for ${s.name}`} type="number" min={0} max={max} step={0.5} className={`w-28 ${invalidRow(r) ? "border-plum" : ""}`} disabled={!sheet.canEnter || r.absent} value={r.marks}
+                  <Input aria-label={`Marks for ${s.name}`} type="number" min={0} max={max} step={0.5} className={`figures w-28 font-semibold ${invalidRow(r) ? "border-plum" : ""}`} disabled={!sheet.canEnter || r.absent} value={r.marks}
                     onChange={(e) => setRows({ ...rows, [s.studentId]: { ...r, marks: e.target.value } })} />
                   <Checkbox label="Absent" checked={r.absent} disabled={!sheet.canEnter} onChange={(e) => setRows({ ...rows, [s.studentId]: { marks: e.target.checked ? "" : r.marks, absent: e.target.checked } })} />
                 </li>

@@ -16,8 +16,7 @@ import { EnrollmentActions, EnrollmentHistory, StudentDocuments } from "./studen
 import {
   Avatar, Badge, Card, CardHeader, EmptyState, GlassCard, LinkButton, ProgressRing, StatusBadge, Tabs, TabsContent, TabsList,
 } from "@/components/ui";
-import { ChartTooltip, axisProps } from "@/components/charts/chart-card";
-import { CHART, CHART_GRID } from "@/lib/constants/theme";
+import { ChartTooltip, axisProps, barCursor, barProps, gridProps } from "@/components/charts/chart-card";
 import { formatCurrency, formatPercent, titleCase } from "@/lib/utils/format";
 import { formatDate, formatShortDate, formatWeekday, daysBetween, todayISO } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils/cn";
@@ -348,13 +347,13 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
                 <div className="h-60 px-3 pb-4">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={p.attendance.monthly} margin={{ top: 10, right: 8, left: 0, bottom: 0 }}>
-                      <CartesianGrid vertical={false} stroke={CHART_GRID} />
+                      <CartesianGrid {...gridProps} />
                       <XAxis dataKey="label" {...axisProps} />
                       <YAxis {...axisProps} width={30} allowDecimals={false} />
-                      <Tooltip content={<ChartTooltip />} cursor={{ fill: "rgba(188,197,204,0.18)" }} />
+                      <Tooltip content={<ChartTooltip />} cursor={barCursor} />
                       <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />
-                      <Bar dataKey="attended" name="Present (incl. late)" stackId="a" fill={CHART.primary} maxBarSize={34} stroke="#fff" strokeWidth={1} />
-                      <Bar dataKey="absent" name="Absent" stackId="a" fill={CHART.secondary} radius={[4, 4, 0, 0]} maxBarSize={34} stroke="#fff" strokeWidth={1} />
+                      <Bar dataKey="attended" name="Present (incl. late)" stackId="a" {...barProps("primary", { top: false })} maxBarSize={34} stroke="#fff" strokeWidth={1} />
+                      <Bar dataKey="absent" name="Absent" stackId="a" {...barProps("secondary")} maxBarSize={34} stroke="#fff" strokeWidth={1} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
