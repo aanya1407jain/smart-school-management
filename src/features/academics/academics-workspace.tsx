@@ -15,19 +15,20 @@
 import { SyllabusProgressTracker } from "./syllabus-tracker";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { BookMarked, CalendarRange, Check, ChevronRight, GraduationCap, Layers, Loader2, Plus, School, Trash2, UserCheck, Users } from "lucide-react";
+import { BookMarked, CalendarRange, ChevronDown, Layers, Loader2, Plus, School, Trash2, UserCheck, Users } from "lucide-react";
 import type { FunctionReturnType } from "convex/server";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { useSchoolMutation, useSchoolQuery } from "@/lib/convex/membership";
 import { useSession } from "@/features/auth/session-provider";
 import {
-  Badge, Button, Card, CardHeader, Checkbox, ConfirmDialog, DataTable, EmptyState, FormField, GlassCard, Input, Modal, PageHeader,
+  Badge, Button, Card, CardHeader, Checkbox, ConfirmDialog, DataTable, DropdownContent, DropdownItem, DropdownMenu, DropdownTrigger, EmptyState, FormField, Input, Modal, PageHeader,
   Select, StatusBadge, Tabs, TabsContent, TabsList, useToast,
 } from "@/components/ui";
 import { formatDate, todayISO } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils/cn";
 import { DemoAcademicsWorkspace } from "./academics-workspace-demo";
+import { SetupCockpit, type CockpitStep } from "./setup-cockpit";
 
 export function AcademicsWorkspace() {
   const { dataSource } = useSession();
@@ -69,74 +70,111 @@ function LiveAcademicsWorkspace() {
     return years.find((y) => y._id === selectedYearId) ?? years.find((y) => y.isCurrent) ?? null;
   }, [years, selectedYearId]);
   const sections = useSchoolQuery(api.academics.listSections, activeYear ? { academicYearId: activeYear._id } : "skip");
+  // Enrolled vs active student records (current year) for the enrollment health metric.
+  const counts = useSchoolQuery(api.academics.studentCounts, studentsOn ? {} : "skip");
+  const action = params.get("action");
 
   useEffect(() => {
     const t = params.get("tab");
     if (t) setTab(t);
   }, [params]);
 
-  const changeTab = (t: string) => {
+  const changeTab = (t: string, extra = "") => {
     setTab(t);
-    router.replace(`/admin/academics?tab=${t}`, { scroll: false });
+    router.replace(`/admin/academics?tab=${t}${extra}`, { scroll: false });
+  };
+  // Stepper / command-bar navigation: open the tab and bring it into view.
+  const openTab = (t: string, extra = "") => {
+    changeTab(t, extra);
+    requestAnimationFrame(() => document.getElementById("academics-tabs")?.scrollIntoView({ behavior: "smooth", block: "start" }));
   };
 
   if (!years || !classes || !subjects || !teachers || (activeYear && sections === undefined)) return <Spinner />;
 
+  const sectionList = sections ?? [];
+  const assigned = sectionList.filter((sec) => sec.classTeacherId).length;
+  const enrolled = counts?.enrolled ?? null;
+  const allSteps: CockpitStep[] = [
+    { tab: "years", key: "years", title: "Academic year", metric: null, detail: activeYear ? `${activeYear.name}${activeYear.isCurrent ? " (current)" : ""} · ${formatDate(activeYear.startDate)} – ${formatDate(activeYear.endDate)}` : "No current academic year", done: years.some((y) => y.isCurrent) },
+    { tab: "classes", key: "classes", title: "Classes", metric: String(classes.length), detail: `${classes.length} class${classes.length === 1 ? "" : "es"} created`, done: classes.length > 0 },
+    { tab: "classes", key: "sections", title: "Sections", metric: String(sectionList.length), detail: activeYear ? `${sectionList.length} sections in ${activeYear.name}` : "—", done: sectionList.length > 0 },
+    { tab: "subjects", key: "subjects", title: "Subjects", metric: String(subjects.length), detail: `${subjects.length} school subjects`, done: subjects.length > 0 },
+    { tab: "enrollments", key: "enrollments", title: "Enrollments", metric: enrolled === null ? null : String(enrolled), detail: "Students placed in sections; roll numbers follow automatically", done: !!counts && counts.enrolled > 0 && counts.notEnrolled === 0 },
+    { tab: "assignments", key: "assignments", title: "Teacher assignments", metric: sectionList.length ? `${Math.round((assigned / sectionList.length) * 100)}%` : null, detail: "Class teachers and subject teachers", done: sectionList.length > 0 && assigned === sectionList.length },
+  ];
+  const steps = allSteps.filter((st) => studentsOn || st.key !== "enrollments");
+
   return (
-    <div>
+    <div className="space-y-5">
       <PageHeader
-        title="Academics"
-        description="Set up the academic year: classes, sections, subjects, enrollments and teacher assignments."
-        actions={years.length > 0 && (
-          <div className="flex items-center gap-2">
-            <label htmlFor="ay" className="text-[13px] text-ink-muted">Academic year</label>
-            <Select id="ay" value={activeYear?._id ?? ""} onChange={(e) => setSelectedYearId(e.target.value)} className="w-52">
-              {!activeYear && <option value="">Choose a year</option>}
-              {years.map((y) => <option key={y._id} value={y._id}>{y.name}{y.isCurrent ? " (current)" : ""}</option>)}
-            </Select>
+        title="Academic Operations & Curriculum"
+        description="Manage class structures, teacher assignments, and real-time curriculum pacing."
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            {years.length > 0 && (
+              <Select aria-label="Academic year" title="Academic year" value={activeYear?._id ?? ""} onChange={(e) => setSelectedYearId(e.target.value)} className="w-56">
+                {!activeYear && <option value="">Choose a year</option>}
+                {years.map((y) => <option key={y._id} value={y._id}>{`${y.name}${y.isCurrent ? " (current)" : ""}`}</option>)}
+              </Select>
+            )}
+            <DropdownMenu>
+              <DropdownTrigger asChild>
+                <Button><Plus className="h-4 w-4" /> Add class / subject <ChevronDown className="h-3.5 w-3.5 opacity-80" aria-hidden /></Button>
+              </DropdownTrigger>
+              <DropdownContent>
+                <DropdownItem onSelect={() => openTab("classes", "&action=add-class")} className={cn(!activeYear && "pointer-events-none opacity-50")}><School className="h-4 w-4" /> Add class</DropdownItem>
+                <DropdownItem onSelect={() => openTab("subjects", "&action=add-subject")}><BookMarked className="h-4 w-4" /> Add subject</DropdownItem>
+              </DropdownContent>
+            </DropdownMenu>
           </div>
-        )}
+        }
       />
 
       {!activeYear && (
-        <div role="status" className="mb-5 rounded-xl border border-blush bg-blush/30 px-4 py-3 text-[13px] text-plum">
+        <div role="status" className="rounded-xl border border-blush bg-blush/30 px-4 py-3 text-[13px] text-plum">
           {years.length === 0
             ? "No academic year exists yet. Create one in Academic years and make it current to start setting up classes and sections."
             : "The school has no current academic year. Choose a year above, or make one current in Academic years."}
         </div>
       )}
 
-      {/* Syllabus Progress Tracker - Principal View Only */}
-      <div className="mb-6 mt-4">
-        <SyllabusProgressTracker readOnly={true} />
-      </div>
+      <SetupCockpit
+        steps={steps}
+        onStep={(t) => openTab(t)}
+        coverage={{
+          pct: sectionList.length ? (assigned / sectionList.length) * 100 : null,
+          caption: sectionList.length === 0 ? "No sections yet" : assigned === sectionList.length ? `All ${sectionList.length} sections have a class teacher` : `${assigned} of ${sectionList.length} sections have a class teacher`,
+        }}
+        enrollment={studentsOn && counts ? { enrolled: counts.enrolled, active: counts.activeRecords, caption: `${counts.activeRecords ? Math.round((counts.enrolled / counts.activeRecords) * 100) : 0}% of active students placed in ${counts.academicYear.name}` } : null}
+      />
 
-      <Tabs value={tab} onValueChange={changeTab}>
-        <TabsList
-          items={[
-            { value: "setup", label: "Setup overview" },
-            { value: "years", label: "Academic years", count: years.length },
-            { value: "classes", label: "Classes & sections", count: sections?.length ?? 0 },
-            { value: "subjects", label: "Subjects", count: subjects.length },
-            ...(studentsOn ? [{ value: "enrollments", label: "Enrollments" }] : []),
-            { value: "assignments", label: "Teacher assignments" },
-          ]}
-        />
-        <TabsContent value="setup">
-          <SetupOverview years={years} year={activeYear} classes={classes} sections={sections ?? []} subjects={subjects} go={changeTab} studentsOn={studentsOn} />
-        </TabsContent>
-        <TabsContent value="years"><YearsTab years={years} /></TabsContent>
-        <TabsContent value="classes">
-          {activeYear ? <ClassesTab year={activeYear} classes={classes} sections={sections ?? []} subjects={subjects} teachers={teachers} /> : <NeedYear />}
-        </TabsContent>
-        <TabsContent value="subjects"><SubjectsTab subjects={subjects} /></TabsContent>
-        {studentsOn && <TabsContent value="enrollments">
-          {activeYear ? <EnrollmentsTab year={activeYear} sections={sections ?? []} /> : <NeedYear />}
-        </TabsContent>}
-        <TabsContent value="assignments">
-          {activeYear ? <AssignmentsTab year={activeYear} sections={sections ?? []} teachers={teachers} /> : <NeedYear />}
-        </TabsContent>
-      </Tabs>
+      <div id="academics-tabs" className="scroll-mt-20">
+        <Tabs value={tab} onValueChange={(t) => changeTab(t)}>
+          <TabsList
+            items={[
+              { value: "setup", label: "Overview" },
+              { value: "years", label: "Academic years", count: years.length },
+              { value: "classes", label: "Classes & sections", count: sectionList.length },
+              { value: "subjects", label: "Subjects", count: subjects.length },
+              ...(studentsOn ? [{ value: "enrollments", label: "Enrollments", ...(enrolled !== null ? { count: enrolled } : {}) }] : []),
+              { value: "assignments", label: "Teacher assignments" },
+            ]}
+          />
+          {/* Overview: curriculum pacing (Principal view, read-only). */}
+          <TabsContent value="setup"><SyllabusProgressTracker readOnly={true} /></TabsContent>
+          <TabsContent value="years"><YearsTab years={years} /></TabsContent>
+          <TabsContent value="classes">
+            {activeYear ? <ClassesTab year={activeYear} classes={classes} sections={sectionList} subjects={subjects} teachers={teachers} autoOpen={action === "add-class"} /> : <NeedYear />}
+          </TabsContent>
+          <TabsContent value="subjects"><SubjectsTab subjects={subjects} autoOpen={action === "add-subject"} /></TabsContent>
+          {studentsOn && <TabsContent value="enrollments">
+            {activeYear ? <EnrollmentsTab year={activeYear} sections={sectionList} /> : <NeedYear />}
+          </TabsContent>}
+          <TabsContent value="assignments">
+            {activeYear ? <AssignmentsTab year={activeYear} sections={sectionList} teachers={teachers} /> : <NeedYear />}
+          </TabsContent>
+        </Tabs>
+      </div>
     </div>
   );
 }
@@ -152,60 +190,6 @@ function useSectionSelection(sections: Section[]) {
     if (!sections.some((s) => s._id === sectionId)) setSectionId(sections[0]?._id ?? "");
   }, [sections, sectionId]);
   return [sectionId, setSectionId] as const;
-}
-
-// ------------------------------------------------------------------ Setup overview
-
-function SetupOverview({ years, year, classes, sections, subjects, go, studentsOn }: { years: Year[]; year: Year | null; classes: Klass[]; sections: Section[]; subjects: Subject[]; go: (t: string) => void; studentsOn: boolean }) {
-  const allSteps = [
-    { tab: "years", Icon: CalendarRange, title: "Academic year", detail: year ? `${year.name} · ${formatDate(year.startDate)} – ${formatDate(year.endDate)}${year.isCurrent ? " (current)" : ""}` : "No current academic year", done: years.some((y) => y.isCurrent) },
-    { tab: "classes", Icon: School, title: "Classes", detail: `${classes.length} classes created`, done: classes.length > 0 },
-    { tab: "classes", Icon: Layers, title: "Sections", detail: year ? `${sections.length} sections in ${year.name}` : "—", done: sections.length > 0 },
-    { tab: "subjects", Icon: BookMarked, title: "Subjects", detail: `${subjects.length} school subjects`, done: subjects.length > 0 },
-    { tab: "enrollments", Icon: GraduationCap, title: "Enroll students", detail: "Place students in sections; roll numbers follow automatically", done: sections.length > 0 },
-    { tab: "assignments", Icon: UserCheck, title: "Assign teachers", detail: "Class teachers and subject teachers", done: sections.length > 0 && sections.every((s) => s.classTeacherId) },
-  ];
-  const steps = allSteps.filter((s) => studentsOn || s.tab !== "enrollments");
-  const doneCount = steps.filter((s) => s.done).length;
-  return (
-    <div className="grid gap-4 lg:grid-cols-3">
-      <GlassCard className="p-6 lg:col-span-2">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <h2 className="text-base font-semibold text-sapphire">Year setup workflow</h2>
-            <p className="text-sm text-ink-muted">Each step builds on the previous one. Changes flow straight to teachers&apos; and students&apos; views.</p>
-          </div>
-          <Badge tone={doneCount === steps.length ? "teal" : "lavender"}>{doneCount}/{steps.length} complete</Badge>
-        </div>
-        <ol className="mt-6 space-y-2">
-          {steps.map((s, i) => (
-            <li key={`${s.title}-${i}`}>
-              <button onClick={() => go(s.tab)} className="group flex w-full items-center gap-4 rounded-2xl border border-white/80 bg-white/60 p-3.5 text-left transition-all hover:bg-white hover:shadow-soft">
-                <span className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-xl", s.done ? "bg-lagoon text-white" : "bg-heather/25 text-ink-soft")}>
-                  {s.done ? <Check className="h-5 w-5" /> : <s.Icon className="h-5 w-5" />}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-[12px] font-semibold uppercase tracking-wide text-ink-muted">Step {i + 1}</span>
-                  <span className="block font-semibold text-ink">{s.title}</span>
-                  <span className="block text-[13px] text-ink-muted">{s.detail}</span>
-                </span>
-                <ChevronRight className="h-4 w-4 text-ink-muted transition-transform group-hover:translate-x-0.5" />
-              </button>
-            </li>
-          ))}
-        </ol>
-      </GlassCard>
-      <Card className="h-fit p-5">
-        <p className="text-[13px] font-medium text-ink-muted">Academic setup summary</p>
-        <p className="mt-1 text-2xl font-semibold text-sapphire">{year?.name ?? "No year"}</p>
-        <div className="mt-4 space-y-2 text-sm text-ink">
-          <div className="flex justify-between"><span className="text-ink-muted">Classes</span><span className="font-semibold">{classes.length}</span></div>
-          <div className="flex justify-between"><span className="text-ink-muted">Sections</span><span className="font-semibold">{sections.length}</span></div>
-          <div className="flex justify-between"><span className="text-ink-muted">Subjects</span><span className="font-semibold">{subjects.length}</span></div>
-        </div>
-      </Card>
-    </div>
-  );
 }
 
 // ------------------------------------------------------------------ Academic years
@@ -288,9 +272,10 @@ function YearsTab({ years }: { years: Year[] }) {
 
 // ------------------------------------------------------------------ Classes & sections
 
-function ClassesTab({ year, classes, sections, subjects, teachers }: { year: Year; classes: Klass[]; sections: Section[]; subjects: Subject[]; teachers: Teacher[] }) {
+function ClassesTab({ year, classes, sections, subjects, teachers, autoOpen = false }: { year: Year; classes: Klass[]; sections: Section[]; subjects: Subject[]; teachers: Teacher[]; autoOpen?: boolean }) {
   const { toast } = useToast();
-  const [classOpen, setClassOpen] = useState(false);
+  const [classOpen, setClassOpen] = useState(autoOpen);
+  useEffect(() => { if (autoOpen) setClassOpen(true); }, [autoOpen]);
   const [sectionFor, setSectionFor] = useState<Klass | null>(null);
   const [curriculumFor, setCurriculumFor] = useState<Klass | null>(null);
   const setClassTeacher = useSchoolMutation(api.academics.setClassTeacher);
@@ -459,9 +444,10 @@ function CurriculumModal({ year, klass, subjects, onClose }: { year: Year; klass
 
 // ------------------------------------------------------------------ Subjects
 
-function SubjectsTab({ subjects }: { subjects: Subject[] }) {
+function SubjectsTab({ subjects, autoOpen = false }: { subjects: Subject[]; autoOpen?: boolean }) {
   const { toast } = useToast();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(autoOpen);
+  useEffect(() => { if (autoOpen) setOpen(true); }, [autoOpen]);
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);

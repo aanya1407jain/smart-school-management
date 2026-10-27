@@ -6,19 +6,20 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { BookMarked, CalendarRange, Check, ChevronRight, GraduationCap, Layers, Pencil, Plus, School, UserCheck, Users } from "lucide-react";
+import { BookMarked, ChevronDown, Pencil, Plus, School, Users } from "lucide-react";
 import { services } from "@/lib/services";
 import type { AcademicsOverview } from "@/lib/services/academics.service";
 import { useQuery } from "@/lib/hooks/use-query";
 import { useMutation } from "@/lib/hooks/use-mutation";
 import {
-  Badge, Button, Card, CardHeader, Checkbox, ConfirmDialog, DataTable, EmptyState, FormField, GlassCard, Input, Modal, PageHeader,
-  QueryView, Select, StatusBadge, Tabs, TabsContent, TabsList, useToast, ProgressBar,
+  Badge, Button, Card, CardHeader, Checkbox, ConfirmDialog, DataTable, DropdownContent, DropdownItem, DropdownMenu, DropdownTrigger, EmptyState, FormField, Input, Modal, PageHeader,
+  QueryView, Select, StatusBadge, Tabs, TabsContent, TabsList, useToast,
 } from "@/components/ui";
 import { FormError } from "@/features/shared/form-error";
 import { formatDate } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils/cn";
 import { SyllabusProgressTracker } from "./syllabus-tracker";
+import { SetupCockpit, type CockpitStep } from "./setup-cockpit";
 
 type Overview = AcademicsOverview;
 
@@ -30,106 +31,82 @@ export function DemoAcademicsWorkspace() {
   const q = useQuery(() => services.academics.getOverview(yearId), [yearId]);
 
   useEffect(() => { const t = params.get("tab"); if (t) setTab(t); }, [params]);
-  const changeTab = (t: string) => { setTab(t); router.replace(`/admin/academics?tab=${t}`, { scroll: false }); };
+  const action = params.get("action");
+  const changeTab = (t: string, extra = "") => { setTab(t); router.replace(`/admin/academics?tab=${t}${extra}`, { scroll: false }); };
+  // Stepper / command-bar navigation: open the tab and bring it into view.
+  const openTab = (t: string, extra = "") => {
+    changeTab(t, extra);
+    requestAnimationFrame(() => document.getElementById("academics-tabs")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  };
 
   return (
-    <div>
+    <div className="space-y-5">
       <PageHeader
-        title="Academics"
-        description="Set up the academic year: classes, sections, subjects, enrollments and teacher assignments."
+        title="Academic Operations & Curriculum"
+        description="Manage class structures, teacher assignments, and real-time curriculum pacing."
         actions={q.data && (
-          <div className="flex items-center gap-2">
-            <label htmlFor="ay" className="text-[13px] text-ink-muted">Academic year</label>
-            <Select id="ay" value={q.data.year.id} onChange={(e) => setYearId(e.target.value)} className="w-52">
-              {q.data.years.map((y) => <option key={y.id} value={y.id}>{y.name}{y.isCurrent ? " (current)" : ""}</option>)}
+          <div className="flex flex-wrap items-center gap-2">
+            <Select aria-label="Academic year" title="Academic year" value={q.data.year.id} onChange={(e) => setYearId(e.target.value)} className="w-56">
+              {q.data.years.map((y) => <option key={y.id} value={y.id}>{`${y.name}${y.isCurrent ? " (current)" : ""}`}</option>)}
             </Select>
+            <DropdownMenu>
+              <DropdownTrigger asChild>
+                <Button><Plus className="h-4 w-4" /> Add class / subject <ChevronDown className="h-3.5 w-3.5 opacity-80" aria-hidden /></Button>
+              </DropdownTrigger>
+              <DropdownContent>
+                <DropdownItem onSelect={() => openTab("classes", "&action=add-class")}><School className="h-4 w-4" /> Add class</DropdownItem>
+                <DropdownItem onSelect={() => openTab("subjects", "&action=add-subject")}><BookMarked className="h-4 w-4" /> Add subject</DropdownItem>
+              </DropdownContent>
+            </DropdownMenu>
           </div>
         )}
       />
-      {/* Same Principal view as the live workspace (the tracker is self-contained). */}
-      <div className="mb-6 mt-4">
-        <SyllabusProgressTracker readOnly={true} />
-      </div>
       <QueryView query={q}>
         {(d) => (
-          <Tabs value={tab} onValueChange={changeTab}>
-            <TabsList items={[
-              { value: "setup", label: "Setup overview" },
-              { value: "years", label: "Academic years", count: d.years.length },
-              { value: "classes", label: "Classes & sections", count: d.progress.sections },
-              { value: "subjects", label: "Subjects", count: d.subjects.length },
-              { value: "enrollments", label: "Enrollments", count: d.progress.enrolled },
-              { value: "assignments", label: "Teacher assignments" },
-            ]} />
-            <TabsContent value="setup"><SetupOverview d={d} go={changeTab} /></TabsContent>
-            <TabsContent value="years"><YearsTab d={d} /></TabsContent>
-            <TabsContent value="classes"><ClassesTab d={d} /></TabsContent>
-            <TabsContent value="subjects"><SubjectsTab d={d} /></TabsContent>
-            <TabsContent value="enrollments"><EnrollmentsTab d={d} /></TabsContent>
-            <TabsContent value="assignments"><AssignmentsTab d={d} /></TabsContent>
-          </Tabs>
+          <div className="space-y-5">
+            <SetupCockpit
+              steps={setupSteps(d)}
+              onStep={(t) => openTab(t)}
+              coverage={{ pct: d.progress.sections ? d.progress.assignmentCoverage : null, caption: d.progress.openSlots ? `${d.progress.openSlots} subject slot${d.progress.openSlots === 1 ? "" : "s"} still need a teacher` : `All ${d.progress.sections} sections fully assigned` }}
+              enrollment={{ enrolled: d.progress.enrolled, active: d.progress.activeStudents, caption: d.unenrolled.length ? `${d.unenrolled.length} active student${d.unenrolled.length === 1 ? " is" : "s are"} not enrolled in ${d.year.name}` : `${d.progress.activeStudents ? Math.round((d.progress.enrolled / d.progress.activeStudents) * 100) : 0}% of the active roster mapped` }}
+            />
+            <div id="academics-tabs" className="scroll-mt-20">
+              <Tabs value={tab} onValueChange={(t) => changeTab(t)}>
+                <TabsList items={[
+                  { value: "setup", label: "Overview" },
+                  { value: "years", label: "Academic years", count: d.years.length },
+                  { value: "classes", label: "Classes & sections", count: d.progress.sections },
+                  { value: "subjects", label: "Subjects", count: d.subjects.length },
+                  { value: "enrollments", label: "Enrollments", count: d.progress.enrolled },
+                  { value: "assignments", label: "Teacher assignments" },
+                ]} />
+                {/* Overview: curriculum pacing (Principal view, read-only; the same tracker as the live workspace). */}
+                <TabsContent value="setup"><SyllabusProgressTracker readOnly={true} /></TabsContent>
+                <TabsContent value="years"><YearsTab d={d} /></TabsContent>
+                <TabsContent value="classes"><ClassesTab d={d} autoOpen={action === "add-class"} /></TabsContent>
+                <TabsContent value="subjects"><SubjectsTab d={d} autoOpen={action === "add-subject"} /></TabsContent>
+                <TabsContent value="enrollments"><EnrollmentsTab d={d} /></TabsContent>
+                <TabsContent value="assignments"><AssignmentsTab d={d} /></TabsContent>
+              </Tabs>
+            </div>
+          </div>
         )}
       </QueryView>
     </div>
   );
 }
 
-// ------------------------------------------------------------------ Setup overview (workflow)
+// ------------------------------------------------------------------ Setup steps (cockpit)
 
-function SetupOverview({ d, go }: { d: Overview; go: (t: string) => void }) {
-  const steps = [
-    { tab: "years", Icon: CalendarRange, title: "Academic year", detail: `${d.year.name} · ${formatDate(d.year.startDate)} – ${formatDate(d.year.endDate)}`, done: true },
-    { tab: "classes", Icon: School, title: "Classes", detail: `${d.progress.classes} classes`, done: d.progress.classes > 0 },
-    { tab: "classes", Icon: Layers, title: "Sections", detail: `${d.progress.sections} sections`, done: d.progress.sections > 0 },
-    { tab: "subjects", Icon: BookMarked, title: "Subjects", detail: `${d.progress.subjects} subjects`, done: d.progress.subjects > 0 },
-    { tab: "enrollments", Icon: GraduationCap, title: "Enroll students", detail: `${d.progress.enrolled} of ${d.progress.activeStudents} active students`, done: d.progress.enrolled > 0 && d.unenrolled.length === 0 },
-    { tab: "assignments", Icon: UserCheck, title: "Assign teachers", detail: `${Math.round(d.progress.assignmentCoverage)}% of subject slots covered`, done: d.progress.openSlots === 0 && d.progress.sections > 0 },
+function setupSteps(d: Overview): CockpitStep[] {
+  return [
+    { tab: "years", key: "years", title: "Academic year", metric: null, detail: `${d.year.name} · ${formatDate(d.year.startDate)} – ${formatDate(d.year.endDate)}`, done: true },
+    { tab: "classes", key: "classes", title: "Classes", metric: String(d.progress.classes), detail: `${d.progress.classes} classes`, done: d.progress.classes > 0 },
+    { tab: "classes", key: "sections", title: "Sections", metric: String(d.progress.sections), detail: `${d.progress.sections} sections`, done: d.progress.sections > 0 },
+    { tab: "subjects", key: "subjects", title: "Subjects", metric: String(d.progress.subjects), detail: `${d.progress.subjects} subjects`, done: d.progress.subjects > 0 },
+    { tab: "enrollments", key: "enrollments", title: "Enrollments", metric: String(d.progress.enrolled), detail: `${d.progress.enrolled} of ${d.progress.activeStudents} active students`, done: d.progress.enrolled > 0 && d.unenrolled.length === 0 },
+    { tab: "assignments", key: "assignments", title: "Teacher assignments", metric: `${Math.round(d.progress.assignmentCoverage)}%`, detail: `${Math.round(d.progress.assignmentCoverage)}% of subject slots covered`, done: d.progress.openSlots === 0 && d.progress.sections > 0 },
   ];
-  const done = steps.filter((s) => s.done).length;
-  return (
-    <div className="grid gap-4 lg:grid-cols-3">
-      <GlassCard className="p-6 lg:col-span-2">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <h2 className="text-base font-semibold text-sapphire">Year setup workflow</h2>
-            <p className="text-sm text-ink-muted">Each step builds on the previous one. Changes flow straight to teachers&apos; and students&apos; views.</p>
-          </div>
-          <Badge tone={done === steps.length ? "teal" : "lavender"}>{done}/{steps.length} complete</Badge>
-        </div>
-        <ol className="mt-6 space-y-2">
-          {steps.map((s, i) => (
-            <li key={s.title}>
-              <button onClick={() => go(s.tab)} className="group flex w-full items-center gap-4 rounded-2xl border border-white/80 bg-white/60 p-3.5 text-left transition-all hover:bg-white hover:shadow-soft">
-                <span className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-xl", s.done ? "bg-lagoon text-white" : "bg-heather/25 text-ink-soft")}>
-                  {s.done ? <Check className="h-5 w-5" /> : <s.Icon className="h-5 w-5" />}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-[12px] font-semibold uppercase tracking-wide text-ink-muted">Step {i + 1}</span>
-                  <span className="block font-semibold text-ink">{s.title}</span>
-                  <span className="block text-[13px] text-ink-muted">{s.detail}</span>
-                </span>
-                <ChevronRight className="h-4 w-4 text-ink-muted transition-transform group-hover:translate-x-0.5" aria-hidden />
-              </button>
-            </li>
-          ))}
-        </ol>
-      </GlassCard>
-      <div className="space-y-4">
-        <Card className="p-5">
-          <p className="text-[13px] font-medium text-ink-muted">Teacher coverage</p>
-          <p className="mt-1 text-2xl font-semibold text-sapphire">{Math.round(d.progress.assignmentCoverage)}%</p>
-          <ProgressBar className="mt-3" value={d.progress.assignmentCoverage} label="Teacher coverage" />
-          <p className="mt-2 text-[12.5px] text-ink-muted">{d.progress.openSlots ? `${d.progress.openSlots} subject slots still need a teacher.` : "Every section has a teacher for every subject."}</p>
-        </Card>
-        <Card className="p-5">
-          <p className="text-[13px] font-medium text-ink-muted">Enrollment</p>
-          <p className="mt-1 text-2xl font-semibold text-sapphire">{d.progress.enrolled}</p>
-          <p className="text-[12.5px] text-ink-muted">{d.unenrolled.length ? `${d.unenrolled.length} active students are not enrolled in ${d.year.name}.` : `All active students are enrolled in ${d.year.name}.`}</p>
-          {d.unenrolled.length > 0 && <Button size="sm" variant="soft" className="mt-3" onClick={() => go("enrollments")}>Enroll now</Button>}
-        </Card>
-      </div>
-    </div>
-  );
 }
 
 // ------------------------------------------------------------------ Years
@@ -182,9 +159,10 @@ function YearsTab({ d }: { d: Overview }) {
 
 // ------------------------------------------------------------------ Classes & sections
 
-function ClassesTab({ d }: { d: Overview }) {
+function ClassesTab({ d, autoOpen = false }: { d: Overview; autoOpen?: boolean }) {
   const { toast } = useToast();
-  const [classOpen, setClassOpen] = useState(false);
+  const [classOpen, setClassOpen] = useState(autoOpen);
+  useEffect(() => { if (autoOpen) setClassOpen(true); }, [autoOpen]);
   const [sectionFor, setSectionFor] = useState<string | null>(null);
   const [editSection, setEditSection] = useState<Overview["classes"][number]["sections"][number] | null>(null);
   const [subjectsFor, setSubjectsFor] = useState<Overview["classes"][number] | null>(null);
@@ -304,9 +282,10 @@ function ClassSubjectsModal({ cls, d, onClose }: { cls: Overview["classes"][numb
 
 // ------------------------------------------------------------------ Subjects
 
-function SubjectsTab({ d }: { d: Overview }) {
+function SubjectsTab({ d, autoOpen = false }: { d: Overview; autoOpen?: boolean }) {
   const { toast } = useToast();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(autoOpen);
+  useEffect(() => { if (autoOpen) setOpen(true); }, [autoOpen]);
   const [form, setForm] = useState({ name: "", code: "", type: "elective" as "core" | "language" | "elective", classIds: [] as string[] });
   const m = useMutation(services.academics.createSubject);
   return (
