@@ -356,7 +356,7 @@ export const mockDashboardService = {
         const pcts = roster.map((s) => attendanceStats(db, s.id).percentage).filter((p): p is number => p !== null);
         return {
           sectionId: sid, label: info.label, grade: info.cls?.grade ?? 0, room: info.section?.room ?? "", isClassTeacher: info.section?.classTeacherId === scope.teacherId,
-          subjects, students: roster.length, avgAttendance: pcts.length ? pcts.reduce((a, b) => a + b, 0) / pcts.length : null,
+          subjects, students: roster.length, studentNames: roster.slice(0, 4).map(fullName), avgAttendance: pcts.length ? pcts.reduce((a, b) => a + b, 0) / pcts.length : null,
           markedToday: !!session, activeHomework: db.homework.filter((h) => h.sectionId === sid && h.teacherId === scope.teacherId && h.status === "active").length,
         };
       }).sort((a, b) => Number(b.isClassTeacher) - Number(a.isClassTeacher) || a.grade - b.grade || a.label.localeCompare(b.label));

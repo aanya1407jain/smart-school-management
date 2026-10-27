@@ -8,11 +8,13 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useQueries } from "convex/react";
 import { BookOpenCheck, CalendarDays, ClipboardList, Lock, Plus, Save, Users } from "lucide-react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
-import { useSchoolMutation, useSchoolQuery } from "@/lib/convex/membership";
+import { useMembership, useSchoolMutation, useSchoolQuery } from "@/lib/convex/membership";
+import { ClassesDashboard, type TeacherClassCard } from "@/features/teachers/classes-dashboard";
 import {
   Badge, Button, Card, CardHeader, Checkbox, DataTable, EmptyState, FormField, Input, LinkButton, LoadingState, Modal, PageHeader, ProgressBar, Select, StatCard, StatusBadge, Textarea, useToast,
 } from "@/components/ui";
@@ -55,7 +57,12 @@ export function LiveTeacherTimetable() {
 
 // ------------------------------------------------------------------ my classes
 export function LiveMyClasses() {
+  const params = useParams<{ id?: string }>();
+  const { activeMembershipId } = useMembership();
   const teaching = useSchoolQuery(api.academics.myTeaching, {});
+  const overview = useSchoolQuery(api.dashboards.teacherOverview, {});
+  const sections = useSchoolQuery(api.academics.listSections, {});
+  const homework = useSchoolQuery(api.homework.listMine, {});
   const sectionIds = useMemo(() => {
     if (!teaching) return [];
     const ids = new Map<string, string>();
@@ -63,36 +70,62 @@ export function LiveMyClasses() {
     for (const a of teaching.assignments) ids.set(a.sectionId, a.sectionName);
     return [...ids.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
   }, [teaching]);
+  // One roster query per section (student count + avatar preview), batched by Convex.
+  const rosterQueries = useMemo(
+    () => Object.fromEntries(sectionIds.map((sec) => [sec.id, { query: api.academics.sectionRoster, args: { sectionId: sec.id as Id<"sections">, ...(activeMembershipId ? { membershipId: activeMembershipId } : {}) } }])),
+    [sectionIds, activeMembershipId],
+  );
+  const rosters = useQueries(rosterQueries) as Record<string, { students: { name: string }[] } | Error | undefined>;
   const [sectionId, setSectionId] = useState("");
-  useEffect(() => { if (!sectionIds.some((s) => s.id === sectionId)) setSectionId(sectionIds[0]?.id ?? ""); }, [sectionIds, sectionId]);
+  useEffect(() => {
+    if (params?.id && sectionIds.some((sec) => sec.id === params.id) && sectionId !== params.id && !sectionId) { setSectionId(params.id); return; }
+    if (!sectionIds.some((sec) => sec.id === sectionId)) setSectionId(sectionIds[0]?.id ?? "");
+  }, [sectionIds, sectionId, params?.id]);
   const roster = useSchoolQuery(api.academics.sectionRoster, sectionId ? { sectionId: sectionId as Id<"sections"> } : "skip");
+
+  const cards: TeacherClassCard[] = useMemo(() => {
+    if (!teaching) return [];
+    const owned = new Set(teaching.classTeacherOf.map((c) => c.sectionId as string));
+    return sectionIds.map((sec) => {
+      const r = rosters[sec.id];
+      const students = r && !(r instanceof Error) ? r.students : null;
+      const ct = overview?.classTeacherOf.find((c) => c.sectionId === sec.id);
+      return {
+        sectionId: sec.id,
+        label: sec.name,
+        room: sections?.find((x) => x._id === sec.id)?.room ?? null,
+        subjects: teaching.assignments.filter((a) => a.sectionId === sec.id).map((a) => a.subjectName),
+        students: students ? students.length : ct?.students ?? null,
+        studentNames: students ? students.slice(0, 4).map((x) => x.name) : [],
+        attendancePct: null, // no per-section average in the live records yet
+        activeHomework: homework ? homework.filter((h) => h.sectionId === sec.id && h.status === "active").length : null,
+        isClassTeacher: owned.has(sec.id),
+        markedToday: owned.has(sec.id) ? ct?.registerMarked ?? null : null,
+      };
+    });
+  }, [teaching, overview, sections, homework, rosters, sectionIds]);
+
   if (teaching === undefined) return <LoadingState variant="cards" label="Loading your classes" />;
   return (
     <div className="space-y-5">
-      <PageHeader title="My Classes" description="Sections you own as class teacher and the subjects you teach, from the school's assignments." />
-      {sectionIds.length === 0 ? <Card><EmptyState icon={<Users className="h-6 w-6" />} title="No classes assigned" description="The school office has not assigned you a section or subject yet." /></Card> : (
-        <>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {teaching.classTeacherOf.map((c) => <Card key={c.sectionId} className="p-4"><p className="text-[12px] font-semibold uppercase tracking-wide text-plum">Class teacher</p><p className="text-lg font-semibold text-sapphire">{c.displayName}</p><p className="text-[12.5px] text-ink-muted">You mark this section&apos;s attendance.</p></Card>)}
-            {teaching.assignments.map((a) => <Card key={a._id} className="p-4"><p className="text-[12px] font-semibold uppercase tracking-wide text-ink-muted">Subject teacher</p><p className="text-lg font-semibold text-sapphire">{a.subjectName}</p><p className="text-[12.5px] text-ink-muted">Class {a.sectionName}</p></Card>)}
+      <ClassesDashboard classes={cards} />
+      {sectionIds.length > 0 && (
+        <Card id="roster" className="scroll-mt-20">
+          <CardHeader title="Roster" description="Roll-number order (assigned by the school)." action={<Select aria-label="Section" value={sectionId} onChange={(e) => setSectionId(e.target.value)} className="w-44">{sectionIds.map((sec) => <option key={sec.id} value={sec.id}>{sec.name}</option>)}</Select>} />
+          <div className="p-5">
+            {roster === undefined ? <LoadingState variant="table" /> : roster.students.length === 0 ? <EmptyState title="No students in this section" /> : (
+              <ul className="divide-y divide-line/60">
+                {roster.students.map((st) => (
+                  <li key={st.studentId} className="flex items-center gap-3 py-2.5">
+                    <span className="mono-id w-8 text-center font-bold text-sapphire">{st.rollNo ?? "—"}</span>
+                    <Link href={`/teacher/students/${st.studentId}`} className="font-medium text-ink hover:text-lagoon">{st.name}</Link>
+                    <span className="mono-id text-ink-muted">{st.admissionNo}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
-          <Card>
-            <CardHeader title="Roster" description="Roll-number order (assigned by the school)." action={<Select aria-label="Section" value={sectionId} onChange={(e) => setSectionId(e.target.value)} className="w-44">{sectionIds.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</Select>} />
-            <div className="p-5">
-              {roster === undefined ? <LoadingState variant="table" /> : roster.students.length === 0 ? <EmptyState title="No students in this section" /> : (
-                <ul className="divide-y divide-line/60">
-                  {roster.students.map((s) => (
-                    <li key={s.studentId} className="flex items-center gap-3 py-2.5">
-                      <span className="w-8 text-center text-sm font-bold text-sapphire">{s.rollNo ?? "—"}</span>
-                      <Link href={`/teacher/students/${s.studentId}`} className="font-medium text-ink hover:text-lagoon">{s.name}</Link>
-                      <span className="text-[12px] text-ink-muted">{s.admissionNo}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </Card>
-        </>
+        </Card>
       )}
     </div>
   );
