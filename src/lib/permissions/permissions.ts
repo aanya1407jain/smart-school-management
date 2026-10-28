@@ -6,7 +6,7 @@
  * with the Convex backend, which enforces it server-side. This file only adds
  * UI helpers. Never declare permissions here.
  */
-import type { UserAccount } from "@/types/domain";
+import type { UserAccount } from "@/types/core";
 import { PERMISSIONS, PERMISSION_SETS, ROLE_LABELS, ROLE_PERMISSIONS, resolvePermissions, type Permission } from "@convex/core/permissions";
 
 export { PERMISSIONS, PERMISSION_SETS, ROLE_LABELS, ROLE_PERMISSIONS };

@@ -87,7 +87,8 @@ function IssueTc({ studentId, onStudent }: { studentId: Id<"students"> | null; o
   useEffect(() => { if (profile && !tcNoEdited) setForm((f) => ({ ...f, tcNo: profile.nextTcNo })); }, [profile?.nextTcNo]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const reason = form.reasonCategory === "Other" ? (form.reasonOther.trim() ? `Other: ${form.reasonOther.trim()}` : "") : form.reasonCategory;
-  const hasDues = !!profile && profile.dues.outstandingMinor > 0;
+  const dues = profile?.dues ?? null; // null: Fees is not installed in this build, dues are not checked
+  const hasDues = !!dues && dues.outstandingMinor > 0;
   const gateOpen = !hasDues || (waive && waiverNote.trim().length > 0);
   const blocked = !profile || profile.status !== "active" || !!profile.issued;
   const canIssue = !blocked && !!reason && !!form.leavingDate && gateOpen;
@@ -214,11 +215,13 @@ function IssueTc({ studentId, onStudent }: { studentId: Id<"students"> | null; o
 
           <div className="space-y-4">
             <GlassCard className="spatial">
-              <CardHeader title="Pre-flight dues gate" description={`Checked against ${profile.dues.year}.`} icon={<ShieldAlert className="h-4 w-4" />} />
+              <CardHeader title="Pre-flight dues gate" description={dues ? `Checked against ${dues.year}.` : "Fees is not installed, so dues are not checked."} icon={<ShieldAlert className="h-4 w-4" />} />
               <ul className="space-y-3 p-5 pt-3">
-                <CheckItem ok={!hasDues} detail={hasDues ? `${rupees(profile.dues.outstandingMinor)} outstanding${profile.dues.overdueMinor ? `, ${rupees(profile.dues.overdueMinor)} overdue` : ""}` : "No balance for the year"}>
-                  Fee balance {hasDues ? rupees(profile.dues.outstandingMinor) : "₹0"}
-                </CheckItem>
+                {dues ? (
+                  <CheckItem ok={!hasDues} detail={hasDues ? `${rupees(dues.outstandingMinor)} outstanding${dues.overdueMinor ? `, ${rupees(dues.overdueMinor)} overdue` : ""}` : "No balance for the year"}>
+                    Fee balance {hasDues ? rupees(dues.outstandingMinor) : "₹0"}
+                  </CheckItem>
+                ) : <li className="text-sm text-ink-soft">Fee balance not checked — confirm dues with the accounts office.</li>}
                 <li className="text-[12px] text-ink-muted">Library books and ID-card return aren&apos;t tracked in the system — confirm them with the library and office.</li>
               </ul>
               {hasDues && (

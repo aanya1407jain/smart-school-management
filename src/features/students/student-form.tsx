@@ -9,8 +9,9 @@ import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useSchoolMutation, useSchoolQuery } from "@/lib/convex/membership";
 import { getAppError } from "@/lib/convex/errors";
-import { services, ServiceError } from "@/lib/services";
 import { useQuery } from "@/lib/hooks/use-query";
+import { fieldErrorsOf } from "@/lib/utils/errors";
+import type { StudentEditInput } from "@/types/students";
 import { useSchoolProfile } from "@/lib/hooks/use-school-profile";
 import { Button, Card, ConfirmDialog, FormField, FormSection, Input, LoadingState, Modal, PageHeader, Select, ErrorState, useToast, LinkButton } from "@/components/ui";
 import { FormError } from "@/features/shared/form-error";
@@ -50,7 +51,13 @@ const EMPTY: Values = {
   parentContact: { name: "", relation: "Mother", phone: "", email: "", occupation: "" }, assignFees: true,
 };
 
-export function StudentForm({ studentId }: { studentId?: string }) {
+/**
+ * Admit a student (live, Convex). Editing an existing record is the internal
+ * demo editor only: the demo slot "students.edit" passes `demoEdit` (the demo
+ * dataset's load/save); live records are edited in live-students.tsx.
+ */
+export type DemoStudentEdit = { load(): Promise<StudentEditInput>; save(input: StudentEditInput): Promise<unknown> };
+export function StudentForm({ studentId, demoEdit }: { studentId?: string; demoEdit?: DemoStudentEdit }) {
   const emailDomain = useSchoolProfile()?.emailDomain ?? "school.edu";
   const router = useRouter();
   const { toast } = useToast();
@@ -60,13 +67,13 @@ export function StudentForm({ studentId }: { studentId?: string }) {
   const opts = useAcademicOptions();
   const liveClasses = useSchoolQuery(api.academics.listClasses, editing ? "skip" : {});
   const liveSections = useSchoolQuery(api.academics.listSections, editing ? "skip" : {});
-  const editable = useQuery(() => services.students.getEditable(studentId!), [studentId], { enabled: !!studentId });
+  const editable = useQuery(() => demoEdit!.load(), [studentId], { enabled: !!studentId && !!demoEdit });
   const [serverError, setServerError] = useState<Error | null>(null);
   // A possible duplicate (same name + date of birth) the office must confirm is a different child.
   const [duplicate, setDuplicate] = useState<{ message: string; values: Values } | null>(null);
   const [created, setCreated] = useState<{ studentId: Id<"students">; admissionNo: string; scholarNo: string | null; section: string; rollNo: number | null; classTeacher: string | null; warnings: string[] } | null>(null);
 
-  const createStudentWithEnrollment = useSchoolMutation(api.academics.createStudentWithEnrollment);
+  const createStudentWithEnrollment = useSchoolMutation(api.students.createStudentWithEnrollment);
 
   const { register, handleSubmit, watch, reset, setValue, setError, formState: { errors, isSubmitting } } = useForm<Values>({
     resolver: zodResolver(schema),
@@ -96,7 +103,7 @@ export function StudentForm({ studentId }: { studentId?: string }) {
     try {
       if (studentId) {
         const { parentContact, ...rest } = v;
-        await services.students.update(studentId, { ...rest, guardian: { ...parentContact } });
+        await demoEdit!.save({ ...rest, guardian: { ...parentContact } });
         toast({ title: "Student updated", description: `${v.firstName} ${v.lastName}'s details were saved.` });
         router.push(`/admin/students/${studentId}`);
       } else {
@@ -139,7 +146,7 @@ export function StudentForm({ studentId }: { studentId?: string }) {
         return;
       }
       setServerError(app ? new Error(app.message) : e instanceof Error ? e : new Error(String(e)));
-      const fieldErrors = app?.fields ?? (e instanceof ServiceError ? e.fieldErrors : undefined);
+      const fieldErrors = app?.fields ?? fieldErrorsOf(e);
       if (fieldErrors) {
         Object.entries(fieldErrors).forEach(([k, msg]) => setError(k as keyof Values, { message: msg }));
       }

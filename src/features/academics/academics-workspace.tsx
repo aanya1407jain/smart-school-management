@@ -1,68 +1,55 @@
 "use client";
 /**
- * Academics workspace.
- *  - Demo personas: the original demo-data workspace (academics-workspace-demo.tsx).
- *  - School accounts (live): Convex records via the school-aware hooks. Built on
- *    Trisha's Convex wiring (fec0ceb) and extended with the admin actions the
- *    demo workspace had: class teachers, subject teachers, class curriculum,
- *    the current academic year and enrolling students who have no section yet.
+ * Academics workspace (Core shell): school structure — academic years,
+ * classes, sections and class teachers — with the year setup cockpit.
+ *  - Demo personas: the internal demo workspace (DemoSlot "academics.workspace").
+ *  - School accounts (live): Convex records via the school-aware hooks.
+ * Subjects, curriculum, subject teachers and pacing (Academics) and student
+ * enrollment (Students) are tabs contributed by those modules when they are
+ * shipped in the build (src/lib/contributions); the cockpit reads their
+ * figures through academics.setupStatus (providers).
  *
  * Every action is enforced on the server (academics:manage / students:write,
  * school isolation, one class teacher per year, curriculum before assignment).
- * Roll numbers are assigned by the server; the roster is shown in the server's
- * canonical order (model/rollNumbers.ts) and is never re-sorted here.
  */
-import { SyllabusProgressTracker } from "./syllabus-tracker";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ComponentType } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { BookMarked, CalendarRange, ChevronDown, Layers, Loader2, Plus, School, Trash2, UserCheck, Users } from "lucide-react";
-import type { FunctionReturnType } from "convex/server";
+import { BookMarked, ChevronDown, Plus, School } from "lucide-react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { useSchoolMutation, useSchoolQuery } from "@/lib/convex/membership";
 import { useSession } from "@/features/auth/session-provider";
-import {
-  Badge, Button, Card, CardHeader, Checkbox, ConfirmDialog, DataTable, DropdownContent, DropdownItem, DropdownMenu, DropdownTrigger, EmptyState, FormField, Input, Modal, PageHeader,
-  Select, StatusBadge, Tabs, TabsContent, TabsList, useToast,
-} from "@/components/ui";
-import { formatDate, todayISO } from "@/lib/utils/dates";
+import { Badge, Button, Card, CardHeader, Checkbox, ConfirmDialog, DataTable, DropdownContent, DropdownItem, DropdownMenu, DropdownTrigger, EmptyState, FormField, Input, Modal, PageHeader, Select, StatusBadge, Tabs, TabsContent, TabsList, useToast } from "@/components/ui";
+import { formatDate } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils/cn";
-import { DemoAcademicsWorkspace } from "./academics-workspace-demo";
 import { SetupCockpit, type CockpitStep } from "./setup-cockpit";
+import { NeedYear, Spinner, errText, type Klass, type Section, type Teacher, type Year } from "@/features/academics/workspace-kit";
+import { DemoSlot } from "@/lib/demo/demo-slot";
+import { contributionsTo, type AcademicsSetupCtx } from "@/lib/contributions";
 
 export function AcademicsWorkspace() {
   const { dataSource } = useSession();
   return (
     <div className="space-y-6">
-      {dataSource === "live" ? <LiveAcademicsWorkspace /> : <DemoAcademicsWorkspace />}
+      {dataSource === "live" ? <LiveAcademicsWorkspace /> : <DemoSlot id="academics.workspace" />}
     </div>
   );
 }
 
-type Year = FunctionReturnType<typeof api.academics.listAcademicYears>[number];
-type Klass = FunctionReturnType<typeof api.academics.listClasses>[number];
-type Subject = FunctionReturnType<typeof api.academics.listSubjects>[number];
-type Section = FunctionReturnType<typeof api.academics.listSections>[number];
-type Teacher = FunctionReturnType<typeof api.academics.listTeachers>[number];
-
-const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
-
-function Spinner() {
-  return <div className="flex justify-center p-8"><Loader2 className="h-6 w-6 animate-spin text-ink-muted" /></div>;
-}
+type SetupTab = { value: string; label: string; order: number; count?: number; Content: ComponentType<{ ctx: AcademicsSetupCtx }> };
 
 function LiveAcademicsWorkspace() {
   const params = useSearchParams();
   const router = useRouter();
+  const { hasModule } = useSession();
   const [selectedYearId, setSelectedYearId] = useState<string>("");
-  const [tab, setTab] = useState(params.get("tab") ?? "setup");
-  // Enrolling students is Student Management (module entitlement); the rest of Academics setup is core.
-  const studentsOn = useSession().hasModule("students");
+  const parts = contributionsTo("academicsSetup", hasModule);
 
   const years = useSchoolQuery(api.academics.listAcademicYears, {});
   const classes = useSchoolQuery(api.academics.listClasses, {});
-  const subjects = useSchoolQuery(api.academics.listSubjects, {});
   const teachers = useSchoolQuery(api.academics.listTeachers, {});
+  // Module figures for the cockpit (subjects: Academics; enrollment: Students), null when not shipped / enabled.
+  const status = useSchoolQuery(api.academics.setupStatus, {});
 
   // The year being viewed: the chosen one, else the school's current year, else none (no invented fallback).
   const activeYear = useMemo<Year | null>(() => {
@@ -70,9 +57,18 @@ function LiveAcademicsWorkspace() {
     return years.find((y) => y._id === selectedYearId) ?? years.find((y) => y.isCurrent) ?? null;
   }, [years, selectedYearId]);
   const sections = useSchoolQuery(api.academics.listSections, activeYear ? { academicYearId: activeYear._id } : "skip");
-  // Enrolled vs active student records (current year) for the enrollment health metric.
-  const counts = useSchoolQuery(api.academics.studentCounts, studentsOn ? {} : "skip");
   const action = params.get("action");
+
+  const sectionList = sections ?? [];
+  const counts: Record<string, number | undefined> = { subjects: status?.subjects ?? undefined, enrollments: status?.enrollment?.enrolled ?? undefined };
+  const tabs: SetupTab[] = [
+    { value: "years", label: "Academic years", order: 10, count: years?.length, Content: () => <YearsTab years={years ?? []} /> },
+    { value: "classes", label: "Classes & sections", order: 20, count: sectionList.length, Content: ({ ctx }: { ctx: AcademicsSetupCtx }) => (ctx.year ? <ClassesTab year={ctx.year} classes={classes ?? []} sections={ctx.sections} teachers={ctx.teachers} autoOpen={ctx.action === "add-class"} /> : <NeedYear />) },
+    ...parts.flatMap((c) => c.tabs.map((t) => ({ ...t, count: counts[t.value] }))),
+  ].sort((a, b) => a.order - b.order);
+  const has = (t: string) => tabs.some((x) => x.value === t);
+  const [tab, setTab] = useState(params.get("tab") ?? "");
+  const current = has(tab) ? tab : tabs[0].value;
 
   useEffect(() => {
     const t = params.get("tab");
@@ -89,20 +85,20 @@ function LiveAcademicsWorkspace() {
     requestAnimationFrame(() => document.getElementById("academics-tabs")?.scrollIntoView({ behavior: "smooth", block: "start" }));
   };
 
-  if (!years || !classes || !subjects || !teachers || (activeYear && sections === undefined)) return <Spinner />;
+  if (!years || !classes || !teachers || status === undefined || (activeYear && sections === undefined)) return <Spinner />;
 
-  const sectionList = sections ?? [];
   const assigned = sectionList.filter((sec) => sec.classTeacherId).length;
-  const enrolled = counts?.enrolled ?? null;
-  const allSteps: CockpitStep[] = [
+  const enrollment = status.enrollment;
+  const steps: CockpitStep[] = [
     { tab: "years", key: "years", title: "Academic year", metric: null, detail: activeYear ? `${activeYear.name}${activeYear.isCurrent ? " (current)" : ""} · ${formatDate(activeYear.startDate)} – ${formatDate(activeYear.endDate)}` : "No current academic year", done: years.some((y) => y.isCurrent) },
     { tab: "classes", key: "classes", title: "Classes", metric: String(classes.length), detail: `${classes.length} class${classes.length === 1 ? "" : "es"} created`, done: classes.length > 0 },
     { tab: "classes", key: "sections", title: "Sections", metric: String(sectionList.length), detail: activeYear ? `${sectionList.length} sections in ${activeYear.name}` : "—", done: sectionList.length > 0 },
-    { tab: "subjects", key: "subjects", title: "Subjects", metric: String(subjects.length), detail: `${subjects.length} school subjects`, done: subjects.length > 0 },
-    { tab: "enrollments", key: "enrollments", title: "Enrollments", metric: enrolled === null ? null : String(enrolled), detail: "Students placed in sections; roll numbers follow automatically", done: !!counts && counts.enrolled > 0 && counts.notEnrolled === 0 },
-    { tab: "assignments", key: "assignments", title: "Teacher assignments", metric: sectionList.length ? `${Math.round((assigned / sectionList.length) * 100)}%` : null, detail: "Class teachers and subject teachers", done: sectionList.length > 0 && assigned === sectionList.length },
+    ...(status.subjects !== null && has("subjects") ? [{ tab: "subjects", key: "subjects", title: "Subjects", metric: String(status.subjects), detail: `${status.subjects} school subjects`, done: status.subjects > 0 }] : []),
+    ...(enrollment && has("enrollments") ? [{ tab: "enrollments", key: "enrollments", title: "Enrollments", metric: String(enrollment.enrolled), detail: "Students placed in sections; roll numbers follow automatically", done: enrollment.enrolled > 0 && enrollment.notEnrolled === 0 }] : []),
+    { tab: has("assignments") ? "assignments" : "classes", key: "assignments", title: has("assignments") ? "Teacher assignments" : "Class teachers", metric: sectionList.length ? `${Math.round((assigned / sectionList.length) * 100)}%` : null, detail: has("assignments") ? "Class teachers and subject teachers" : "A class teacher for every section", done: sectionList.length > 0 && assigned === sectionList.length },
   ];
-  const steps = allSteps.filter((st) => studentsOn || st.key !== "enrollments");
+  const ctx: AcademicsSetupCtx = { year: activeYear, sections: sectionList, teachers, action };
+  const Current = tabs.find((t) => t.value === current)!;
 
   return (
     <div className="space-y-5">
@@ -119,11 +115,11 @@ function LiveAcademicsWorkspace() {
             )}
             <DropdownMenu>
               <DropdownTrigger asChild>
-                <Button><Plus className="h-4 w-4" /> Add class / subject <ChevronDown className="h-3.5 w-3.5 opacity-80" aria-hidden /></Button>
+                <Button><Plus className="h-4 w-4" /> {has("subjects") ? "Add class / subject" : "Add class"} <ChevronDown className="h-3.5 w-3.5 opacity-80" aria-hidden /></Button>
               </DropdownTrigger>
               <DropdownContent>
                 <DropdownItem onSelect={() => openTab("classes", "&action=add-class")} className={cn(!activeYear && "pointer-events-none opacity-50")}><School className="h-4 w-4" /> Add class</DropdownItem>
-                <DropdownItem onSelect={() => openTab("subjects", "&action=add-subject")}><BookMarked className="h-4 w-4" /> Add subject</DropdownItem>
+                {has("subjects") && <DropdownItem onSelect={() => openTab("subjects", "&action=add-subject")}><BookMarked className="h-4 w-4" /> Add subject</DropdownItem>}
               </DropdownContent>
             </DropdownMenu>
           </div>
@@ -145,54 +141,18 @@ function LiveAcademicsWorkspace() {
           pct: sectionList.length ? (assigned / sectionList.length) * 100 : null,
           caption: sectionList.length === 0 ? "No sections yet" : assigned === sectionList.length ? `All ${sectionList.length} sections have a class teacher` : `${assigned} of ${sectionList.length} sections have a class teacher`,
         }}
-        enrollment={studentsOn && counts ? { enrolled: counts.enrolled, active: counts.activeRecords, caption: `${counts.activeRecords ? Math.round((counts.enrolled / counts.activeRecords) * 100) : 0}% of active students placed in ${counts.academicYear.name}` } : null}
+        enrollment={enrollment ? { enrolled: enrollment.enrolled, active: enrollment.activeRecords, caption: `${enrollment.activeRecords ? Math.round((enrollment.enrolled / enrollment.activeRecords) * 100) : 0}% of active students placed in ${enrollment.academicYear}` } : null}
       />
 
       <div id="academics-tabs" className="scroll-mt-20">
-        <Tabs value={tab} onValueChange={(t) => changeTab(t)}>
-          <TabsList
-            items={[
-              { value: "setup", label: "Overview" },
-              { value: "years", label: "Academic years", count: years.length },
-              { value: "classes", label: "Classes & sections", count: sectionList.length },
-              { value: "subjects", label: "Subjects", count: subjects.length },
-              ...(studentsOn ? [{ value: "enrollments", label: "Enrollments", ...(enrolled !== null ? { count: enrolled } : {}) }] : []),
-              { value: "assignments", label: "Teacher assignments" },
-            ]}
-          />
-          {/* Overview: curriculum pacing (Principal view, read-only). */}
-          <TabsContent value="setup"><SyllabusProgressTracker readOnly={true} /></TabsContent>
-          <TabsContent value="years"><YearsTab years={years} /></TabsContent>
-          <TabsContent value="classes">
-            {activeYear ? <ClassesTab year={activeYear} classes={classes} sections={sectionList} subjects={subjects} teachers={teachers} autoOpen={action === "add-class"} /> : <NeedYear />}
-          </TabsContent>
-          <TabsContent value="subjects"><SubjectsTab subjects={subjects} autoOpen={action === "add-subject"} /></TabsContent>
-          {studentsOn && <TabsContent value="enrollments">
-            {activeYear ? <EnrollmentsTab year={activeYear} sections={sectionList} /> : <NeedYear />}
-          </TabsContent>}
-          <TabsContent value="assignments">
-            {activeYear ? <AssignmentsTab year={activeYear} sections={sectionList} teachers={teachers} /> : <NeedYear />}
-          </TabsContent>
+        <Tabs value={current} onValueChange={(t) => changeTab(t)}>
+          <TabsList items={tabs.map(({ value, label, count }) => ({ value, label, ...(count !== undefined ? { count } : {}) }))} />
+          <TabsContent value={current}><Current.Content ctx={ctx} /></TabsContent>
         </Tabs>
       </div>
     </div>
   );
 }
-
-function NeedYear() {
-  return <Card><EmptyState icon={<CalendarRange className="h-6 w-6" />} title="No academic year selected" description="Create an academic year (or choose one) first." /></Card>;
-}
-
-/** Keeps a selected section id valid as the sections list changes (e.g. when switching years). */
-function useSectionSelection(sections: Section[]) {
-  const [sectionId, setSectionId] = useState<string>(sections[0]?._id ?? "");
-  useEffect(() => {
-    if (!sections.some((s) => s._id === sectionId)) setSectionId(sections[0]?._id ?? "");
-  }, [sections, sectionId]);
-  return [sectionId, setSectionId] as const;
-}
-
-// ------------------------------------------------------------------ Academic years
 
 function YearsTab({ years }: { years: Year[] }) {
   const { toast } = useToast();
@@ -272,12 +232,14 @@ function YearsTab({ years }: { years: Year[] }) {
 
 // ------------------------------------------------------------------ Classes & sections
 
-function ClassesTab({ year, classes, sections, subjects, teachers, autoOpen = false }: { year: Year; classes: Klass[]; sections: Section[]; subjects: Subject[]; teachers: Teacher[]; autoOpen?: boolean }) {
+function ClassesTab({ year, classes, sections, teachers, autoOpen = false }: { year: Year; classes: Klass[]; sections: Section[]; teachers: Teacher[]; autoOpen?: boolean }) {
   const { toast } = useToast();
   const [classOpen, setClassOpen] = useState(autoOpen);
   useEffect(() => { if (autoOpen) setClassOpen(true); }, [autoOpen]);
   const [sectionFor, setSectionFor] = useState<Klass | null>(null);
-  const [curriculumFor, setCurriculumFor] = useState<Klass | null>(null);
+  // Class actions contributed by modules (Academics: the class curriculum).
+  const { hasModule } = useSession();
+  const classActions = contributionsTo("academicsSetup", hasModule).flatMap((c) => (c.ClassAction ? [c.ClassAction] : []));
   const setClassTeacher = useSchoolMutation(api.academics.setClassTeacher);
   const sorted = [...classes].sort((a, b) => a.level - b.level);
 
@@ -306,7 +268,7 @@ function ClassesTab({ year, classes, sections, subjects, teachers, autoOpen = fa
                   description={`${classSections.length} section(s) in ${year.name}`}
                   action={
                     <div className="flex gap-1.5">
-                      <Button size="sm" variant="outline" onClick={() => setCurriculumFor(c)}><BookMarked className="h-3.5 w-3.5" /> Subjects</Button>
+                      {classActions.map((A, i) => <A key={i} year={year} klass={c} />)}
                       <Button size="sm" variant="soft" onClick={() => setSectionFor(c)}><Plus className="h-3.5 w-3.5" /> Section</Button>
                     </div>
                   }
@@ -332,7 +294,6 @@ function ClassesTab({ year, classes, sections, subjects, teachers, autoOpen = fa
       )}
       <AddClassModal open={classOpen} onOpenChange={setClassOpen} existingLevels={classes.map((c) => c.level)} />
       {sectionFor && <AddSectionModal year={year} klass={sectionFor} onClose={() => setSectionFor(null)} />}
-      {curriculumFor && <CurriculumModal year={year} klass={curriculumFor} subjects={subjects} onClose={() => setCurriculumFor(null)} />}
     </div>
   );
 }
@@ -403,271 +364,3 @@ function AddSectionModal({ year, klass, onClose }: { year: Year; klass: Klass; o
 }
 
 /** The subjects a class studies in the selected year (classSubjects). Subject teachers can only be assigned to these. */
-function CurriculumModal({ year, klass, subjects, onClose }: { year: Year; klass: Klass; subjects: Subject[]; onClose: () => void }) {
-  const { toast } = useToast();
-  const current = useSchoolQuery(api.academics.listClassSubjects, { classId: klass._id, academicYearId: year._id });
-  const [chosen, setChosen] = useState<Set<string> | null>(null);
-  const [loading, setLoading] = useState(false);
-  const setClassSubjects = useSchoolMutation(api.academics.setClassSubjects);
-  useEffect(() => { if (current && chosen === null) setChosen(new Set(current.map((s) => s.subjectId as string))); }, [current, chosen]);
-  const save = async () => {
-    if (!chosen) return;
-    setLoading(true);
-    try {
-      const r = await setClassSubjects({ classId: klass._id, academicYearId: year._id, subjectIds: [...chosen] as Id<"subjects">[] });
-      toast({ title: "Curriculum saved", description: `${r.added} added · ${r.removed} removed` });
-      onClose();
-    } catch (e) {
-      toast({ title: "Could not save the curriculum", description: errText(e), tone: "error" });
-    } finally {
-      setLoading(false);
-    }
-  };
-  return (
-    <Modal open onOpenChange={(o) => !o && onClose()} title={`${klass.name} subjects`} description={`Curriculum for ${year.name}. A subject that still has a teacher assigned cannot be removed.`} size="md"
-      footer={<><Button variant="outline" onClick={onClose}>Cancel</Button><Button loading={loading} disabled={!chosen} onClick={save}>Save</Button></>}>
-      {!chosen ? <Spinner /> : subjects.length === 0 ? <EmptyState title="No subjects yet" description="Add subjects in the Subjects tab first." /> : (
-        <div className="grid gap-3 sm:grid-cols-2">
-          {subjects.filter((s) => s.active || chosen.has(s._id)).map((s) => (
-            <Checkbox key={s._id} label={`${s.name} (${s.code})`} checked={chosen.has(s._id)} onChange={(e) => {
-              const next = new Set(chosen);
-              if (e.target.checked) next.add(s._id);
-              else next.delete(s._id);
-              setChosen(next);
-            }} />
-          ))}
-        </div>
-      )}
-    </Modal>
-  );
-}
-
-// ------------------------------------------------------------------ Subjects
-
-function SubjectsTab({ subjects, autoOpen = false }: { subjects: Subject[]; autoOpen?: boolean }) {
-  const { toast } = useToast();
-  const [open, setOpen] = useState(autoOpen);
-  useEffect(() => { if (autoOpen) setOpen(true); }, [autoOpen]);
-  const [name, setName] = useState("");
-  const [code, setCode] = useState("");
-  const [loading, setLoading] = useState(false);
-  const createSubject = useSchoolMutation(api.academics.createSubject);
-  const handleCreate = async () => {
-    const trimmedName = name.trim();
-    const trimmedCode = code.trim().toUpperCase();
-    if (!trimmedName || !trimmedCode) return toast({ title: "Please fill all fields", tone: "error" });
-    setLoading(true);
-    try {
-      await createSubject({ name: trimmedName, code: trimmedCode });
-      toast({ title: "Subject created", description: `${trimmedName} (${trimmedCode}) added.` });
-      setOpen(false);
-      setName("");
-      setCode("");
-    } catch (e) {
-      toast({ title: "Could not create subject", description: errText(e), tone: "error" });
-    } finally {
-      setLoading(false);
-    }
-  };
-  return (
-    <Card>
-      <CardHeader title="Subjects" description="Subjects offered across the school. Add them to each class's curriculum in Classes & sections." action={<Button size="sm" onClick={() => setOpen(true)}><Plus className="h-4 w-4" /> Add subject</Button>} />
-      <div className="p-5">
-        <DataTable
-          rows={[...subjects].sort((a, b) => a.name.localeCompare(b.name))}
-          getRowId={(s) => s._id}
-          empty={<EmptyState title="No subjects yet" />}
-          columns={[
-            { key: "name", header: "Subject", primary: true, cell: (s) => <span className="font-semibold text-ink">{s.name}</span> },
-            { key: "code", header: "Code", cell: (s) => <span className="font-mono">{s.code}</span> },
-            { key: "status", header: "Status", cell: (s) => (s.active ? <Badge tone="teal">Active</Badge> : <Badge tone="lavender">Inactive</Badge>) },
-          ]}
-        />
-      </div>
-      <Modal open={open} onOpenChange={setOpen} title="Add subject" size="sm" footer={<><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button loading={loading} onClick={handleCreate}>Add</Button></>}>
-        <div className="space-y-4">
-          <FormField label="Subject name" required><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Science" /></FormField>
-          <FormField label="Code" required><Input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} maxLength={12} placeholder="SCI" /></FormField>
-        </div>
-      </Modal>
-    </Card>
-  );
-}
-
-// ------------------------------------------------------------------ Enrollments
-
-function EnrollmentsTab({ year, sections }: { year: Year; sections: Section[] }) {
-  const { toast } = useToast();
-  const [sectionId, setSectionId] = useSectionSelection(sections);
-  const roster = useSchoolQuery(api.academics.sectionRoster, sectionId ? { sectionId: sectionId as Id<"sections"> } : "skip");
-  const unenrolled = useSchoolQuery(api.academics.listUnenrolledStudents, { academicYearId: year._id });
-  const enroll = useSchoolMutation(api.academics.enrollStudent);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [target, setTarget] = useState("");
-  const [busy, setBusy] = useState(false);
-  const today = todayISO();
-  const startDate = today < year.startDate ? year.startDate : today > year.endDate ? year.endDate : today;
-
-  const enrolSelected = async () => {
-    if (!target || selected.size === 0) return;
-    setBusy(true);
-    let done = 0;
-    const failed: string[] = [];
-    for (const studentId of selected) {
-      try {
-        await enroll({ studentId: studentId as Id<"students">, sectionId: target as Id<"sections">, startDate });
-        done++;
-      } catch (e) {
-        failed.push(errText(e));
-      }
-    }
-    setBusy(false);
-    setSelected(new Set());
-    const section = sections.find((s) => s._id === target);
-    if (done) toast({ title: `${done} student${done === 1 ? "" : "s"} enrolled in ${section?.displayName ?? "the section"}`, description: "Roll numbers were updated alphabetically." });
-    if (failed.length) toast({ title: `${failed.length} could not be enrolled`, description: failed[0], tone: "error" });
-  };
-
-  return (
-    <div className="space-y-4">
-      <Card>
-        <CardHeader
-          title="Section roster & roll numbers"
-          description="Students in roll-number order. Roll numbers are assigned by the system alphabetically (first name, then last name)."
-          action={
-            <Select aria-label="Section" value={sectionId} onChange={(e) => setSectionId(e.target.value)} className="w-48" disabled={sections.length === 0}>
-              {sections.map((s) => <option key={s._id} value={s._id}>{s.displayName}</option>)}
-            </Select>
-          }
-        />
-        <div className="p-5">
-          {!sectionId ? <EmptyState title="No sections available" description="Create a section first." />
-            : roster === undefined ? <Spinner />
-            : roster.students.length === 0 ? <EmptyState title="No students in this section" description="Enroll students below to populate the roster." />
-            : (
-              // Server order = roll-number order; rendered as-is (never re-sorted on the client).
-              <ul className="divide-y divide-line/60" data-testid="live-roster">
-                {roster.students.map((s) => (
-                  <li key={s.studentId} className="flex items-center justify-between py-2.5">
-                    <div className="flex items-center gap-3">
-                      <span className="w-8 text-center text-sm font-bold text-sapphire">{s.rollNo ?? "—"}</span>
-                      <div><p className="font-medium text-ink">{s.name}</p><p className="text-[12px] text-ink-muted">Adm: {s.admissionNo}</p></div>
-                    </div>
-                    <Badge tone="teal">Enrolled</Badge>
-                  </li>
-                ))}
-              </ul>
-            )}
-        </div>
-      </Card>
-
-      <Card>
-        <CardHeader title="Not yet enrolled" description={`Active students with no section in ${year.name}.`} icon={<Users className="h-4 w-4" />} />
-        <div className="p-5">
-          {unenrolled === undefined ? <Spinner /> : unenrolled.students.length === 0 ? (
-            <EmptyState title="Everyone is enrolled" description="Every active student has a section this year." />
-          ) : (
-            <div className="space-y-4">
-              <div className="flex flex-wrap items-end gap-2">
-                <FormField label="Enroll selected into">
-                  <Select value={target} onChange={(e) => setTarget(e.target.value)} className="w-48">
-                    <option value="">Choose a section</option>
-                    {sections.map((s) => <option key={s._id} value={s._id}>{s.displayName}</option>)}
-                  </Select>
-                </FormField>
-                <Button loading={busy} disabled={!target || selected.size === 0} onClick={enrolSelected}>Enroll {selected.size || ""}</Button>
-                <span className="text-[12.5px] text-ink-muted">Start date {formatDate(startDate)}</span>
-              </div>
-              {unenrolled.truncated && <p className="text-[12.5px] text-plum">Showing the first {unenrolled.students.length} of {unenrolled.total}.</p>}
-              <ul className="grid gap-2 sm:grid-cols-2">
-                {unenrolled.students.map((s) => (
-                  <li key={s.studentId} className="rounded-xl border border-line/70 px-3 py-2">
-                    <Checkbox label={`${s.name} · ${s.admissionNo}`} checked={selected.has(s.studentId)} onChange={(e) => {
-                      const next = new Set(selected);
-                      if (e.target.checked) next.add(s.studentId);
-                      else next.delete(s.studentId);
-                      setSelected(next);
-                    }} />
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-      </Card>
-    </div>
-  );
-}
-
-// ------------------------------------------------------------------ Teacher assignments
-
-function AssignmentsTab({ year, sections, teachers }: { year: Year; sections: Section[]; teachers: Teacher[] }) {
-  const { toast } = useToast();
-  const [sectionId, setSectionId] = useSectionSelection(sections);
-  const section = sections.find((s) => s._id === sectionId) ?? null;
-  const assignments = useSchoolQuery(api.academics.listTeacherAssignments, section ? { sectionId: section._id } : "skip");
-  const curriculum = useSchoolQuery(api.academics.listClassSubjects, section ? { classId: section.classId, academicYearId: year._id } : "skip");
-  const assign = useSchoolMutation(api.academics.assignSubjectTeacher);
-  const remove = useSchoolMutation(api.academics.removeTeacherAssignment);
-
-  const rows = useMemo(() => {
-    if (!curriculum || !assignments) return undefined;
-    const bySubject = new Map(assignments.map((a) => [a.subjectId as string, a]));
-    const list = curriculum.map((s) => ({ subjectId: s.subjectId, subjectName: s.name, assignment: bySubject.get(s.subjectId) ?? null }));
-    // Assignments whose subject left the curriculum are still shown so they can be removed.
-    for (const a of assignments) if (!curriculum.some((s) => s.subjectId === a.subjectId)) list.push({ subjectId: a.subjectId, subjectName: `${a.subjectName ?? "Subject"} (not in curriculum)`, assignment: a });
-    return list;
-  }, [curriculum, assignments]);
-
-  const change = async (subjectId: Id<"subjects">, teacherId: string, current: { _id: Id<"teacherAssignments"> } | null) => {
-    if (!section) return;
-    try {
-      if (!teacherId) {
-        if (current) await remove({ assignmentId: current._id });
-        toast({ title: "Assignment removed" });
-      } else {
-        await assign({ sectionId: section._id, subjectId, teacherId: teacherId as Id<"teachers"> });
-        toast({ title: "Subject teacher assigned" });
-      }
-    } catch (e) {
-      toast({ title: "Could not change the assignment", description: errText(e), tone: "error" });
-    }
-  };
-
-  return (
-    <Card>
-      <CardHeader
-        title="Teacher assignments"
-        description={section ? `Class teacher: ${section.classTeacherName ?? "none (set it in Classes & sections)"}. Subject teachers mark marks, set homework and appear in the timetable.` : "Subject teachers for each section."}
-        action={
-          <Select aria-label="Section" value={sectionId} onChange={(e) => setSectionId(e.target.value)} className="w-48" disabled={sections.length === 0}>
-            {sections.map((s) => <option key={s._id} value={s._id}>{s.displayName}</option>)}
-          </Select>
-        }
-      />
-      <div className="p-5">
-        {!section ? <EmptyState title="No sections available" />
-          : rows === undefined ? <Spinner />
-          : rows.length === 0 ? <EmptyState title="No subjects in this class's curriculum" description="Add subjects to the class in Classes & sections → Subjects, then assign teachers here." />
-          : (
-            <DataTable
-              rows={rows}
-              getRowId={(r) => r.subjectId}
-              columns={[
-                { key: "subject", header: "Subject", primary: true, cell: (r) => <span className="font-semibold text-ink">{r.subjectName}</span> },
-                {
-                  key: "teacher", header: "Teacher", cell: (r) => (
-                    <Select aria-label={`Teacher for ${r.subjectName}`} value={r.assignment?.teacherId ?? ""} onChange={(e) => change(r.subjectId, e.target.value, r.assignment)} className="h-9 w-56 text-[13px]">
-                      <option value="">— Unassigned —</option>
-                      {teachers.map((t) => <option key={t.teacherId} value={t.teacherId}>{t.name}</option>)}
-                    </Select>
-                  ),
-                },
-              ]}
-              rowActions={(r) => (r.assignment ? <Button size="sm" variant="ghost" aria-label={`Remove ${r.subjectName} assignment`} onClick={() => change(r.subjectId, "", r.assignment)}><Trash2 className="h-4 w-4" /></Button> : null)}
-            />
-          )}
-      </div>
-    </Card>
-  );
-}

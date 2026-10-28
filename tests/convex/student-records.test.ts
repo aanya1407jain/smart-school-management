@@ -71,8 +71,8 @@ function keysDeep(v: unknown, out = new Set<string>()): Set<string> {
 describe("academics.getStudentProfile", () => {
   test("is a deployed public query (regression: 'Could not find public function') and admins get the full, explicit-field profile", async () => {
     const { t, A } = await setup();
-    expect(api.academics.getStudentProfile).toBeDefined();
-    const p = (await (await as(t, A.users.admin)).query(api.academics.getStudentProfile, { studentId: A.studentA }))!;
+    expect(api.students.getStudentProfile).toBeDefined();
+    const p = (await (await as(t, A.users.admin)).query(api.students.getStudentProfile, { studentId: A.studentA }))!;
     expect(p.access).toBe("school");
     expect(p.student).toMatchObject({ studentId: A.studentA, firstName: "Asha", admissionNo: "alpha-Asha" });
     expect(p.enrollment).toMatchObject({ sectionDisplayName: "8-A", className: "Grade 8", status: "active", classTeacher: "Class T" });
@@ -87,7 +87,7 @@ describe("academics.getStudentProfile", () => {
   test("an assigned teacher sees the student without parent-contact phone/email or fees; an unassigned teacher sees nothing", async () => {
     const { t, A } = await setup();
     // subjectTeacher teaches section A (where Asha is).
-    const p = (await (await as(t, A.users.subjectTeacher)).query(api.academics.getStudentProfile, { studentId: A.studentA }))!;
+    const p = (await (await as(t, A.users.subjectTeacher)).query(api.students.getStudentProfile, { studentId: A.studentA }))!;
     expect(p.access).toBe("assigned");
     expect(p.parentContacts[0]).toMatchObject({ name: "Parent Contact", phone: null, email: null });
     expect(p.fees).toBeNull();
@@ -98,33 +98,33 @@ describe("academics.getStudentProfile", () => {
       await ctx.db.insert("schoolMemberships", { schoolId: A.schoolId, userId: uid, displayName: "No Scope", role: "teacher", status: "active", permissionSets: [], teacherId: tid });
       return uid;
     });
-    expect(await errorCode((await as(t, outsider)).query(api.academics.getStudentProfile, { studentId: A.studentA }))).toBe("NOT_FOUND");
+    expect(await errorCode((await as(t, outsider)).query(api.students.getStudentProfile, { studentId: A.studentA }))).toBe("NOT_FOUND");
   });
 
   test("a student sees only their own profile; a legacy guardian sign-in sees nothing; other schools and malformed ids are not found", async () => {
     const { t, A, B } = await setup();
     const student = await as(t, A.users.student); // Asha
-    const own = (await student.query(api.academics.getStudentProfile, { studentId: A.studentA }))!;
+    const own = (await student.query(api.students.getStudentProfile, { studentId: A.studentA }))!;
     expect(own.access).toBe("own");
     expect(own.fees).not.toBeNull();
-    expect(await errorCode(student.query(api.academics.getStudentProfile, { studentId: A.studentB }))).toBe("NOT_FOUND");
-    expect(await errorCode(student.query(api.academics.getStudentProfile, { studentId: B.studentA }))).toBe("NOT_FOUND");
-    expect(await student.query(api.academics.getStudentProfile, { studentId: "stu_aarav" })).toBeNull();
+    expect(await errorCode(student.query(api.students.getStudentProfile, { studentId: A.studentB }))).toBe("NOT_FOUND");
+    expect(await errorCode(student.query(api.students.getStudentProfile, { studentId: B.studentA }))).toBe("NOT_FOUND");
+    expect(await student.query(api.students.getStudentProfile, { studentId: "stu_aarav" })).toBeNull();
     const legacy = await as(t, A.users.legacyGuardian); // was linked to Asha — no access any more
-    expect(await errorCode(legacy.query(api.academics.getStudentProfile, { studentId: A.studentA }))).toBe("NO_SCHOOL_ACCESS");
-    expect(await errorCode((await as(t, B.users.admin)).query(api.academics.getStudentProfile, { studentId: A.studentA }))).toBe("NOT_FOUND");
+    expect(await errorCode(legacy.query(api.students.getStudentProfile, { studentId: A.studentA }))).toBe("NO_SCHOOL_ACCESS");
+    expect(await errorCode((await as(t, B.users.admin)).query(api.students.getStudentProfile, { studentId: A.studentA }))).toBe("NOT_FOUND");
   });
 
   test("missing or ended enrollments are reported, not invented", async () => {
     const { t, A } = await setup();
     const admin = await as(t, A.users.admin);
     const e = await t.run(async (ctx) => (await ctx.db.query("enrollments").withIndex("by_student_year", (q) => q.eq("studentId", A.studentB).eq("academicYearId", A.yearId)).unique())!);
-    await admin.mutation(api.academics.endEnrollment, { enrollmentId: e._id, status: "withdrawn", endDate: "2026-07-01" });
-    let p = (await admin.query(api.academics.getStudentProfile, { studentId: A.studentB }))!;
+    await admin.mutation(api.students.endEnrollment, { enrollmentId: e._id, status: "withdrawn", endDate: "2026-07-01" });
+    let p = (await admin.query(api.students.getStudentProfile, { studentId: A.studentB }))!;
     expect(p.enrollmentState).toBe("ended");
     expect(p.homework).toEqual([]);
     await t.run((ctx) => ctx.db.delete(e._id));
-    p = (await admin.query(api.academics.getStudentProfile, { studentId: A.studentB }))!;
+    p = (await admin.query(api.students.getStudentProfile, { studentId: A.studentB }))!;
     expect(p.enrollmentState).toBe("missing");
     expect(p.enrollment).toBeNull();
   });
@@ -134,15 +134,15 @@ describe("student portal modules (live accounts)", () => {
   test("timetable, homework, results, fees and notices resolve to the signed-in student's own records", async () => {
     const { t, A } = await setup();
     const me = await as(t, A.users.student); // Asha, 8-A
-    const tt = await me.query(api.studentPortal.myTimetable, {});
+    const tt = await me.query(api.timetable.myStudentTimetable, {});
     expect(tt.state === "ok" && tt.section === "8-A" && tt.lessons.length === 1 && tt.lessons[0].teacher === "Subject T").toBe(true);
-    const hw = await me.query(api.studentPortal.myHomework, {});
+    const hw = await me.query(api.homework.myHomework, {});
     expect(hw.state === "ok" && hw.homework.map((h) => [h.title, h.submission?.status, h.submission?.feedback])).toEqual([["Fractions sheet", "reviewed", "Well done"]]);
     // The fields the student homework screen renders: homework status, attachments, and the student's own submission text.
     expect(hw.state === "ok" && hw.homework.map((h) => [h.homeworkStatus, h.attachmentFileIds, h.submission?.content, typeof h.submission?.submissionId])).toEqual([["active", [], null, "string"]]);
-    const res = await me.query(api.studentPortal.myResults, {});
+    const res = await me.query(api.exams.myResults, {});
     expect(res.state === "ok" && res.results.map((r) => [r.examName, r.percentage, r.rank, r.sectionSize])).toEqual([["Unit Test 1", 82, 1, 1]]);
-    const fees = await me.query(api.studentPortal.myFees, {});
+    const fees = await me.query(api.fees.myFees, {});
     if (fees.state !== "ok") throw new Error(fees.state);
     expect(fees.obligations.map((o) => [o.label, o.concessionMinor, o.paidMinor, o.outstandingMinor])).toEqual([["Q1", 100000, 900000, 0], ["Q2", 100000, 0, 900000]]);
     expect(fees.payments.map((p) => [p.receiptNo, p.amountMinor])).toEqual([["AL/26-27/0001", 900000]]); // the reversed payment is excluded
@@ -153,17 +153,17 @@ describe("student portal modules (live accounts)", () => {
   test("a student cannot read another student's modules; a legacy guardian sign-in reads none", async () => {
     const { t, A, B } = await setup();
     const me = await as(t, A.users.student);
-    for (const q of [api.studentPortal.myTimetable, api.studentPortal.myHomework, api.studentPortal.myResults, api.studentPortal.myFees] as const) {
+    for (const q of [api.timetable.myStudentTimetable, api.homework.myHomework, api.exams.myResults, api.fees.myFees] as const) {
       expect(await errorCode(me.query(q, { studentId: A.studentB }))).toBe("NOT_FOUND");
       expect(await errorCode(me.query(q, { studentId: B.studentA }))).toBe("NOT_FOUND");
     }
     expect(await errorCode(me.query(api.studentPortal.myNotices, { studentId: A.studentB, today: TODAY }))).toBe("NOT_FOUND");
     const g = await as(t, A.users.legacyGuardian);
-    expect(await errorCode(g.query(api.studentPortal.myResults, { studentId: A.studentA }))).toBe("NO_SCHOOL_ACCESS");
-    expect(await errorCode(g.query(api.studentPortal.myFees, {}))).toBe("NO_SCHOOL_ACCESS");
+    expect(await errorCode(g.query(api.exams.myResults, { studentId: A.studentA }))).toBe("NO_SCHOOL_ACCESS");
+    expect(await errorCode(g.query(api.fees.myFees, {}))).toBe("NO_SCHOOL_ACCESS");
     // Staff are not student-portal identities.
-    expect(await errorCode((await as(t, A.users.admin)).query(api.studentPortal.myFees, {}))).toBe("FORBIDDEN");
-    expect(await errorCode((await as(t, A.users.classTeacher)).query(api.studentPortal.myTimetable, {}))).toBe("FORBIDDEN");
+    expect(await errorCode((await as(t, A.users.admin)).query(api.fees.myFees, {}))).toBe("FORBIDDEN");
+    expect(await errorCode((await as(t, A.users.classTeacher)).query(api.timetable.myStudentTimetable, {}))).toBe("FORBIDDEN");
   });
 
   test("a bulk-created student (no seeded data) gets real, empty-but-honest modules for their section", async () => {
@@ -179,15 +179,15 @@ describe("student portal modules (live accounts)", () => {
     const res = await admin.action(api.bulkAccounts.processBatch, { jobId });
     const userId = await t.run(async (ctx) => (await ctx.db.query("schoolMemberships").withIndex("by_student", (q) => q.eq("studentId", sid)).unique())!.userId!);
     const me = await as(t, userId);
-    expect(await errorCode(me.query(api.studentPortal.myTimetable, {}))).toBe("PASSWORD_CHANGE_REQUIRED");
+    expect(await errorCode(me.query(api.timetable.myStudentTimetable, {}))).toBe("PASSWORD_CHANGE_REQUIRED");
     await me.action(api.account.changePassword, { currentPassword: res.credentials[0].temporaryPassword, newPassword: "Kabir#2026x" });
-    const tt = await me.query(api.studentPortal.myTimetable, {});
+    const tt = await me.query(api.timetable.myStudentTimetable, {});
     expect(tt.state === "ok" && tt.section === "8-B" && tt.lessons.length === 1).toBe(true); // 8-B's real timetable
-    const hw = await me.query(api.studentPortal.myHomework, {});
+    const hw = await me.query(api.homework.myHomework, {});
     expect(hw.state === "ok" && hw.homework.map((h) => [h.title, h.submission])).toEqual([["B only", null]]);
     // The report-card header (school name, student name and admission number) comes with the results.
-    expect((await me.query(api.studentPortal.myResults, {}))).toEqual({ state: "ok", school: "School alpha", student: { name: "Kabir Rao", admissionNo: "NEW-1" }, results: [] });
-    const fees = await me.query(api.studentPortal.myFees, {});
+    expect((await me.query(api.exams.myResults, {}))).toEqual({ state: "ok", school: "School alpha", student: { name: "Kabir Rao", admissionNo: "NEW-1" }, results: [] });
+    const fees = await me.query(api.fees.myFees, {});
     expect(fees.state === "ok" && fees.obligations.length === 0 && fees.totals.grossMinor === 0).toBe(true);
     const n = await me.query(api.studentPortal.myNotices, { today: TODAY });
     expect(n.state === "ok" && n.notices.map((x) => x.title).sort()).toEqual(["8-B only", "Everyone", "Grade 8", "Students"]);
@@ -198,10 +198,10 @@ describe("student portal modules (live accounts)", () => {
     const e = await t.run(async (ctx) => (await ctx.db.query("enrollments").withIndex("by_student_year", (q) => q.eq("studentId", A.studentA).eq("academicYearId", A.yearId)).unique())!);
     await t.run((ctx) => ctx.db.patch(e._id, { status: "withdrawn" }));
     const me = await as(t, A.users.student);
-    expect(await me.query(api.studentPortal.myTimetable, {})).toEqual({ state: "not_enrolled" });
-    expect(await me.query(api.studentPortal.myHomework, {})).toEqual({ state: "not_enrolled" });
+    expect(await me.query(api.timetable.myStudentTimetable, {})).toEqual({ state: "not_enrolled" });
+    expect(await me.query(api.homework.myHomework, {})).toEqual({ state: "not_enrolled" });
     await t.run((ctx) => ctx.db.patch(A.memberships.student, { studentId: undefined }));
-    expect(await me.query(api.studentPortal.myFees, {})).toEqual({ state: "no_student_record" });
+    expect(await me.query(api.fees.myFees, {})).toEqual({ state: "no_student_record" });
     expect(await errorCode(me.query(api.studentPortal.myNotices, { today: "14/07/2026" }))).toBe("INVALID_ARGUMENT");
   });
 });

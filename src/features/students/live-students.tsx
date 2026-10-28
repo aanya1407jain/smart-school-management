@@ -39,7 +39,7 @@ export function LiveStudentsList() {
     { kind: "student", ...(sectionId ? { sectionId: sectionId as Id<"sections"> } : {}), ...(debounced ? { search: debounced } : {}) },
     { initialNumItems: 50 },
   );
-  const counts = useSchoolQuery(api.academics.studentCounts, sectionId ? { sectionId: sectionId as Id<"sections"> } : {});
+  const counts = useSchoolQuery(api.students.studentCounts, sectionId ? { sectionId: sectionId as Id<"sections"> } : {});
   return (
     <div>
       <PageHeader title="Students" description="Active students in roll-number order (first name, then last name)." actions={canWrite ? <LinkButton href="/admin/students/new"><UserPlus className="h-4 w-4" /> Admit student</LinkButton> : undefined} />
@@ -96,8 +96,8 @@ const BLOOD = ["", "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
 export function LiveStudentEdit({ studentId }: { studentId: string }) {
   const router = useRouter();
   const { toast } = useToast();
-  const profile = useSchoolQuery(api.academics.getStudentProfile, { studentId });
-  const update = useSchoolMutation(api.academics.updateStudentProfile);
+  const profile = useSchoolQuery(api.students.getStudentProfile, { studentId });
+  const update = useSchoolMutation(api.students.updateStudentProfile);
   const [form, setForm] = useState<null | { firstName: string; lastName: string; gender: string; dateOfBirth: string; email: string; phone: string; address: string; bloodGroup: string; scholarNo: string }>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

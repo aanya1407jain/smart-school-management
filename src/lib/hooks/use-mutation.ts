@@ -1,12 +1,12 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { ServiceError } from "@/lib/services";
+import { fieldErrorsOf } from "@/lib/utils/errors";
 
 export interface MutationState<A extends unknown[], R> {
   mutate: (...args: A) => Promise<R | undefined>;
   isPending: boolean;
-  error: ServiceError | Error | null;
+  error: Error | null;
   fieldErrors: Record<string, string>;
   reset: () => void;
 }
@@ -30,7 +30,8 @@ export function useMutation<A extends unknown[], R>(fn: (...args: A) => Promise<
     } catch (e) {
       const err = e as Error;
       setError(err);
-      if (err instanceof ServiceError && err.fieldErrors) setFieldErrors(err.fieldErrors);
+      const fields = fieldErrorsOf(err);
+      if (fields) setFieldErrors(fields);
       return undefined;
     } finally {
       setPending(false);

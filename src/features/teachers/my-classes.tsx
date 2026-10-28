@@ -7,7 +7,7 @@ import { services } from "@/lib/services";
 import { useQuery } from "@/lib/hooks/use-query";
 import { Avatar, Badge, Card, CardHeader, DataTable, EmptyState, GlassCard, LinkButton, PageHeader, ProgressBar, QueryView, SearchInput } from "@/components/ui";
 import { AttendancePill } from "@/features/students/students-list";
-import { ClassesDashboard } from "./classes-dashboard";
+import { ClassesDashboard } from "@/features/students/classes-dashboard";
 import { formatPercent } from "@/lib/utils/format";
 import { dueLabel } from "@/lib/utils/dates";
 

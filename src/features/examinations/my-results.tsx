@@ -7,7 +7,7 @@ import { useActiveStudentId } from "@/features/auth/session-provider";
 import { Card, CardHeader, EmptyState, PageHeader, QueryView, StatusBadge } from "@/components/ui";
 import { ChartTooltip, axisProps, barCursor, barProps, gridProps } from "@/components/charts/chart-card";
 import { formatDate } from "@/lib/utils/dates";
-import { ResultCard } from "./result-card";
+import { ResultCard } from "./demo-result-card";
 
 export function MyResults() {
   const studentId = useActiveStudentId();

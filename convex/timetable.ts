@@ -19,12 +19,13 @@ import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
 import type { Actor } from "./core/actor";
 import { moduleQuery, moduleMutation } from "./core/functions";
-import { getInSchool, getSchoolSettings, isSubjectTeacherOf, requirePermission, requireSectionRead } from "./core/authorization";
+import { getInSchool, getSchoolSettings, requirePermission, requireSectionRead } from "./core/authorization";
 import { conflict, forbidden, invalid, invalidRelationship } from "./core/errors";
 import { assertNonEmpty, assertTime } from "./core/validators";
-import { subjectInCurriculum, teacherDisplayName } from "./model/academics";
-import { timetableFor } from "./model/studentRecords";
+import { teacherDisplayName } from "./model/academics";
+import { isSubjectTeacherOf, subjectInCurriculum, timetableFor } from "./model/academicsRecords";
 import { writeAudit } from "./model/audit";
+import { activeSection, resolvePortalStudent, vPortalStudent } from "./model/portalStudent";
 
 const academicsQuery = moduleQuery("academics");
 const academicsMutation = moduleMutation("academics");
@@ -236,5 +237,18 @@ export const teacherTimetable = academicsQuery({
     requirePermission(ctx.actor, "timetable:manage");
     const teacher = await getInSchool(ctx, "teachers", teacherId, "Teacher");
     return await teacherWeek(ctx, teacher._id);
+  },
+});
+
+// ================================================================ student portal
+/** Weekly timetable of the signed-in student's current section (was studentPortal.myTimetable). */
+export const myStudentTimetable = academicsQuery({
+  args: vPortalStudent,
+  handler: async (ctx, { studentId }) => {
+    const student = await resolvePortalStudent(ctx, studentId, "timetable:read:own");
+    if (!student) return { state: "no_student_record" as const };
+    const { section } = await activeSection(ctx, student);
+    if (!section) return { state: "not_enrolled" as const };
+    return { state: "ok" as const, section: section.displayName, ...(await timetableFor(ctx, section)) };
   },
 });

@@ -3,6 +3,8 @@ import Link from "next/link";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis, Legend } from "recharts";
 import { Cake, Droplet, FileText, Mail, MapPin, Pencil, Phone, UserRound, Wallet, CalendarDays, Download } from "lucide-react";
 import type { StudentProfile as Profile } from "@/lib/services/students.service";
+import { services } from "@/lib/services";
+import { useQuery as useDemoQuery } from "@/lib/hooks/use-query";
 import { useSession } from "@/features/auth/session-provider";
 import {
   Avatar, Badge, Card, CardHeader, EmptyState, GlassCard, LinkButton, ProgressRing, StatusBadge, Tabs, TabsContent, TabsList,
@@ -12,7 +14,15 @@ import { formatCurrency, formatPercent, titleCase } from "@/lib/utils/format";
 import { formatDate, formatShortDate, formatWeekday, daysBetween, todayISO } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils/cn";
 import { FeeObligationsTable, PaymentsTable } from "@/features/fees/fee-tables";
-import { ResultCard } from "@/features/examinations/result-card";
+import { ResultCard } from "@/features/examinations/demo-result-card";
+
+/** Demo slot "students.profile": loads a demo-dataset record and renders it. */
+export function DemoStudentProfile({ studentId, backHref }: { studentId: string; backHref?: string }) {
+  const demo = useDemoQuery(() => services.students.getProfile(studentId), [studentId]);
+  if (demo.isLoading) return <div className="p-8 text-center text-ink-muted" role="status">Loading student profile...</div>;
+  if (!demo.data) return <div className="mx-auto max-w-4xl p-6"><EmptyState title="Student not found" description="This student record doesn't exist or you don't have access to it." /></div>;
+  return <DemoStudentProfileBody p={demo.data} backHref={backHref} />;
+}
 
 /**
  * DEMO-mode student profile: the in-browser demo dataset (services.students),

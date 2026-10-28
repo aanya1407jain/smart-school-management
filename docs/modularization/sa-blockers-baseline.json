@@ -1,0 +1,4 @@
+{
+  "note": "Students + Attendance export blockers: Core/Students/Attendance files that still depend on Academics, Fees or Examinations. Must shrink to zero before the export (tests/convex/module-selection.test.ts).",
+  "blockers": []
+}

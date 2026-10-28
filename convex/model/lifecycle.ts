@@ -1,78 +1,54 @@
 /**
- * Read-side facts the Promotions & TC workspace shows next to each student:
- * the latest published result of a year (with an eligibility standing), the
- * year's fee balance and the year's attendance totals. Pure reads over
- * existing records — nothing here is stored separately.
+ * What the Promotions & TC workspace shows next to each student, gathered
+ * from the OWNING modules through providers (contracts/providers.ts,
+ * core/registry.ts) — Students reads no examination, fee or attendance table.
+ *
+ * A module that is not shipped in this build is reported as such, never as
+ * empty data: fees come back as `null` ("not checked", never ₹0), standing as
+ * "no_result", attendance totals as `null`.
  */
 import type { QueryCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
-import { computeLedger, effectivePayments, standingOf } from "./feeMath";
-import { schoolYearFees } from "./feeData";
+import type { FeeDues, LatestResult } from "../contracts/providers";
+import { maybeProvider } from "../core/registry";
 
-/**
- * Academic standing from the latest published result of the year:
- *  - eligible     every subject passed
- *  - compartment  one or two subjects not passed
- *  - detained     three or more subjects not passed
- *  - no_result    nothing published for the student this year
- * A suggestion for the office — promotion itself is the administrator's decision.
- */
-export type Standing = "eligible" | "compartment" | "detained" | "no_result";
+export type Standing = LatestResult["standing"] | "no_result";
+export type { FeeDues, LatestResult };
 
-export type LatestResult = { examName: string; percentage: number; grade: string | null; failedSubjects: number; standing: Standing };
-
-export function standingFrom(failedSubjects: number): Exclude<Standing, "no_result"> {
-  return failedSubjects === 0 ? "eligible" : failedSubjects <= 2 ? "compartment" : "detained";
+/** Latest published result per student (empty when Examinations is not shipped). */
+export async function latestResults(ctx: QueryCtx, schoolId: Id<"schools">, academicYearId: Id<"academicYears">, studentIds: Id<"students">[]): Promise<Map<string, LatestResult>> {
+  const p = maybeProvider("examinations.studentStanding");
+  return p ? await p.latestResults(ctx, schoolId, academicYearId, studentIds) : new Map();
 }
 
-/** Latest published result per student, limited to exams of `academicYearId`. */
-export async function latestResults(ctx: QueryCtx, schoolId: Id<"schools">, academicYearId: Id<"academicYears">, studentIds: Id<"students">[]) {
-  const exams = await ctx.db.query("exams").withIndex("by_school_year", (q) => q.eq("schoolId", schoolId).eq("academicYearId", academicYearId)).collect();
-  const examById = new Map(exams.map((e) => [e._id, e]));
-  const out = new Map<Id<"students">, LatestResult>();
-  for (const studentId of studentIds) {
-    const rows = await ctx.db.query("results").withIndex("by_student_exam", (q) => q.eq("studentId", studentId)).collect();
-    const mine = rows.filter((r) => r.schoolId === schoolId && examById.has(r.examId)).sort((a, b) => b.publishedAt - a.publishedAt);
-    const r = mine[0];
-    if (!r) continue;
-    const failed = r.subjects.filter((s) => !s.passed).length;
-    out.set(studentId, { examName: examById.get(r.examId)!.name, percentage: r.percentage, grade: r.grade ?? null, failedSubjects: failed, standing: standingFrom(failed) });
-  }
-  return out;
+/** Fee balances per student, or null when Fees is not shipped (dues cannot be checked). */
+export async function feeBalances(ctx: QueryCtx, schoolId: Id<"schools">, academicYearId: Id<"academicYears">, studentIds: Id<"students">[], today: string): Promise<Map<string, FeeDues> | null> {
+  const p = maybeProvider("fees.studentDues");
+  return p ? await p.duesMany(ctx, schoolId, academicYearId, studentIds, today) : null;
 }
 
-export type FeeBalance = { outstandingMinor: number; overdueMinor: number; assigned: boolean };
-
-/** Fee balance per student for one year (the same ledger arithmetic as the student's fee page). */
-export async function feeBalances(ctx: QueryCtx, schoolId: Id<"schools">, academicYearId: Id<"academicYears">, studentIds: Id<"students">[], today: string) {
-  const fees = await schoolYearFees(ctx, schoolId, academicYearId);
-  const out = new Map<Id<"students">, FeeBalance>();
-  for (const id of studentIds) {
-    const ledger = computeLedger(fees.obligations.get(id) ?? [], fees.concessions.get(id) ?? [], fees.payments.get(id) ?? []);
-    out.set(id, { outstandingMinor: ledger.totals.outstandingMinor, overdueMinor: standingOf(ledger.rows, today).overdueMinor, assigned: ledger.rows.length > 0 });
-  }
-  return out;
+/** One student's fee balance, or null when Fees is not shipped. */
+export async function feeBalanceOf(ctx: QueryCtx, student: Doc<"students">, academicYearId: Id<"academicYears">, today: string): Promise<FeeDues | null> {
+  const p = maybeProvider("fees.studentDues");
+  return p ? await p.dues(ctx, student, academicYearId, today) : null;
 }
 
-/** One student's fee balance for one year. */
-export async function feeBalanceOf(ctx: QueryCtx, student: Doc<"students">, academicYearId: Id<"academicYears">, today: string): Promise<FeeBalance> {
-  const [obligations, concessions, payments] = await Promise.all([
-    ctx.db.query("studentFees").withIndex("by_student_year", (q) => q.eq("studentId", student._id).eq("academicYearId", academicYearId)).collect(),
-    ctx.db.query("feeConcessions").withIndex("by_student_year", (q) => q.eq("studentId", student._id).eq("academicYearId", academicYearId)).collect(),
-    ctx.db.query("feePayments").withIndex("by_student_paid", (q) => q.eq("studentId", student._id)).collect(),
-  ]);
-  const ledger = computeLedger(obligations, concessions, effectivePayments(payments.filter((p) => p.academicYearId === academicYearId && p.schoolId === student.schoolId)));
-  return { outstandingMinor: ledger.totals.outstandingMinor, overdueMinor: standingOf(ledger.rows, today).overdueMinor, assigned: ledger.rows.length > 0 };
-}
-
-/**
- * Working days and days attended in one academic year: every register the
- * student was on counts as a working day; present (and late, when the school
- * counts late as present) count as attended.
- */
+/** Working / attended days in a year, or null when Attendance is not shipped. */
 export async function attendanceTotals(ctx: QueryCtx, studentId: Id<"students">, year: Pick<Doc<"academicYears">, "startDate" | "endDate">, upTo: string, lateCounts: boolean) {
-  const end = upTo < year.endDate ? upTo : year.endDate;
-  const records = await ctx.db.query("attendanceRecords").withIndex("by_student_date", (q) => q.eq("studentId", studentId).gte("date", year.startDate).lte("date", end)).collect();
-  const attended = records.filter((r) => r.status === "present" || (lateCounts && r.status === "late")).length;
-  return { workingDays: records.length, attendedDays: attended };
+  const p = maybeProvider("attendance.studentRecords");
+  return p ? await p.totals(ctx, studentId, year, upTo, lateCounts) : null;
+}
+
+/**
+ * Why the student's new-year records make a promotion permanent, or null. Each
+ * shipped module answers for its own records (attendance, fees, results).
+ */
+export async function newYearRecordsProblem(ctx: QueryCtx, studentId: Id<"students">, name: string, year: Doc<"academicYears">): Promise<string | null> {
+  const attendance = maybeProvider("attendance.studentRecords");
+  if (attendance && (await attendance.hasRecordsBetween(ctx, studentId, year.startDate, year.endDate))) return `Attendance is already recorded for ${name} in ${year.name}.`;
+  const fees = maybeProvider("fees.studentDues");
+  if (fees && (await fees.hasFeesInYear(ctx, studentId, year._id))) return `Fees are already assigned to ${name} for the new year.`;
+  const results = maybeProvider("examinations.studentStanding");
+  if (results && (await results.hasResultsInYear(ctx, studentId, year._id))) return `Results are already published for ${name} in the new year.`;
+  return null;
 }

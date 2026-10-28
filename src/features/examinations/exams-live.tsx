@@ -209,7 +209,7 @@ function PaperFormModal({ exam, paper, classes, onClose }: { exam: Exam; paper?:
   const { toast } = useToast();
   const upsert = useSchoolMutation(api.exams.upsertPaper);
   const [classId, setClassId] = useState<string>(paper?.classId ?? classes[0]?._id ?? "");
-  const subjects = useSchoolQuery(api.academics.listClassSubjects, classId ? { classId: classId as Id<"classes"> } : "skip");
+  const subjects = useSchoolQuery(api.subjects.listClassSubjects, classId ? { classId: classId as Id<"classes"> } : "skip");
   const [subjectId, setSubjectId] = useState<string>(paper?.subjectId ?? "");
   const [date, setDate] = useState(paper?.date ?? exam.startDate);
   const [startTime, setStartTime] = useState(paper?.startTime ?? "09:00");

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { LiveTimetableBuilder } from "@/features/timetable/timetable-live";
-import { LiveAware } from "@/features/student-portal/live-portal";
+import { LiveAware } from "@/features/live/portal";
 
 export const metadata: Metadata = { title: "Timetable" };
 // One source for every admin session (demo personas included), like the Students page: the

@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { Avatar, Card, EmptyState, FilterPills, LinkButton, PageHeader, ProgressRing, SearchInput } from "@/components/ui";
 import { cn } from "@/lib/utils/cn";
+import { isRouteShipped } from "@/lib/permissions/routes";
 
 export type TeacherClassCard = {
   sectionId: string;
@@ -231,9 +232,9 @@ function AdvisoryHero({ c }: { c: TeacherClassCard }) {
         </div>
         <div className="flex flex-col justify-between gap-3 rounded-2xl bg-white/60 p-4 ring-1 ring-inset ring-white/70 backdrop-blur-md">
           <StatusBanner c={c} />
-          <LinkButton href={attendanceHref(c)} size="lg" className={cn("w-full justify-center", pending ? "bg-gradient-to-br from-violet-600 to-indigo-600 shadow-[0_8px_24px_-8px_rgb(99_102_241/0.7)] hover:shadow-[0_10px_28px_-8px_rgb(99_102_241/0.8)]" : "")} variant={pending ? "primary" : "outline"}>
+          {isRouteShipped(attendanceHref(c)) && <LinkButton href={attendanceHref(c)} size="lg" className={cn("w-full justify-center", pending ? "bg-gradient-to-br from-violet-600 to-indigo-600 shadow-[0_8px_24px_-8px_rgb(99_102_241/0.7)] hover:shadow-[0_10px_28px_-8px_rgb(99_102_241/0.8)]" : "")} variant={pending ? "primary" : "outline"}>
             <CalendarCheck2 className="h-4 w-4" /> {pending ? "Mark attendance now" : "Edit today's attendance"}
-          </LinkButton>
+          </LinkButton>}
           <div className="grid grid-cols-3 gap-2">
             <QuickLink href={homeworkHref} icon={<ClipboardList className="h-4 w-4" />} label="Homework" />
             <QuickLink href={`${detailHref(c)}#roster`} icon={<Users className="h-4 w-4" />} label="Roster" />
@@ -247,6 +248,7 @@ function AdvisoryHero({ c }: { c: TeacherClassCard }) {
 }
 
 function QuickLink({ href, icon, label }: { href: string; icon: ReactNode; label: string }) {
+  if (!isRouteShipped(href)) return null; // the module is not part of this build
   return (
     <Link href={href} className="flex flex-col items-center gap-1 rounded-xl bg-white/70 px-2 py-2 text-[12px] font-semibold text-ink-soft ring-1 ring-inset ring-line/70 transition-all hover:-translate-y-0.5 hover:bg-white hover:text-lagoon active:scale-95 focus-visible:outline-none focus-visible:shadow-focus">
       <span className="text-lagoon">{icon}</span>{label}
@@ -265,8 +267,8 @@ function ClassCard({ c }: { c: TeacherClassCard }) {
       <div className="mt-3.5"><MetricTiles c={c} /></div>
       <div className="mt-3"><StatusBanner c={c} /></div>
       <div className="mt-auto grid grid-cols-2 gap-2 border-t border-line/60 pt-3">
-        <LinkButton href={attendanceHref(c)} size="sm" variant="outline" className="justify-center"><CalendarCheck2 className="h-3.5 w-3.5" /> View attendance</LinkButton>
-        <LinkButton href={homeworkHref} size="sm" variant="outline" className="justify-center"><ClipboardList className="h-3.5 w-3.5" /> Assign homework</LinkButton>
+        {isRouteShipped(attendanceHref(c)) && <LinkButton href={attendanceHref(c)} size="sm" variant="outline" className="justify-center"><CalendarCheck2 className="h-3.5 w-3.5" /> View attendance</LinkButton>}
+        {isRouteShipped(homeworkHref) && <LinkButton href={homeworkHref} size="sm" variant="outline" className="justify-center"><ClipboardList className="h-3.5 w-3.5" /> Assign homework</LinkButton>}
         <LinkButton href={`${detailHref(c)}#roster`} size="sm" variant="ghost" className="justify-center"><Users className="h-3.5 w-3.5" /> Roster</LinkButton>
         <LinkButton href={detailHref(c)} size="sm" variant="ghost" className="justify-center">Class details <ArrowUpRight className="h-3.5 w-3.5" /></LinkButton>
       </div>

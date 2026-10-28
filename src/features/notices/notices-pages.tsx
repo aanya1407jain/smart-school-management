@@ -14,9 +14,8 @@ import {
   Trash2,
   Users,
 } from "lucide-react";
-import type { Notice, NoticeAudienceScope, NoticePriority, NoticeType } from "@/types/domain";
-import type { NoticeInput } from "@/lib/services/notices.service";
-import { services } from "@/lib/services";
+import type { Notice, NoticeAudienceScope, NoticePriority, NoticeType } from "@/types/core";
+import { requireDemo, type NoticeInput } from "@/lib/demo/runtime";
 import { useQuery, type QueryState } from "@/lib/hooks/use-query";
 import { useSchoolMutation, useSchoolQuery } from "@/lib/convex/membership";
 import { api } from "@convex/_generated/api";
@@ -275,7 +274,7 @@ export function NoticesManager() {
     api.notices.listManaged,
     live ? { status: filters.status !== "all" ? (filters.status as "draft" | "published" | "archived") : undefined } : "skip"
   );
-  const q = useQuery(() => services.notices.list(filters), [...deps, live], { enabled: !live });
+  const q = useQuery(() => requireDemo().notices.list(filters), [...deps, live], { enabled: !live });
 
   const publishMutation = useSchoolMutation(api.notices.publish);
   const archiveMutation = useSchoolMutation(api.notices.archive);
@@ -382,7 +381,7 @@ export function NoticesManager() {
                                   if (live) {
                                     await publishLive(n.id);
                                   } else {
-                                    await services.notices.update(n.id, toEditableNoticeInput(n, "published"));
+                                    await requireDemo().notices.update(n.id, toEditableNoticeInput(n, "published"));
                                     toast({ title: "Notice published", description: "Notice is now visible to its target audience." });
                                   }
                                 } catch (e) { fail(e); }
@@ -396,7 +395,7 @@ export function NoticesManager() {
                               onSelect={async () => {
                                 try {
                                   if (live) await archiveMutation({ noticeId: n.id as Id<"notices"> });
-                                  else await services.notices.archive(n.id);
+                                  else await requireDemo().notices.archive(n.id);
                                   toast({ title: "Notice archived" });
                                 } catch (e) { fail(e); }
                               }}
@@ -409,7 +408,7 @@ export function NoticesManager() {
                               onSelect={async () => {
                                 try {
                                   if (live) await restoreMutation({ noticeId: n.id as Id<"notices"> });
-                                  else await services.notices.restore(n.id);
+                                  else await requireDemo().notices.restore(n.id);
                                   toast({ title: "Notice restored as a draft", description: "Publish it again to put it back on the board." });
                                 } catch (e) { fail(e); }
                               }}
@@ -454,7 +453,7 @@ export function NoticesManager() {
             if (live) {
               await publishLive(n.id);
             } else {
-              await services.notices.update(n.id, toEditableNoticeInput(n, "published"));
+              await requireDemo().notices.update(n.id, toEditableNoticeInput(n, "published"));
               toast({ title: "Notice published", description: "Notice is now visible to its audience." });
             }
             setView(null);
@@ -470,7 +469,7 @@ export function NoticesManager() {
         confirmLabel="Delete"
         onConfirm={async () => {
           if (del) {
-            await services.notices.remove(del.id); // demo data only
+            await requireDemo().notices.remove(del.id); // demo data only
             toast({ title: "Notice deleted" });
           }
           setDel(null);
@@ -514,7 +513,7 @@ function ComposeModal({ existing, onClose, teacherMode = false }: { existing?: N
         }
   );
   // Reach preview is computed from demo data only; live notices report who was notified when published.
-  const reach = useQuery(() => services.notices.previewReach(form.audience), [JSON.stringify(form.audience), live], { enabled: !live });
+  const reach = useQuery(() => requireDemo().notices.previewReach(form.audience), [JSON.stringify(form.audience), live], { enabled: !live });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<Error | null>(null);
   const [busy, setBusy] = useState(false);
@@ -590,10 +589,10 @@ function ComposeModal({ existing, onClose, teacherMode = false }: { existing?: N
       } else {
         const payload = toEditableNoticeInput(form, status);
         if (existing) {
-          await services.notices.update(existing.id, payload);
+          await requireDemo().notices.update(existing.id, payload);
           toast({ title: status === "draft" ? "Draft saved" : "Notice updated" });
         } else {
-          const r = await services.notices.create(payload);
+          const r = await requireDemo().notices.create(payload);
           toast({
             title: status === "draft" ? "Draft saved" : "Notice published",
             description: status === "published" ? `Delivered to ${r.reached} accounts.` : undefined,
@@ -850,7 +849,7 @@ export function NoticeBoard() {
 
   // Live: published notices addressed to this member (server-side audience check), visible today.
   const liveNotices = useSchoolQuery(api.notices.feed, live ? {} : "skip");
-  const q = useQuery(() => services.notices.list(filters), [...deps, live], { enabled: !live });
+  const q = useQuery(() => requireDemo().notices.list(filters), [...deps, live], { enabled: !live });
   const [view, setView] = useState<NoticeView | null>(null);
 
   const today = todayISO();

@@ -1,9 +1,9 @@
 "use client";
 import { useState } from "react";
 import { Printer, Receipt as ReceiptIcon } from "lucide-react";
-import type { Payment } from "@/types/domain";
-import type { ObligationView } from "@/lib/services/derive";
-import { services } from "@/lib/services";
+import type { Payment } from "@/types/fees";
+import type { ObligationView } from "@/types/fees";
+import { demoCall } from "@/lib/demo/runtime";
 import { useQuery, type QueryState } from "@/lib/hooks/use-query";
 import { useSchoolQuery } from "@/lib/convex/membership";
 import { api } from "@convex/_generated/api";
@@ -14,7 +14,7 @@ import { Button, DataTable, EmptyState, Modal, QueryView, StatusBadge } from "@/
 import { LogoMark } from "@/components/brand/logo";
 import { formatCurrency } from "@/lib/utils/format";
 import { formatDate, formatDateTime, dueLabel } from "@/lib/utils/dates";
-import { PAYMENT_METHOD_LABELS } from "@/lib/constants/labels";
+import { PAYMENT_METHOD_LABELS } from "@/features/fees/labels";
 
 export function FeeObligationsTable({ obligations }: { obligations: ObligationView[] }) {
   return (
@@ -68,7 +68,7 @@ export function ReceiptModal({ receiptId, onClose }: { receiptId: string | null;
   const liveReceipt = useSchoolQuery(api.fees.receipt, live && receiptId ? { receiptId: receiptId as Id<"receipts"> } : "skip");
 
   // Demo data
-  const q = useQuery(() => services.fees.getReceipt(receiptId!), [live, receiptId], { enabled: !!receiptId && !live });
+  const q = useQuery(() => demoCall("fees.getReceipt")(receiptId!), [live, receiptId], { enabled: !!receiptId && !live });
 
   const adaptedLive = useMemo(() => {
     if (!liveReceipt) return undefined;

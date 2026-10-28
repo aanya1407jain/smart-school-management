@@ -20,10 +20,10 @@ import { formatDate } from "@/lib/utils/dates";
 import { downloadCsv } from "@/lib/utils/csv";
 import { useAcademicOptions } from "@/features/shared/use-academic-options";
 
-type Result = FunctionReturnType<typeof api.reports.lowAttendance>;
+type Result = FunctionReturnType<typeof api.attendanceReports.lowAttendance>;
 
 export function LiveLowAttendance() {
-  const run = useSchoolQueryRunner(api.reports.lowAttendance);
+  const run = useSchoolQueryRunner(api.attendanceReports.lowAttendance);
   const opts = useAcademicOptions();
   const [sectionId, setSectionId] = useState("");
   const [data, setData] = useState<Result | null>(null);

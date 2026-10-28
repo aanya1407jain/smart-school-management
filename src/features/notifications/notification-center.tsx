@@ -3,8 +3,8 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { Bell, Check, CheckCheck, ChevronRight, Trash2 } from "lucide-react";
-import type { NotificationCategory } from "@/types/domain";
-import { services } from "@/lib/services";
+import type { NotificationCategory } from "@/types/core";
+import { requireDemo } from "@/lib/demo/runtime";
 import { useQuery, type QueryState } from "@/lib/hooks/use-query";
 import { useSchoolMutation, useSchoolQuery } from "@/lib/convex/membership";
 import { api } from "@convex/_generated/api";
@@ -48,9 +48,9 @@ export function NotificationCenter() {
   const [clearing, setClearing] = useState(false);
 
   // Demo fallback queries
-  const allItemsQuery = useQuery(() => (live ? Promise.resolve([]) : services.notifications.list({})), [live]);
+  const allItemsQuery = useQuery(() => (live ? Promise.resolve([]) : requireDemo().notifications.list({})), [live]);
   const q = useQuery(
-    () => (live ? Promise.resolve([]) : services.notifications.list({ category, unreadOnly: onlyUnread === "unread" })),
+    () => (live ? Promise.resolve([]) : requireDemo().notifications.list({ category, unreadOnly: onlyUnread === "unread" })),
     [live, category, onlyUnread]
   );
 
@@ -119,7 +119,7 @@ export function NotificationCenter() {
         description: `${r.updated} notification${r.updated === 1 ? "" : "s"} updated.`,
       });
     } else {
-      const r = await services.notifications.markAllRead();
+      const r = await requireDemo().notifications.markAllRead();
       toast({
         title: "All notifications marked as read",
         description: `${r.count} notification${r.count === 1 ? "" : "s"} updated.`,
@@ -149,7 +149,7 @@ export function NotificationCenter() {
       if (live) {
         await markReadMutation({ notificationId: id as Id<"notifications"> });
       } else {
-        await services.notifications.markRead(id);
+        await requireDemo().notifications.markRead(id);
       }
       toast({ title: "Notification marked as read" });
     } catch (err) { fail(err); }
@@ -161,7 +161,7 @@ export function NotificationCenter() {
       if (live) {
         await removeMutation({ notificationId: id as Id<"notifications"> });
       } else {
-        await services.notifications.remove(id);
+        await requireDemo().notifications.remove(id);
       }
       toast({ title: "Notification removed" });
     } catch (err) { fail(err); }
@@ -277,7 +277,7 @@ export function NotificationCenter() {
                             if (live) {
                               await markReadMutation({ notificationId: n.id as Id<"notifications"> });
                             } else {
-                              await services.notifications.markRead(n.id);
+                              await requireDemo().notifications.markRead(n.id);
                             }
                           }
                           // Live accounts only follow links to pages backed by real records.

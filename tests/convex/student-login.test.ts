@@ -41,14 +41,14 @@ describe("Login ID follows the scholar number", () => {
     const r = await admin.action(api.accounts.create, { person: { kind: "student", studentId: A.studentB } });
     expect(r.loginId).toBe("ALPHABALA");
 
-    await admin.mutation(api.academics.updateStudentProfile, { studentId: A.studentB, scholarNo: "0246cbse 0042" });
+    await admin.mutation(api.students.updateStudentProfile, { studentId: A.studentB, scholarNo: "0246cbse 0042" });
     const { m, user, account } = await memberOf(t, r.membershipId);
     expect([m.loginId, user?.loginId, account?.providerAccountId]).toEqual(["0246CBSE0042", "0246CBSE0042", "0246CBSE0042"]);
     // The password still works under the new Login ID.
     expect(await errorCode((await as(t, user!._id)).action(api.account.changePassword, { currentPassword: STUDENT_DEFAULT_PASSWORD, newPassword: "Bala#2026x" }))).toBe("NO_ERROR");
 
-    expect(await errorCode(admin.mutation(api.academics.updateStudentProfile, { studentId: A.studentB, scholarNo: "" }))).toBe("INVALID_ARGUMENT");
-    expect(await errorCode(admin.mutation(api.academics.updateStudentProfile, { studentId: A.studentB, scholarNo: "SR/1" }))).toBe("INVALID_ARGUMENT"); // not usable to sign in
+    expect(await errorCode(admin.mutation(api.students.updateStudentProfile, { studentId: A.studentB, scholarNo: "" }))).toBe("INVALID_ARGUMENT");
+    expect(await errorCode(admin.mutation(api.students.updateStudentProfile, { studentId: A.studentB, scholarNo: "SR/1" }))).toBe("INVALID_ARGUMENT"); // not usable to sign in
   });
 
   test("a reset gives a student the default password again (forced change, no expiry)", async () => {

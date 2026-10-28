@@ -1,6 +1,6 @@
 "use client";
 import { api } from "@convex/_generated/api";
-import { services } from "@/lib/services";
+import { requireDemo } from "@/lib/demo/runtime";
 import { useQuery } from "@/lib/hooks/use-query";
 import { useSchoolQuery } from "@/lib/convex/membership";
 import { useSession } from "@/features/auth/session-provider";
@@ -9,7 +9,7 @@ import { useSession } from "@/features/auth/session-provider";
 export function useUnreadCount() {
   const { user, dataSource } = useSession();
   const live = dataSource === "live";
-  const demo = useQuery(() => services.notifications.unreadCount(), [user?.id], { enabled: !!user && !live });
+  const demo = useQuery(() => requireDemo().notifications.unreadCount(), [user?.id], { enabled: !!user && !live });
   const server = useSchoolQuery(api.notifications.unreadCount, user && live ? {} : "skip");
   return (live ? server : demo.data) ?? 0;
 }

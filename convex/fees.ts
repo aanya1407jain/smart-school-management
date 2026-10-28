@@ -25,7 +25,7 @@
  *    `clientRequestId`. Re-sending the same request returns the ORIGINAL
  *    payment and receipt instead of charging again;
  *  - a reversal is a new row pointing at the original; balances and receipts
- *    then exclude the original (model/studentRecords.ts feeLedger).
+ *    then exclude the original (model/feeRecords.ts feeLedger).
  * No payment gateway is integrated: payments are recorded by staff after the
  * money was received (cash, UPI, card, bank transfer, cheque).
  */
@@ -40,7 +40,9 @@ import { assertAmountMinor, assertIsoDate, assertNonEmpty, vConcessionKind, vPay
 import { fullName } from "./model/academics";
 import { daysBetween, MAX_RANGE_DAYS, todayIn } from "./model/calendar";
 import { nextReceiptNumber } from "./model/counters";
-import { feeLedger } from "./model/studentRecords";
+import { feeLedger } from "./model/feeRecords";
+import { currentYear } from "./model/studentRecords";
+import { resolvePortalStudent, vPortalStudent } from "./model/portalStudent";
 import { computeLedger, obligationStatus, standingOf, type FeeStanding } from "./model/feeMath";
 import { activeEnrollments as activeEnrollmentsOf, MAX_AGGREGATE_ROWS, schoolYearFees as schoolYearFeesOf } from "./model/feeData";
 
@@ -700,3 +702,16 @@ async function activeEnrollmentsAll(ctx: Ctx, academicYearId: Id<"academicYears"
   }
   return [...latest.values()];
 }
+
+// ================================================================ student portal
+/** The signed-in student's fee obligations, payments and receipts for the current year (moved from studentPortal.ts). */
+export const myFees = financeQuery({
+  args: vPortalStudent,
+  handler: async (ctx, { studentId }) => {
+    const student = await resolvePortalStudent(ctx, studentId, "fees:read:own");
+    if (!student) return { state: "no_student_record" as const };
+    const year = await currentYear(ctx, ctx.actor.schoolId);
+    if (!year) return { state: "no_current_year" as const };
+    return { state: "ok" as const, ...(await feeLedger(ctx, student, year)) };
+  },
+});

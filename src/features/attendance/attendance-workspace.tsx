@@ -4,7 +4,7 @@ import { useSearchParams } from "next/navigation";
 import { CalendarX2, Check, CheckCheck, CheckCircle2, Clock3, History, Lock, Save, UserX, Loader2, X } from "lucide-react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
-import type { AttendanceStatus } from "@/types/domain";
+import type { AttendanceStatus } from "@/types/attendance";
 import {
   Avatar, Badge, Button, Card, CardHeader, EmptyState, FormField, GlassCard, Input, PageHeader, Segmented, Select, StatusBadge,
   Tabs, TabsContent, TabsList, useToast, ProgressBar,

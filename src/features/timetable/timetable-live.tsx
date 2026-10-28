@@ -225,8 +225,8 @@ function LessonModal({
   onClose: () => void;
 }) {
   const { toast } = useToast();
-  const subjects = useSchoolQuery(api.academics.listClassSubjects, { classId });
-  const assignments = useSchoolQuery(api.academics.listTeacherAssignments, { sectionId });
+  const subjects = useSchoolQuery(api.subjects.listClassSubjects, { classId });
+  const assignments = useSchoolQuery(api.subjects.listTeacherAssignments, { sectionId });
   const setEntry = useSchoolMutation(api.timetable.setEntry);
   const removeEntry = useSchoolMutation(api.timetable.removeEntry);
 

@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Download, MoreHorizontal, Pencil, UserPlus, Eye, Wallet } from "lucide-react";
 import { services } from "@/lib/services";
 import { useQuery } from "@/lib/hooks/use-query";
-import type { StudentStatus } from "@/types/domain";
+import type { StudentStatus } from "@/types/students";
 import type { StudentListItem } from "@/lib/services/students.service";
 import {
   Avatar, Button, Card, DataTable, DropdownContent, DropdownItem, DropdownMenu, DropdownTrigger, EmptyState, ErrorState,

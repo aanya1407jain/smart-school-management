@@ -133,7 +133,7 @@ describe("fee totals", () => {
     const b = await admin.query(api.fees.listBalances, {});
     expect(b.rows.reduce((a, r) => a + r.outstandingMinor, 0)).toBe(2500);
     expect(b.rows.reduce((a, r) => a + r.concessionMinor, 0)).toBe(800);
-    const rep = await admin.query(api.reports.feeSummary, {});
+    const rep = await admin.query(api.feeReports.feeSummary, {});
     expect(rep.totals).toMatchObject({ grossMinor: 4000, concessionMinor: 800, paidMinor: 700, outstandingMinor: 2500 });
     // A reversed payment drops out everywhere.
     const paid = la.payments[0];
@@ -254,18 +254,18 @@ describe("academics admin actions", () => {
     const t = makeTest();
     const A = await createSchool(t, "alpha");
     const admin = await as(t, A.users.admin);
-    const science = await admin.mutation(api.academics.createSubject, { name: "Science", code: "SCI" });
+    const science = await admin.mutation(api.subjects.createSubject, { name: "Science", code: "SCI" });
     // Not in the curriculum yet → rejected.
-    expect(await errorCode(admin.mutation(api.academics.assignSubjectTeacher, { sectionId: A.sectionA, subjectId: science, teacherId: A.classTeacher }))).toBe("INVALID_RELATIONSHIP");
-    await admin.mutation(api.academics.setClassSubjects, { classId: A.classId, academicYearId: A.yearId, subjectIds: [A.subjectId, science] });
-    await admin.mutation(api.academics.assignSubjectTeacher, { sectionId: A.sectionA, subjectId: science, teacherId: A.classTeacher });
-    const rows = await admin.query(api.academics.listTeacherAssignments, { sectionId: A.sectionA });
+    expect(await errorCode(admin.mutation(api.subjects.assignSubjectTeacher, { sectionId: A.sectionA, subjectId: science, teacherId: A.classTeacher }))).toBe("INVALID_RELATIONSHIP");
+    await admin.mutation(api.subjects.setClassSubjects, { classId: A.classId, academicYearId: A.yearId, subjectIds: [A.subjectId, science] });
+    await admin.mutation(api.subjects.assignSubjectTeacher, { sectionId: A.sectionA, subjectId: science, teacherId: A.classTeacher });
+    const rows = await admin.query(api.subjects.listTeacherAssignments, { sectionId: A.sectionA });
     expect(rows.map((r) => r.subjectName).sort()).toEqual(["Mathematics", "Science"]);
     // Teachers cannot assign; a teacher owns at most one section per year.
-    expect(await errorCode((await as(t, A.users.classTeacher)).mutation(api.academics.assignSubjectTeacher, { sectionId: A.sectionA, subjectId: science, teacherId: A.classTeacher }))).toBe("FORBIDDEN");
+    expect(await errorCode((await as(t, A.users.classTeacher)).mutation(api.subjects.assignSubjectTeacher, { sectionId: A.sectionA, subjectId: science, teacherId: A.classTeacher }))).toBe("FORBIDDEN");
     expect(await errorCode(admin.mutation(api.academics.setClassTeacher, { sectionId: A.sectionB, teacherId: A.classTeacher }))).toBe("CONFLICT");
     // Removing a subject that still has an assignment is refused.
-    expect(await errorCode(admin.mutation(api.academics.setClassSubjects, { classId: A.classId, academicYearId: A.yearId, subjectIds: [A.subjectId] }))).toBe("INVALID_RELATIONSHIP");
+    expect(await errorCode(admin.mutation(api.subjects.setClassSubjects, { classId: A.classId, academicYearId: A.yearId, subjectIds: [A.subjectId] }))).toBe("INVALID_RELATIONSHIP");
     expect((await admin.query(api.academics.listTeachers, {})).map((x) => x.teacherId).sort()).toEqual([A.classTeacher, A.subjectTeacher].sort());
   });
 
@@ -278,15 +278,15 @@ describe("academics admin actions", () => {
     await t.run(async (ctx) => {
       for (const [firstName, lastName] of names) ids.push(await ctx.db.insert("students", { schoolId: A.schoolId, admissionNo: `N-${firstName}`, firstName, lastName, status: "active" }));
     });
-    const un = await admin.query(api.academics.listUnenrolledStudents, {});
+    const un = await admin.query(api.students.listUnenrolledStudents, {});
     expect(un.students.map((s) => s.studentId).sort()).toEqual([...ids].sort());
-    for (const id of ids) await admin.mutation(api.academics.enrollStudent, { studentId: id, sectionId: A.sectionA, startDate: "2026-06-01" });
-    expect((await admin.query(api.academics.listUnenrolledStudents, {})).students).toHaveLength(0);
-    const roster = await admin.query(api.academics.sectionRoster, { sectionId: A.sectionA });
+    for (const id of ids) await admin.mutation(api.students.enrollStudent, { studentId: id, sectionId: A.sectionA, startDate: "2026-06-01" });
+    expect((await admin.query(api.students.listUnenrolledStudents, {})).students).toHaveLength(0);
+    const roster = await admin.query(api.students.sectionRoster, { sectionId: A.sectionA });
     // The server's order IS the roll-number order: 1..n with no gaps — the UI must render it as-is.
     expect(roster.students.map((s) => s.rollNo)).toEqual(roster.students.map((_, i) => i + 1));
     expect(roster.students.map((s) => s.name)).toEqual(["Aarav Iyer", "aarav Mehta", "Asha S", "D'Souza Ann", "Élan Roy", "Zoë Khan"]);
-    expect(await errorCode((await as(t, A.users.classTeacher)).query(api.academics.listUnenrolledStudents, {}))).toBe("FORBIDDEN");
+    expect(await errorCode((await as(t, A.users.classTeacher)).query(api.students.listUnenrolledStudents, {}))).toBe("FORBIDDEN");
   });
 });
 
@@ -306,7 +306,7 @@ describe("admin and accountant boundaries", () => {
     expect(fin.overview).toBeNull();
     expect(fin.fees).not.toBeNull();
     expect((await acct.query(api.fees.listBalances, {})).rows.length).toBe(2);
-    expect(await errorCode(acct.query(api.reports.studentStatistics, {}))).toBe("FORBIDDEN");
+    expect(await errorCode(acct.query(api.studentReports.studentStatistics, {}))).toBe("FORBIDDEN");
     expect(await errorCode(acct.mutation(api.academics.setCurrentAcademicYear, { academicYearId: A.yearId }))).toBe("FORBIDDEN");
     for (const u of [A.users.classTeacher, A.users.student]) {
       const c = await as(t, u);
@@ -326,15 +326,15 @@ describe("admin and accountant boundaries", () => {
     const A = await createSchool(t, "alpha");
     await createSchool(t, "beta");
     const admin = await as(t, A.users.admin);
-    const stats = await admin.query(api.reports.studentStatistics, {});
+    const stats = await admin.query(api.studentReports.studentStatistics, {});
     expect(stats.total).toBe(2);
     expect(stats.bySection.map((s) => [s.label, s.students])).toEqual([["8-A", 1], ["8-B", 1]]);
     expect(stats.parentContacts).toBe(1);
     await t.run((ctx) => ctx.db.insert("attendanceSessions", { schoolId: A.schoolId, academicYearId: A.yearId, sectionId: A.sectionA, date: "2026-07-06", markedByUserId: A.users.classTeacher, markedByTeacherId: A.classTeacher, markedAt: 1, presentCount: 3, absentCount: 1, lateCount: 0, excusedCount: 2 }));
-    const att = await admin.query(api.reports.attendanceReport, { from: "2026-07-01", to: "2026-07-31" });
+    const att = await admin.query(api.attendanceReports.attendanceReport, { from: "2026-07-01", to: "2026-07-31" });
     expect(att.monthly).toEqual([{ month: "2026-07", percentage: 75, late: 0, absent: 1, registers: 1 }]);
     expect(att.bySection.find((s) => s.label === "8-A")?.percentage).toBe(75);
     expect(att.bySection.find((s) => s.label === "8-B")?.percentage).toBeNull();
-    expect(await errorCode(admin.query(api.reports.attendanceReport, { from: "2026-01-01", to: "2027-06-01" }))).toBe("INVALID_ARGUMENT");
+    expect(await errorCode(admin.query(api.attendanceReports.attendanceReport, { from: "2026-01-01", to: "2027-06-01" }))).toBe("INVALID_ARGUMENT");
   });
 });

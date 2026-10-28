@@ -27,7 +27,7 @@ import { fullName } from "./model/academics";
 import { writeAudit } from "./model/audit";
 import { todayIn } from "./model/calendar";
 import { counterKeys, ensureCounterAtLeast, formatTransferCertificateNumber, nextTransferCertificateNumber, peekCounter } from "./model/counters";
-import { attendanceTotals, feeBalanceOf, feeBalances, latestResults } from "./model/lifecycle";
+import { attendanceTotals, feeBalanceOf, feeBalances, latestResults, newYearRecordsProblem } from "./model/lifecycle";
 import { renumberSections } from "./model/rollNumbers";
 import { scholarNoKey, studentByScholarNo } from "./model/scholarNumbers";
 
@@ -94,12 +94,13 @@ export const promotionPlan = studentsQuery({
       const already = await activeEnrollmentInYear(ctx, s._id, to.year._id);
       const reason = s.status !== "active" ? `Student status is ${s.status}.` : already ? "Already enrolled in the target year." : null;
       const r = results.get(s._id) ?? null;
-      const f = fees.get(s._id)!;
+      const f = fees?.get(s._id) ?? null;
       rows.push({
         studentId: s._id, enrollmentId: e._id, name: fullName(s), firstName: s.firstName, lastName: s.lastName, admissionNo: s.admissionNo, scholarNo: s.scholarNo ?? null,
         rollNo: e.rollNo ?? null, eligible: !reason && !sectionProblem, reason,
         result: r, standing: r?.standing ?? ("no_result" as const),
-        fees: { outstandingMinor: f.outstandingMinor, overdueMinor: f.overdueMinor },
+        // null = Fees is not shipped in this build (dues not checked), never ₹0.
+        fees: f ? { outstandingMinor: f.outstandingMinor, overdueMinor: f.overdueMinor } : null,
       });
     }
     rows.sort((x, y) => (x.rollNo ?? 9999) - (y.rollNo ?? 9999) || x.name.localeCompare(y.name));
@@ -270,18 +271,12 @@ async function rollbackProblem(ctx: QueryCtx, run: Doc<"promotionRuns">): Promis
     if (!oldE || oldE.status !== "promoted") return `${name}'s earlier enrollment has changed since.`;
     if (!newE || newE.status !== "active") return `${name} has left or moved since.`;
     if (student?.status !== "active") return `${name} is no longer active.`;
-    // Anything recorded for the student in the new year makes the run permanent.
+    // Anything recorded for the student in the new year makes the run permanent
+    // (each shipped module answers for its own records).
     const year = await ctx.db.get(run.toYearId);
     if (year) {
-      const att = await ctx.db.query("attendanceRecords").withIndex("by_student_date", (q) => q.eq("studentId", m.studentId).gte("date", year.startDate).lte("date", year.endDate)).first();
-      if (att) return `Attendance is already recorded for ${name} in ${year.name}.`;
-    }
-    const fee = await ctx.db.query("studentFees").withIndex("by_student_year", (q) => q.eq("studentId", m.studentId).eq("academicYearId", run.toYearId)).first();
-    if (fee) return `Fees are already assigned to ${name} for the new year.`;
-    const marks = await ctx.db.query("results").withIndex("by_student_exam", (q) => q.eq("studentId", m.studentId)).collect();
-    for (const r of marks) {
-      const exam = await ctx.db.get(r.examId);
-      if (exam?.academicYearId === run.toYearId) return `Results are already published for ${name} in the new year.`;
+      const problem = await newYearRecordsProblem(ctx, m.studentId, name, year);
+      if (problem) return problem;
     }
   }
   return null;
@@ -402,13 +397,14 @@ export const passOutPlan = studentsQuery({
     const RESULT = { eligible: "passed", compartment: "compartment", detained: "failed" } as const;
     const rows = students.map(({ s, e }) => {
       const r = results.get(s._id);
-      const f = fees.get(s._id)!;
+      const f = fees?.get(s._id) ?? null;
       const result = r ? RESULT[r.standing as keyof typeof RESULT] : ("withheld" as const);
       return {
         studentId: s._id, name: fullName(s), firstName: s.firstName, lastName: s.lastName, admissionNo: s.admissionNo, scholarNo: s.scholarNo ?? null,
         rollNo: e.rollNo ?? null, status: s.status, dateOfBirth: s.dateOfBirth ?? null,
         result, percentage: r?.percentage ?? null, grade: r?.grade ?? null, examName: r?.examName ?? null,
-        outstandingMinor: f.outstandingMinor, cleared: result === "passed" && f.outstandingMinor === 0,
+        // outstandingMinor null = Fees not shipped: clearance then rests on the result alone.
+        outstandingMinor: f ? f.outstandingMinor : null, cleared: result === "passed" && (!f || f.outstandingMinor === 0),
       };
     });
     rows.sort((x, y) => (x.rollNo ?? 9999) - (y.rollNo ?? 9999) || x.name.localeCompare(y.name));
@@ -557,7 +553,7 @@ export const issueTransferCertificate = studentsMutation({
     const today = todayIn(school.timezone);
     const dues = await feeBalanceOf(ctx, student, currentYear._id, today);
     const waiverNote = optText(a.waiverNote, "waiverNote", 300);
-    if (dues.outstandingMinor > 0) {
+    if (dues && dues.outstandingMinor > 0) {
       if (!waiverNote) throw conflict(`${fullName(student)} has unpaid fees for ${currentYear.name}. Clear the dues or record a waiver to issue a provisional certificate.`);
       if (!hasPermission(ctx.actor, "fees:manage")) throw new AppError("FORBIDDEN", "Only the Principal or an administrator who manages fees can waive dues for a certificate.");
     }
@@ -585,7 +581,7 @@ export const issueTransferCertificate = studentsMutation({
       tcNo, status: "issued" as const, issueDate: today, leavingDate: f.leavingDate, reason: f.reason,
       conduct: f.conduct, destinationSchool: f.destinationSchool, remarks: f.remarks, applicationDate: f.applicationDate,
       previousStatus: student.status, endedEnrollmentId: active?._id, snapshot,
-      duesWaiver: dues.outstandingMinor > 0 && waiverNote ? { outstandingMinor: dues.outstandingMinor, note: waiverNote, byUserId: ctx.actor.userId } : undefined,
+      duesWaiver: dues && dues.outstandingMinor > 0 && waiverNote ? { outstandingMinor: dues.outstandingMinor, note: waiverNote, byUserId: ctx.actor.userId } : undefined,
       verificationCode: await newVerificationCode(ctx), issuedByUserId: ctx.actor.userId,
     };
     let tcId: Id<"transferCertificates">;
@@ -594,7 +590,7 @@ export const issueTransferCertificate = studentsMutation({
     await writeAudit(ctx, {
       schoolId: school._id, actor: ctx.actor, action: "student.tc_issued", entity: { table: "students", id: student._id },
       summary: `Issued transfer certificate ${tcNo} to ${fullName(student)} (${student.admissionNo})${fields.duesWaiver ? " with a dues waiver" : ""}`,
-      metadata: { tcId, tcNo, leavingDate: f.leavingDate, endedEnrollmentId: active?._id ?? null, previousStatus: student.status, duesWaiver: fields.duesWaiver ?? null },
+      metadata: { tcId, tcNo, leavingDate: f.leavingDate, endedEnrollmentId: active?._id ?? null, previousStatus: student.status, duesWaiver: fields.duesWaiver ?? null, duesChecked: dues !== null },
     });
     return { tcId, tcNo };
   },
@@ -707,7 +703,8 @@ export const tcStudentProfile = studentsQuery({
     const draft = tcs.filter((t) => t.status === "draft").sort((x, y) => y._creationTime - x._creationTime)[0] ?? null;
     return {
       studentId: student._id, status: student.status, snapshot,
-      dues: { year: currentYear.name, outstandingMinor: dues.outstandingMinor, overdueMinor: dues.overdueMinor },
+      // null = Fees is not shipped in this build: the gate shows "dues not checked".
+      dues: dues ? { year: currentYear.name, outstandingMinor: dues.outstandingMinor, overdueMinor: dues.overdueMinor } : null,
       canWaive: hasPermission(ctx.actor, "fees:manage"),
       issued: tcs.find((t) => t.status === "issued")?.tcNo ?? null,
       draft: draft ? tcView(draft, await memberName(ctx, draft.issuedByUserId)) : null,

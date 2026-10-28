@@ -280,7 +280,8 @@ export default defineSchema({
     phone: v.optional(v.string()),
     designation: v.optional(v.string()),
     qualification: v.optional(v.string()),
-    specializationSubjectIds: v.array(v.id("subjects")),
+    // Academics subject ids (plain ids: Core must not reference a module table in the schema).
+    specializationSubjectIds: v.array(v.string()),
     joiningDate: v.optional(v.string()),
     status: vStaffStatus,
     address: v.optional(v.string()),

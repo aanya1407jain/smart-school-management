@@ -7,7 +7,7 @@
 import { describe, expect, test } from "vitest";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { standingFrom } from "../../convex/model/lifecycle";
+import { standingFrom } from "../../convex/model/examRecords";
 import { as, createSchool, errorCode, makeTest, type SchoolFixture, type T } from "./fixtures";
 
 async function nextYear(t: T, A: SchoolFixture) {

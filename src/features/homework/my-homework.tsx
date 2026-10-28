@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils/cn";
 type Filter = "todo" | "submitted" | "reviewed" | "all";
 
 /** One row of `studentPortal.myHomework` exactly as the server returns it (homework status is `homeworkStatus`). */
-type HomeworkRow = Extract<FunctionReturnType<typeof api.studentPortal.myHomework>, { state: "ok" }>["homework"][number];
+type HomeworkRow = Extract<FunctionReturnType<typeof api.homework.myHomework>, { state: "ok" }>["homework"][number];
 type Submission = NonNullable<HomeworkRow["submission"]>;
 
 /** What the student sees as the item's status badge. */
@@ -115,7 +115,7 @@ function MyHomeworkInner({ studentId }: { studentId: string | null }) {
   // The server resolves the student from the session; studentId can only be the
   // signed-in student's own id.
   const data = useSchoolQuery(
-    api.studentPortal.myHomework,
+    api.homework.myHomework,
     studentId ? { studentId: studentId as Id<"students"> } : {}
   );
 

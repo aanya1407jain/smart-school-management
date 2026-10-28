@@ -1,7 +1,7 @@
 "use client";
 import { useMemo, useState } from "react";
 import { api } from "@convex/_generated/api";
-import { services } from "@/lib/services";
+import { demoCall } from "@/lib/demo/runtime";
 import { useQuery } from "@/lib/hooks/use-query";
 import { useSchoolQuery } from "@/lib/convex/membership";
 import { useSession } from "@/features/auth/session-provider";
@@ -17,7 +17,7 @@ export function StudentPickerModal({ open, onOpenChange, onPick }: { open: boole
   const search = term.trim();
   // Live: real students of the school with their real balance (server-side search).
   const liveRows = useSchoolQuery(api.fees.listBalances, live && open && search.length >= 2 ? { search } : "skip");
-  const q = useQuery(() => services.fees.searchStudents(term), [term], { enabled: open && !live });
+  const q = useQuery(() => demoCall("fees.searchStudents")(term), [term], { enabled: open && !live });
   const rows: PickRow[] | undefined = useMemo(
     () => (live
       ? liveRows?.rows.slice(0, 20).map((r) => ({ id: r.studentId as string, name: r.name, admissionNo: r.admissionNo, classLabel: r.classLabel, outstanding: r.outstandingMinor / 100 }))

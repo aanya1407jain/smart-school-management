@@ -2,7 +2,7 @@
 import { useState, type CSSProperties } from "react";
 import { cn } from "@/lib/utils/cn";
 import { Medal, Star, Target, Trophy } from "lucide-react";
-import type { AchievementCategory, StudentAchievement } from "@/types/domain";
+import type { AchievementCategory, StudentAchievement } from "@/types/students";
 import { Avatar, Badge, CardHeader, EmptyState, GlassCard, Segmented, type Tone } from "@/components/ui";
 import { formatDate } from "@/lib/utils/dates";
 

@@ -48,7 +48,7 @@ export function PassOutTab() {
   const exportCsv = () => {
     if (!data) return;
     downloadCsv(`no-dues-${data.section.label}-${data.section.year}`, ["Roll no", "Name", "Admission no", "Scholar no", "Result", "Percentage", "Fee balance (INR)", "Fee clearance", "Overall"],
-      rows.map((r) => [r.rollNo, r.name, r.admissionNo, r.scholarNo, r.result, r.percentage?.toFixed(1) ?? "", (r.outstandingMinor / 100).toFixed(2), r.outstandingMinor === 0 ? "Zero balance" : "Pending dues", r.cleared ? "Cleared" : "Not cleared"]));
+      rows.map((r) => [r.rollNo, r.name, r.admissionNo, r.scholarNo, r.result, r.percentage?.toFixed(1) ?? "", r.outstandingMinor === null ? "" : (r.outstandingMinor / 100).toFixed(2), r.outstandingMinor === null ? "Not checked (Fees not installed)" : r.outstandingMinor === 0 ? "Zero balance" : "Pending dues", r.cleared ? "Cleared" : "Not cleared"]));
   };
 
   const run = async () => {
@@ -100,7 +100,7 @@ export function PassOutTab() {
               <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
                 <div><dt className="text-[12px] uppercase tracking-wide text-ink-muted">Candidates</dt><dd className="figures text-xl font-bold text-sapphire">{rows.length}</dd></div>
                 <div><dt className="text-[12px] uppercase tracking-wide text-ink-muted">Cleared</dt><dd className="figures text-xl font-bold text-lagoon">{cleared}</dd></div>
-                <div><dt className="text-[12px] uppercase tracking-wide text-ink-muted">Dues pending</dt><dd className="figures text-xl font-bold text-plum">{rows.filter((r) => r.outstandingMinor > 0).length}</dd></div>
+                <div><dt className="text-[12px] uppercase tracking-wide text-ink-muted">Dues pending</dt><dd className="figures text-xl font-bold text-plum">{rows.filter((r) => (r.outstandingMinor ?? 0) > 0).length}</dd></div>
                 <div><dt className="text-[12px] uppercase tracking-wide text-ink-muted">Result pending</dt><dd className="figures text-xl font-bold text-ink">{rows.filter((r) => r.result === "withheld").length}</dd></div>
               </dl>
             </GlassCard>
@@ -144,7 +144,7 @@ export function PassOutTab() {
                           </div>
                         </td>
                         <td className="px-2 py-2.5"><div className="flex flex-col items-start gap-1"><ResultPill result={r.result} />{r.percentage !== null && <span className="figures text-[12px] text-ink-muted">{r.percentage.toFixed(1)}%{r.grade ? ` · ${r.grade}` : ""}</span>}</div></td>
-                        <td className="px-2 py-2.5">{r.outstandingMinor === 0 ? <Badge tone="teal" dot>Zero balance</Badge> : <Badge tone="plum" dot className="figures">Pending dues · {rupees(r.outstandingMinor)}</Badge>}</td>
+                        <td className="px-2 py-2.5">{r.outstandingMinor === null ? <Badge tone="neutral" dot>Not checked</Badge> : r.outstandingMinor === 0 ? <Badge tone="teal" dot>Zero balance</Badge> : <Badge tone="plum" dot className="figures">Pending dues · {rupees(r.outstandingMinor)}</Badge>}</td>
                         <td className="px-4 py-2.5">
                           <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-bold ring-1 ring-inset", r.cleared ? "bg-gradient-to-r from-teal-soft to-cyan/10 text-lagoon ring-teal/25" : "bg-blush/40 text-plum ring-plum/20")}>
                             <span aria-hidden className={cn("h-2 w-2 rounded-full", r.cleared ? "bg-teal shadow-[0_0_6px_rgb(var(--c-teal))]" : "bg-plum")} />

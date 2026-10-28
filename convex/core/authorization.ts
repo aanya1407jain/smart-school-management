@@ -15,6 +15,7 @@ import type { Doc, Id, TableNames } from "../_generated/dataModel";
 import type { Actor } from "./actor";
 import { forbidden, notFound } from "./errors";
 import type { Permission } from "./permissions";
+import { maybeProvider } from "./registry";
 
 type Ctx = QueryCtx & { actor: Actor };
 
@@ -91,14 +92,15 @@ export async function requireClassTeacher(
   return section;
 }
 
-/** Sections the actor's teacher record is linked to in a year: subject assignments ∪ class-teacher sections. */
+/**
+ * Sections the actor's teacher record is linked to in a year: subject
+ * assignments (Academics, through its provider — none when Academics is not
+ * shipped) ∪ class-teacher sections (Core).
+ */
 export async function teacherSectionIds(ctx: QueryCtx, teacherId: Id<"teachers">, academicYearId: Id<"academicYears">): Promise<Set<Id<"sections">>> {
   const ids = new Set<Id<"sections">>();
-  const assignments = await ctx.db
-    .query("teacherAssignments")
-    .withIndex("by_teacher_year", (q) => q.eq("teacherId", teacherId).eq("academicYearId", academicYearId))
-    .collect();
-  assignments.forEach((a) => ids.add(a.sectionId));
+  const scope = maybeProvider("academics.teacherScope");
+  if (scope) for (const id of await scope.teachingSectionIds(ctx, teacherId, academicYearId)) ids.add(id);
   const owned = await ctx.db
     .query("sections")
     .withIndex("by_class_teacher_year", (q) => q.eq("classTeacherId", teacherId).eq("academicYearId", academicYearId))
@@ -208,20 +210,5 @@ export async function requireStudentAccess(
   throw notFound("Student");
 }
 
-/**
- * Subject-teaching gate (marks entry, homework): the actor's teacher record
- * must hold a PERSISTED assignment for this subject in this section. Class
- * teacher ownership alone does not qualify, and neither does teaching another
- * subject in the section.
- */
-export async function isSubjectTeacherOf(ctx: QueryCtx, teacherId: Id<"teachers"> | undefined, sectionId: Id<"sections">, subjectId: Id<"subjects">): Promise<boolean> {
-  if (!teacherId) return false;
-  const rows = await ctx.db.query("teacherAssignments").withIndex("by_section_subject", (q) => q.eq("sectionId", sectionId).eq("subjectId", subjectId)).collect();
-  return rows.some((a) => a.teacherId === teacherId);
-}
-
-export async function requireSubjectTeacher(ctx: Ctx, sectionId: Id<"sections">, subjectId: Id<"subjects">, message = "You do not teach this subject in this section."): Promise<Doc<"sections">> {
-  const section = await getInSchool(ctx, "sections", sectionId, "Section");
-  if (!(await isSubjectTeacherOf(ctx, ctx.actor.teacherId, section._id, subjectId))) throw forbidden(message);
-  return section;
-}
+// Subject-teaching gates (isSubjectTeacherOf / requireSubjectTeacher) belong to Academics:
+// convex/model/academicsRecords.ts.

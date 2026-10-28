@@ -13,6 +13,7 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { Actor } from "../core/actor";
 import { getCurrentAcademicYearId } from "../core/authorization";
 import { AppError } from "../core/errors";
+import { maybeProvider } from "../core/registry";
 import { canonicalLoginId } from "./loginIds";
 import { isLoginIdTaken, reserveAccount } from "./accounts";
 import { counterKeys, ensureCounterAtLeast, nextAdmissionNumber, nextEmployeeId } from "./counters";
@@ -384,14 +385,16 @@ export async function commitStudents(ctx: MutationCtx & { actor: Actor }, rows: 
 // ================================================================ teachers
 export type TeacherPlan = {
   rowNumber: number; firstName: string; lastName: string; title?: string; employeeId?: string; gender?: "male" | "female" | "other";
-  email?: string; phone?: string; designation?: string; qualification?: string; subjectIds: Id<"subjects">[]; joiningDate?: string;
+  email?: string; phone?: string; designation?: string; qualification?: string; subjectIds: string[]; joiningDate?: string;
   address?: string; loginId?: string;
 };
 
 export async function analyzeTeachers(ctx: Ctx, rows: ImportRowInput[], opts: { createAccounts: boolean; today: string }) {
   assertRowsShape(rows);
   const spec = IMPORT_SPECS.teachers;
-  const subjects = (await ctx.db.query("subjects").withIndex("by_school_code", (q) => q.eq("schoolId", ctx.actor.schoolId)).collect()).filter((s) => s.active);
+  // Subjects come from Academics (none when it is not shipped: a "subjects" value is then an error).
+  const catalog = maybeProvider("academics.subjects");
+  const subjects = (catalog ? await catalog.subjects(ctx, ctx.actor.schoolId) : []).filter((s) => s.active);
   const results: RowResult[] = [];
   const plans: TeacherPlan[] = [];
   const trackEmp = dupTracker();
@@ -405,11 +408,11 @@ export async function analyzeTeachers(ctx: Ctx, rows: ImportRowInput[], opts: { 
     const employeeId = r.text("employeeId");
     const email = r.email("email");
     const loginId = r.loginId(opts.createAccounts);
-    const subjectIds: Id<"subjects">[] = [];
+    const subjectIds: string[] = [];
     for (const token of r.raw("subjects").split(/[,;|]/).map((t) => t.trim()).filter(Boolean)) {
       const s = subjects.find((x) => lower(x.code) === lower(token) || lower(x.name) === lower(token));
       if (!s) r.errors.push({ field: "subjects", message: `Subject "${token}" does not exist (set it up in Academics first)` });
-      else if (!subjectIds.includes(s._id)) subjectIds.push(s._id);
+      else if (!subjectIds.includes(s.id)) subjectIds.push(s.id);
     }
     trackEmp(employeeId && lower(employeeId), (first) => r.errors.push({ field: "employeeId", message: `Employee ID ${employeeId} is repeated (first used on row ${first})` }), row.rowNumber);
     if (employeeId) {

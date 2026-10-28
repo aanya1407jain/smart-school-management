@@ -209,14 +209,14 @@ describe("AP-04: Dashboards and reports reconciliation", () => {
     expect(overview.notices.some((n) => n.title.includes("Welcome to Academic Year"))).toBe(true);
 
     // 5. Query studentStatistics
-    const stats = await admin.query(api.reports.studentStatistics, {});
+    const stats = await admin.query(api.studentReports.studentStatistics, {});
     expect(stats.total).toBe(2);
     expect(stats.parentContacts).toBe(1);
     expect(stats.byClass.find((c) => c.name === "Grade 8")?.total).toBe(2);
     expect(stats.bySection.find((s) => s.label === "8-A")?.students).toBe(1);
 
     // 6. Query attendanceReport
-    const attReport = await admin.query(api.reports.attendanceReport, {});
+    const attReport = await admin.query(api.attendanceReports.attendanceReport, {});
     const thisMonth = attReport.monthly.find((m) => m.month === monday.slice(0, 7));
     expect(thisMonth).toBeDefined();
     expect(thisMonth?.percentage).toBe(100);
@@ -231,11 +231,11 @@ describe("AP-04: Dashboards and reports reconciliation", () => {
     const student = await as(t, A.users.student);
 
     // 1. RBAC: student and standard teacher cannot view school-wide studentCounts
-    expect(await errorCode(student.query(api.academics.studentCounts, {}))).toBe("FORBIDDEN");
-    expect(await errorCode(ct.query(api.academics.studentCounts, {}))).toBe("FORBIDDEN");
+    expect(await errorCode(student.query(api.students.studentCounts, {}))).toBe("FORBIDDEN");
+    expect(await errorCode(ct.query(api.students.studentCounts, {}))).toBe("FORBIDDEN");
 
     // 2. Administrator (with students:read:all) CAN view studentCounts
-    const counts = await admin.query(api.academics.studentCounts, {});
+    const counts = await admin.query(api.students.studentCounts, {});
     expect(counts).toBeDefined();
 
     // In createSchool(t, "alpha"): studentA and studentB are created active
@@ -244,7 +244,7 @@ describe("AP-04: Dashboards and reports reconciliation", () => {
     expect(counts.notEnrolled).toBe(0);
     expect(counts.academicYear).not.toBeNull();
 
-    const sectionCounts = await admin.query(api.academics.studentCounts, { sectionId: A.sectionA });
+    const sectionCounts = await admin.query(api.students.studentCounts, { sectionId: A.sectionA });
     expect(sectionCounts.section?.enrolled).toBe(1);
 
     // Update studentB status to "transferred" (TC-issued) and verify count updates
@@ -252,7 +252,7 @@ describe("AP-04: Dashboards and reports reconciliation", () => {
       await ctx.db.patch(A.studentB, { status: "transferred" });
     });
 
-    const updatedCounts = await admin.query(api.academics.studentCounts, {});
+    const updatedCounts = await admin.query(api.students.studentCounts, {});
     expect(updatedCounts.activeRecords).toBe(counts.activeRecords - 1);
     expect(updatedCounts.enrolled).toBe(counts.enrolled - 1);
   });

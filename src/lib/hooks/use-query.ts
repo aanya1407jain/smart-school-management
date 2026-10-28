@@ -9,13 +9,11 @@
  * Swapping to Convex later: replace with `useQuery(api.x.y, args)`.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { subscribeDb } from "@/lib/store/db";
-import { subscribeSession } from "@/lib/services/session-store";
-import { ServiceError } from "@/lib/services";
+import { demoRuntime } from "@/lib/demo/runtime";
 
 export interface QueryState<T> {
   data: T | undefined;
-  error: ServiceError | Error | null;
+  error: Error | null;
   isLoading: boolean;
   isRefreshing: boolean;
   refetch: () => void;
@@ -42,9 +40,9 @@ export function useQuery<T>(fetcher: () => Promise<T>, deps: unknown[], options:
   useEffect(() => {
     if (!enabled) { setState((s) => ({ ...s, isLoading: false })); return; }
     run(false);
-    const unsubDb = subscribeDb(() => run(true));
-    const unsubSession = subscribeSession(() => run(true));
-    return () => { unsubDb(); unsubSession(); runId.current++; };
+    // Demo data (internal builds only) re-runs the query when it changes.
+    const unsubscribe = demoRuntime()?.subscribe(() => run(true)) ?? (() => {});
+    return () => { unsubscribe(); runId.current++; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, run, ...deps]);
 

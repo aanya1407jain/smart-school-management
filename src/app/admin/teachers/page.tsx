@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { TeachersWorkspace } from "@/features/teachers/teachers-workspace";
+import { DemoSlot } from "@/lib/demo/demo-slot";
 import { LiveTeachersWorkspace } from "@/features/teachers/teachers-live";
-import { PortalPage } from "@/features/student-portal/live-portal";
+import { PortalPage } from "@/features/live/portal";
 
 export const metadata: Metadata = { title: "Teachers & Staff" };
 export default function Page() {
-  return <Suspense><PortalPage demo={<TeachersWorkspace />} live={<LiveTeachersWorkspace />} /></Suspense>;
+  return <Suspense><PortalPage demo={<DemoSlot id="teachers.workspace" />} live={<LiveTeachersWorkspace />} /></Suspense>;
 }

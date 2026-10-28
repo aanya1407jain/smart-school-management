@@ -91,7 +91,7 @@ describe("timetable.moveEntry", () => {
   test("teacher clash with another section is refused", async () => {
     const { admin, A, p1, p2, lesson } = await setup();
     // classTeacher teaches 8-B (fixture assignment); give them 8-A too for this test.
-    await admin.mutation(api.academics.assignSubjectTeacher, { sectionId: A.sectionA, subjectId: A.subjectId, teacherId: A.classTeacher }).catch(() => undefined);
+    await admin.mutation(api.subjects.assignSubjectTeacher, { sectionId: A.sectionA, subjectId: A.subjectId, teacherId: A.classTeacher }).catch(() => undefined);
     const a = (await lesson(A.sectionA, A.classTeacher, 1, p2)).entryId;
     await lesson(A.sectionB, A.classTeacher, 1, p1);
     expect(await errorCode(admin.mutation(api.timetable.moveEntry, { entryId: a, dayOfWeek: 1, periodId: p1 }))).toBe("CONFLICT");

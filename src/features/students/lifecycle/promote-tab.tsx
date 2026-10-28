@@ -77,7 +77,7 @@ export function PromoteTab() {
   const promoteCount = moving.filter((r) => decisions[r.studentId].action === "promote").length;
   const repeatCount = moving.length - promoteCount;
   const holdCount = eligible.length - moving.length;
-  const arrears = moving.filter((r) => r.fees.outstandingMinor > 0);
+  const arrears = moving.flatMap((r) => (r.fees && r.fees.outstandingMinor > 0 ? [{ ...r, fees: r.fees }] : []));
 
   // Roll numbers each moving student will get: destination roster + incoming, alphabetical.
   const rollPreview = useMemo(() => {
@@ -217,7 +217,7 @@ export function PromoteTab() {
                           </div>
                         </td>
                         <td className="px-2 py-2.5">
-                          {r.fees.outstandingMinor > 0 ? (
+                          {r.fees === null ? <Badge tone="neutral" dot>Not checked</Badge> : r.fees.outstandingMinor > 0 ? (
                             <Tooltip content={<>Outstanding {rupees(r.fees.outstandingMinor)} for {plan.from.year}{r.fees.overdueMinor ? <>, of which {rupees(r.fees.overdueMinor)} is overdue</> : null}. Promotion is allowed; the balance stays on the student&apos;s ledger.</>}>
                               <button type="button" className="rounded-full focus-visible:outline-none focus-visible:shadow-focus"><Badge tone="plum" dot className="figures">Arrears due: {rupees(r.fees.outstandingMinor)}</Badge></button>
                             </Tooltip>

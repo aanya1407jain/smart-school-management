@@ -1,63 +1,41 @@
 import type { ModuleKey } from "@convex/core/modules";
 import { hasAnyPermission, hasPermission, type Permission } from "./permissions";
+import { CORE, MODULE_MANIFESTS } from "@/modules/registry.generated";
 import { moduleAllowed, type NavUser } from "./navigation";
 
 /**
- * Route → permission rules. The first matching rule wins.
- * Every protected route MUST be covered by a rule; unknown routes inside a
- * workspace fall back to the workspace's area permission.
+ * Route → permission rules, built from the routes of Core and the module
+ * manifests SHIPPED in this build (src/modules/registry.generated.ts) — no
+ * hard-coded paths. A concrete URL uses the most specific declared route
+ * ("/admin/examinations/marks" before "/admin/examinations/[id]"); a path below
+ * a declared page uses the closest declared ancestor; anything else inside a
+ * workspace falls back to the workspace's area permission.
  */
 interface RouteRule {
+  path: string;
   pattern: RegExp;
+  /** Pattern for the page and everything below it. */
+  prefix: RegExp;
+  dynamicSegments: number;
   anyOf: Permission[];
   /** The module the page belongs to; the school must have it enabled (convex/core/modules.ts). */
   module?: ModuleKey;
 }
 
-const r = (path: string) => new RegExp(`^${path}(?:/.*)?$`);
+function toRule(path: string, anyOf: readonly Permission[], module: ModuleKey | undefined): RouteRule {
+  // Declared paths are plain segments ("fees", "[studentId]"); only dynamic ones become patterns.
+  const body = path.split("/").map((seg) => (/^\[.+\]$/.test(seg) ? "[^/]+" : seg)).join("/");
+  return {
+    path, pattern: new RegExp(`^${body}$`), prefix: new RegExp(`^${body}(?:/.*)?$`),
+    dynamicSegments: path.split("/").filter((seg) => /^\[.+\]$/.test(seg)).length,
+    anyOf: [...anyOf], ...(module ? { module } : {}),
+  };
+}
 
 export const ROUTE_RULES: RouteRule[] = [
-  // Admin workspace
-  { pattern: r("/admin/dashboard"), anyOf: ["reports:read", "fees:manage"] },
-  { pattern: r("/admin/students"), anyOf: ["students:read:all"], module: "students" },
-  { pattern: r("/admin/promotions"), anyOf: ["students:lifecycle"], module: "students" },
-  { pattern: r("/admin/permissions"), anyOf: ["users:manage"] },
-  { pattern: r("/admin/academics"), anyOf: ["academics:manage"] },
-  { pattern: r("/admin/teachers"), anyOf: ["staff:manage"] },
-  { pattern: r("/admin/accounts"), anyOf: ["users:manage", "students:write", "staff:manage"] },
-  { pattern: r("/admin/attendance"), anyOf: ["attendance:read:all"], module: "attendance" },
-  { pattern: r("/admin/fees"), anyOf: ["fees:manage"], module: "finance" },
-  { pattern: r("/admin/examinations"), anyOf: ["exams:manage"], module: "academics" },
-  { pattern: r("/admin/timetable"), anyOf: ["timetable:manage"], module: "academics" },
-  { pattern: r("/admin/notices"), anyOf: ["notices:manage"], module: "administration" },
-  { pattern: r("/admin/notifications"), anyOf: ["notifications:read"] },
-  { pattern: r("/admin/reports"), anyOf: ["reports:read", "reports:finance"], module: "administration" },
-  { pattern: r("/admin/settings"), anyOf: ["settings:manage"] },
-  { pattern: r("/admin/audit"), anyOf: ["audit:read"] },
-  { pattern: r("/admin/profile"), anyOf: ["profile:read:own"] },
-  // Teacher workspace
-  { pattern: r("/teacher/dashboard"), anyOf: ["area:teacher"] },
-  { pattern: r("/teacher/classes"), anyOf: ["students:read:assigned"] },
-  { pattern: r("/teacher/students"), anyOf: ["students:read:assigned"] },
-  { pattern: r("/teacher/attendance"), anyOf: ["attendance:read:assigned"], module: "attendance" },
-  { pattern: r("/teacher/homework"), anyOf: ["homework:manage:assigned"], module: "academics" },
-  { pattern: r("/teacher/examinations"), anyOf: ["marks:enter:assigned"], module: "academics" },
-  { pattern: r("/teacher/timetable"), anyOf: ["timetable:read:own"], module: "academics" },
-  { pattern: r("/teacher/notices"), anyOf: ["notices:read"], module: "administration" },
-  { pattern: r("/teacher/notifications"), anyOf: ["notifications:read"] },
-  { pattern: r("/teacher/profile"), anyOf: ["profile:read:own"] },
-  // Student portal
-  { pattern: r("/student/dashboard"), anyOf: ["area:student"] },
-  { pattern: r("/student/attendance"), anyOf: ["attendance:read:own"], module: "attendance" },
-  { pattern: r("/student/timetable"), anyOf: ["timetable:read:own"], module: "academics" },
-  { pattern: r("/student/homework"), anyOf: ["homework:read:own"], module: "academics" },
-  { pattern: r("/student/results"), anyOf: ["results:read:own"], module: "academics" },
-  { pattern: r("/student/certificates"), anyOf: ["profile:read:own"], module: "students" },
-  { pattern: r("/student/fees"), anyOf: ["fees:read:own"], module: "finance" },
-  { pattern: r("/student/notices"), anyOf: ["notices:read"], module: "administration" },
-  { pattern: r("/student/notifications"), anyOf: ["notifications:read"] },
-  { pattern: r("/student/profile"), anyOf: ["profile:read:own"] },
-];
+  ...CORE.routes.map((r) => toRule(r.path, r.anyOf, r.entitlementKey)),
+  ...MODULE_MANIFESTS.flatMap((m) => m.routes.map((r) => toRule(r.path, r.anyOf, r.entitlementKey ?? m.entitlementKey))),
+].filter((r) => r.anyOf.length > 0); // public pages need no rule
 
 const AREA_RULES: { prefix: string; permission: Permission }[] = [
   { prefix: "/admin", permission: "area:admin" },
@@ -74,8 +52,21 @@ export type RouteAccess = "allowed" | "unauthenticated" | "forbidden" | "module_
 
 /** The rule that covers a path (for messages such as which module is off). */
 export function routeRuleFor(pathname: string): RouteRule | undefined {
-  return ROUTE_RULES.find((rule) => rule.pattern.test(pathname));
+  const exact = ROUTE_RULES.filter((rule) => rule.pattern.test(pathname)).sort((a, b) => a.dynamicSegments - b.dynamicSegments)[0];
+  if (exact) return exact;
+  // Closest declared ancestor (longest path), e.g. an unknown sub-page of a module.
+  return ROUTE_RULES.filter((rule) => rule.prefix.test(pathname)).sort((a, b) => b.path.length - a.path.length)[0];
 }
+
+/**
+ * Is this page part of the build at all (declared by Core or a shipped
+ * module)? Shared screens use it to hide links to modules that are not shipped.
+ */
+export function isRouteShipped(href: string): boolean {
+  const path = href.split(/[?#]/)[0];
+  return SHIPPED_PATHS.some((re) => re.test(path));
+}
+const SHIPPED_PATHS = [...CORE.routes, ...MODULE_MANIFESTS.flatMap((m) => m.routes)].map((r) => toRule(r.path, r.anyOf, undefined).pattern);
 
 export function isProtectedRoute(pathname: string) {
   return AREA_RULES.some((a) => pathname === a.prefix || pathname.startsWith(`${a.prefix}/`));
@@ -86,7 +77,7 @@ export function canAccessRoute(user: NavUser | null | undefined, pathname: strin
   if (!user) return "unauthenticated";
   const area = AREA_RULES.find((a) => pathname === a.prefix || pathname.startsWith(`${a.prefix}/`))!;
   if (!hasPermission(user, area.permission)) return "forbidden";
-  const rule = ROUTE_RULES.find((rule) => rule.pattern.test(pathname));
+  const rule = routeRuleFor(pathname);
   if (rule && !hasAnyPermission(user, rule.anyOf)) return "forbidden";
   if (rule && !moduleAllowed(user, rule.module)) return "module_disabled";
   return "allowed";

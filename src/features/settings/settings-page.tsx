@@ -2,9 +2,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarRange, Database, Upload } from "lucide-react";
-import type { SchoolSettings } from "@/types/domain";
-import type { SchoolInfoInput } from "@/lib/services/school.service";
-import { services } from "@/lib/services";
+import type { SchoolSettings } from "@/types/core";
+import { requireDemo, type SchoolInfoInput } from "@/lib/demo/runtime";
 import { useQuery, type QueryState } from "@/lib/hooks/use-query";
 import { useMutation } from "@/lib/hooks/use-mutation";
 import { useSchoolMutation, useSchoolQuery } from "@/lib/convex/membership";
@@ -16,6 +15,10 @@ import { LogoMark } from "@/components/brand/logo";
 import { formatDate } from "@/lib/utils/dates";
 import { useMemo } from "react";
 
+// Demo-dataset edits (internal demo personas only; live schools use the Convex settings below).
+const demoUpdateInfo = (input: SchoolInfoInput) => requireDemo().school.updateInfo(input);
+const demoUpdateSettings = (settings: SchoolSettings) => requireDemo().school.updateSettings(settings);
+
 export function SettingsPage() {
   const { dataSource } = useSession();
   const live = dataSource === "live";
@@ -25,7 +28,7 @@ export function SettingsPage() {
   const liveYears = useSchoolQuery(api.academics.listAcademicYears, live ? {} : "skip");
 
   // Demo data
-  const q = useQuery(() => services.lookup.getSchool(), [live], { enabled: !live });
+  const q = useQuery(() => requireDemo().school.getSchool(), [live], { enabled: !live });
 
   const adaptedLive = useMemo(() => {
     if (!liveCurrent) return undefined;
@@ -112,7 +115,7 @@ function SchoolInfo({ initial }: { initial: SchoolInfoInput }) {
   const [error, setError] = useState<string | null>(null);
 
   const updateProfileMutation = useSchoolMutation(api.schools.updateProfile);
-  const m = useMutation(services.school.updateInfo);
+  const m = useMutation(demoUpdateInfo);
 
   const field = (k: keyof SchoolInfoInput, label: string, wide?: boolean) => (
     <FormField label={label} error={m.fieldErrors[k]} className={wide ? "sm:col-span-2" : undefined}><Input value={form[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} /></FormField>
@@ -184,7 +187,7 @@ function GeneralSettings({ initial, gradingScheme }: { initial: SchoolSettings; 
 
   useEffect(() => setS(initial), [initial]);
   const updateSettingsMutation = useSchoolMutation(api.schools.updateSettings);
-  const m = useMutation(services.school.updateSettings);
+  const m = useMutation(demoUpdateSettings);
 
   const handleSubmit = async () => {
     setError(null);
@@ -239,7 +242,7 @@ function NotificationSettings({ initial }: { initial: SchoolSettings }) {
 
   useEffect(() => setS(initial), [initial]);
   const updateSettingsMutation = useSchoolMutation(api.schools.updateSettings);
-  const m = useMutation(services.school.updateSettings);
+  const m = useMutation(demoUpdateSettings);
 
   const handleSubmit = async () => {
     setError(null);
@@ -314,7 +317,7 @@ function DemoData() {
         <Button variant="danger" onClick={() => setOpen(true)}>Reset data</Button>
       </div>
       <ConfirmDialog open={open} onOpenChange={setOpen} title="Reset all demo data?" description="All changes made in this browser will be lost." tone="danger" confirmLabel="Reset & sign out"
-        onConfirm={async () => { await services.school.resetDemoData(); await logout(); toast({ title: "Demo data restored" }); router.replace("/login"); }} />
+        onConfirm={async () => { await requireDemo().school.resetDemoData(); await logout(); toast({ title: "Demo data restored" }); router.replace("/login"); }} />
     </Card>
   );
 }
