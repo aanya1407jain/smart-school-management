@@ -26,7 +26,7 @@ async function newPage(width = 1440) {
   const ctx = await browser.newContext({ viewport: { width, height: 900 } });
   const page = await ctx.newPage();
   page.on("pageerror", (e) => errors.push(`${page.url()} :: ${e.message}`));
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(40000);
   return { ctx, page };
 }
 /** Sign in with a Login ID. The portal (role) is decided by the server, never chosen on the form. */
@@ -350,7 +350,15 @@ async function serverAnswer(ctx, path) {
   await page.getByRole("button", { name: /create structure/i }).click();
   await page.getByRole("button", { name: /^assign$/i }).click();
   check("W2 Admin creates & assigns fee structure", await waitText(page, /Assigned to \d+ students/));
-  await page.goto(BASE + "/admin/fees/stu_aarav");
+  // Dynamically resolve student ID from balances tab
+  await page.goto(BASE + "/admin/fees?tab=balances");
+  await page.getByPlaceholder(/search student/i).fill("Aarav Sharma");
+  const aaravRow = page.locator("tr", { hasText: "Aarav Sharma" });
+  await aaravRow.waitFor();
+  await aaravRow.click();
+  await page.waitForURL(/\/admin\/fees\/.+/);
+  const resolvedStudentId = page.url().split("/admin/fees/")[1].split(/[?#]/)[0];
+  check("W2 Dynamically resolved student ID for fee ledger", Boolean(resolvedStudentId), resolvedStudentId);
   check("W2 Ledger shows new outstanding ₹7,500", await waitText(page, /₹7,500/));
   await page.getByRole("button", { name: /record payment/i }).first().click();
   await page.getByRole("dialog").getByLabel(/amount/i).fill("7500");

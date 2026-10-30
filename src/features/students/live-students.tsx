@@ -20,9 +20,10 @@ import { GraduationCap, UserPlus, Users } from "lucide-react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { useSchoolMutation, useSchoolPaginatedQuery, useSchoolQuery } from "@/lib/convex/membership";
-import { Avatar, Button, Card, EmptyState, FormField, Input, LinkButton, LoadingState, PageHeader, SearchInput, Select, StatCard, Textarea, useToast } from "@/components/ui";
+import { Avatar, Button, Card, EmptyState, FormField, Input, LinkButton, LoadingState, PageHeader, SearchInput, Select, StatCard, Tabs, TabsContent, TabsList, Textarea, useToast } from "@/components/ui";
 import { useSession } from "@/features/auth/session-provider";
 import { errorMessage } from "@/lib/convex/errors";
+import { AdmissionRegisterPanel } from "./admission-register";
 
 export function LiveStudentsList() {
   const { can } = useSession();
@@ -40,39 +41,52 @@ export function LiveStudentsList() {
   const counts = useSchoolQuery(api.academics.studentCounts, sectionId ? { sectionId: sectionId as Id<"sections"> } : {});
   return (
     <div>
-      <PageHeader title="Students" description="Active students in roll-number order (first name, then last name)." actions={canWrite ? <LinkButton href="/admin/students/new"><UserPlus className="h-4 w-4" /> Admit student</LinkButton> : undefined} />
-      <div className="mb-4 grid gap-4 sm:grid-cols-3" data-testid="student-totals">
-        <StatCard label={counts ? `Enrolled in ${counts.academicYear.name}` : "Enrolled this year"} value={<span data-testid="students-enrolled">{counts?.enrolled ?? "—"}</span>} icon={<GraduationCap className="h-5 w-5" />} hint="Distinct students with an active class enrollment" />
-        <StatCard label="Active student records" value={<span data-testid="students-active-records">{counts?.activeRecords ?? "—"}</span>} icon={<Users className="h-5 w-5" />} tone="sapphire" hint={counts ? `${counts.notEnrolled} not yet enrolled in a class` : undefined} />
-        {counts?.section && <StatCard label={`Enrolled in ${counts.section.label}`} value={<span data-testid="students-section">{counts.section.enrolled}</span>} icon={<GraduationCap className="h-5 w-5" />} tone="lavender" />}
-      </div>
-      <Card className="mb-4 flex flex-col gap-3 p-4 sm:flex-row">
-        <Select aria-label="Section" value={sectionId} onChange={(e) => setSectionId(e.target.value)} className="w-56">
-          <option value="">All sections</option>
-          {(sections ?? []).map((s) => <option key={s._id} value={s._id}>{s.displayName}</option>)}
-        </Select>
-        <SearchInput value={search} onChange={setSearch} placeholder="Search name or scholar no." label="Filter students by name or scholar no." className="sm:w-72" />
-      </Card>
-      <Card>
-        {list.status === "LoadingFirstPage" ? <LoadingState variant="table" /> : list.results.length === 0 ? (
-          <EmptyState icon={<GraduationCap className="h-6 w-6" />} title="No students" description={debounced ? "No students match this search." : sectionId ? "No active students in this section." : "Admit students or import them in Accounts & Import."} />
-        ) : (
-          <ul className="divide-y divide-line/60" data-testid="live-students">
-            {list.results.map((p) => (
-              <li key={p.personId} className="flex items-center gap-3 px-5 py-3">
-                {sectionId && <span className="w-8 text-center text-sm font-bold text-sapphire">{p.rollNo ?? "—"}</span>}
-                <Avatar name={p.name} size="sm" />
-                <Link href={`/admin/students/${p.personId}`} className="min-w-0 flex-1 hover:text-lagoon">
-                  <span className="block font-semibold text-ink">{p.name}</span>
-                  <span className="block text-[12px] text-ink-muted">Scholar No: {p.number} · {p.detail}</span>
-                </Link>
-                {canWrite && <Link href={`/admin/students/${p.personId}/edit`} className="text-[13px] font-medium text-lagoon hover:underline">Edit</Link>}
-              </li>
-            ))}
-          </ul>
-        )}
-        {list.status === "CanLoadMore" && <div className="border-t border-line/60 p-3 text-center"><Button variant="outline" size="sm" onClick={() => list.loadMore(50)}>Load more</Button></div>}
-      </Card>
+      <PageHeader title="Students" description="Active students in roll-number order (first name, then last name) and full admission register." actions={canWrite ? <LinkButton href="/admin/students/new"><UserPlus className="h-4 w-4" /> Admit student</LinkButton> : undefined} />
+      <Tabs defaultValue="roster">
+        <TabsList
+          items={[
+            { value: "roster", label: "Active roster" },
+            { value: "register", label: "Admission register (CSR)" },
+          ]}
+        />
+        <TabsContent value="roster">
+          <div className="mb-4 grid gap-4 sm:grid-cols-3" data-testid="student-totals">
+            <StatCard label={counts ? `Enrolled in ${counts.academicYear.name}` : "Enrolled this year"} value={<span data-testid="students-enrolled">{counts?.enrolled ?? "—"}</span>} icon={<GraduationCap className="h-5 w-5" />} hint="Distinct students with an active class enrollment" />
+            <StatCard label="Active student records" value={<span data-testid="students-active-records">{counts?.activeRecords ?? "—"}</span>} icon={<Users className="h-5 w-5" />} tone="sapphire" hint={counts ? `${counts.notEnrolled} not yet enrolled in a class` : undefined} />
+            {counts?.section && <StatCard label={`Enrolled in ${counts.section.label}`} value={<span data-testid="students-section">{counts.section.enrolled}</span>} icon={<GraduationCap className="h-5 w-5" />} tone="lavender" />}
+          </div>
+          <Card className="mb-4 flex flex-col gap-3 p-4 sm:flex-row">
+            <Select aria-label="Section" value={sectionId} onChange={(e) => setSectionId(e.target.value)} className="w-56">
+              <option value="">All sections</option>
+              {(sections ?? []).map((s) => <option key={s._id} value={s._id}>{s.displayName}</option>)}
+            </Select>
+            <SearchInput value={search} onChange={setSearch} placeholder="Search name or scholar no." label="Filter students by name or scholar no." className="sm:w-72" />
+          </Card>
+          <Card>
+            {list.status === "LoadingFirstPage" ? <LoadingState variant="table" /> : list.results.length === 0 ? (
+              <EmptyState icon={<GraduationCap className="h-6 w-6" />} title="No students" description={debounced ? "No students match this search." : sectionId ? "No active students in this section." : "Admit students or import them in Accounts & Import."} />
+            ) : (
+              <ul className="divide-y divide-line/60" data-testid="live-students">
+                {list.results.map((p) => (
+                  <li key={p.personId} className="flex items-center gap-3 px-5 py-3">
+                    {sectionId && <span className="w-8 text-center text-sm font-bold text-sapphire">{p.rollNo ?? "—"}</span>}
+                    <Avatar name={p.name} size="sm" />
+                    <Link href={`/admin/students/${p.personId}`} className="min-w-0 flex-1 hover:text-lagoon">
+                      <span className="block font-semibold text-ink">{p.name}</span>
+                      <span className="block text-[12px] text-ink-muted">Scholar No: {p.number} · {p.detail}</span>
+                    </Link>
+                    {canWrite && <Link href={`/admin/students/${p.personId}/edit`} className="text-[13px] font-medium text-lagoon hover:underline">Edit</Link>}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {list.status === "CanLoadMore" && <div className="border-t border-line/60 p-3 text-center"><Button variant="outline" size="sm" onClick={() => list.loadMore(50)}>Load more</Button></div>}
+          </Card>
+        </TabsContent>
+        <TabsContent value="register">
+          <AdmissionRegisterPanel />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
