@@ -95,10 +95,10 @@ export function fromConvexAudience(audience: any): Notice["audience"] {
   return { scope: "school" };
 }
 
-type NoticeView = Notice & { audienceLabel: string; author: string; isUpcoming: boolean };
+type NoticeView = Notice & { audienceLabel: string; author: string; isUpcoming: boolean; endDate?: string | null };
 
 /** A notice from Convex (notices.listManaged / notices.feed) as the shared notice UI shows it. */
-type LiveNotice = FunctionReturnType<typeof api.notices.feed>[number];
+type LiveNotice = FunctionReturnType<typeof api.notices.feed>[number] & { endDate?: string };
 function liveNoticeView(n: LiveNotice, today: string): NoticeView {
   return {
     id: n.noticeId,
@@ -109,6 +109,7 @@ function liveNoticeView(n: LiveNotice, today: string): NoticeView {
     audienceLabel: n.audienceLabel,
     publishDate: n.publishDate,
     eventDate: n.eventDate ?? null,
+    endDate: n.endDate ?? null,
     priority: n.priority as NoticePriority,
     status: n.status,
     author: n.authorName ?? "School office",
@@ -270,7 +271,6 @@ export function NoticesManager() {
 
   const { filters, bar, hasActiveFilters, resetFilters, deps } = useNoticeFilters(true);
 
-  // Live: every notice of the school (managers) from Convex; lifecycle via publish / archive / restore.
   const liveNotices = useSchoolQuery(
     api.notices.listManaged,
     live ? { status: filters.status !== "all" ? (filters.status as "draft" | "published" | "archived") : undefined } : "skip"
@@ -417,7 +417,6 @@ export function NoticesManager() {
                               <RotateCcw className="h-4 w-4" /> Restore
                             </DropdownItem>
                           )}
-                          {/* Live notices are never hard-deleted (archive keeps the record); delete is demo-only. */}
                           {!live && (
                             <DropdownItem tone="danger" onSelect={() => setDel(n)}>
                               <Trash2 className="h-4 w-4" /> Delete
@@ -470,7 +469,7 @@ export function NoticesManager() {
         confirmLabel="Delete"
         onConfirm={async () => {
           if (del) {
-            await services.notices.remove(del.id); // demo data only
+            await services.notices.remove(del.id);
             toast({ title: "Notice deleted" });
           }
           setDel(null);
@@ -513,7 +512,11 @@ function ComposeModal({ existing, onClose, teacherMode = false }: { existing?: N
           status: "published",
         }
   );
-  // Reach preview is computed from demo data only; live notices report who was notified when published.
+
+  // Multi-day Date Range State
+  const [isMultiDay, setIsMultiDay] = useState(Boolean(existing?.endDate));
+  const [endDate, setEndDate] = useState<string>(existing?.endDate ?? "");
+
   const reach = useQuery(() => services.notices.previewReach(form.audience), [JSON.stringify(form.audience), live], { enabled: !live });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<Error | null>(null);
@@ -564,7 +567,6 @@ function ComposeModal({ existing, onClose, teacherMode = false }: { existing?: N
     setErrors({});
     try {
       if (live) {
-        // Server lifecycle: save as a draft (create or edit), then publish if asked. Published notices are immutable.
         const fields = {
           title: form.title.trim(),
           body: form.body.trim(),
@@ -640,7 +642,16 @@ function ComposeModal({ existing, onClose, teacherMode = false }: { existing?: N
           />
         </FormField>
         <FormField label="Type">
-          <Select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as NoticeType })}>
+          <Select 
+            value={form.type} 
+            onChange={(e) => {
+              const newType = e.target.value as NoticeType;
+              setForm({ ...form, type: newType });
+              if (newType === "holiday" || newType === "event") {
+                setIsMultiDay(true);
+              }
+            }}
+          >
             {Object.entries(NOTICE_TYPE_LABELS).map(([k, v]) => (
               <option key={k} value={k}>
                 {v}
@@ -667,17 +678,53 @@ function ComposeModal({ existing, onClose, teacherMode = false }: { existing?: N
             onChange={(e) => setForm({ ...form, publishDate: e.target.value })}
           />
         </FormField>
-        <FormField
-          label={form.type === "notice" ? "Relevant date (optional)" : "Event / holiday date"}
-          required={form.type !== "notice"}
-          error={errors.eventDate}
-        >
-          <Input
-            type="date"
-            value={form.eventDate ?? ""}
-            onChange={(e) => setForm({ ...form, eventDate: e.target.value || null })}
-          />
-        </FormField>
+
+        {/* Start Date & End Date Range Fields */}
+        <div className="sm:col-span-2 space-y-3 rounded-xl border border-line/60 bg-paper-soft/30 p-3.5">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-ink-muted">Event / Schedule Dates</span>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="multiDayCheckbox"
+                checked={isMultiDay}
+                onChange={(e) => {
+                  setIsMultiDay(e.target.checked);
+                  if (!e.target.checked) setEndDate("");
+                }}
+                className="h-3.5 w-3.5 rounded border-line text-sapphire focus:ring-sapphire cursor-pointer"
+              />
+              <label htmlFor="multiDayCheckbox" className="text-xs font-medium text-ink cursor-pointer select-none">
+                Multi-day duration (e.g. Winter Break, Sports Week)
+              </label>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <FormField
+              label={isMultiDay ? "Start date" : form.type === "notice" ? "Relevant date (optional)" : "Event / holiday date"}
+              required={form.type !== "notice" || isMultiDay}
+              error={errors.eventDate}
+            >
+              <Input
+                type="date"
+                value={form.eventDate ?? ""}
+                onChange={(e) => setForm({ ...form, eventDate: e.target.value || null })}
+              />
+            </FormField>
+
+            {isMultiDay && (
+              <FormField label="End date" required>
+                <Input
+                  type="date"
+                  min={form.eventDate ?? undefined}
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                />
+              </FormField>
+            )}
+          </div>
+        </div>
 
         <FormField label="Audience" required error={errors.audience} className="sm:col-span-2">
           <Select value={form.audience.scope} onChange={(e) => setScope(e.target.value as NoticeAudienceScope)} disabled={teacherMode}>
@@ -826,7 +873,10 @@ function NoticeDetail({
           </div>
           {notice.eventDate && (
             <p className="flex items-center gap-2 text-sm font-medium text-sapphire">
-              <CalendarDays className="h-4 w-4" /> {formatLongDate(notice.eventDate)}
+              <CalendarDays className="h-4 w-4" />{" "}
+              {notice.endDate && notice.endDate !== notice.eventDate
+                ? `${formatLongDate(notice.eventDate)} to ${formatLongDate(notice.endDate)}`
+                : formatLongDate(notice.eventDate)}
             </p>
           )}
           <div className="rounded-xl bg-paper-soft/50 p-4">
@@ -848,7 +898,6 @@ export function NoticeBoard() {
 
   const { filters, bar, hasActiveFilters, resetFilters, deps } = useNoticeFilters(false);
 
-  // Live: published notices addressed to this member (server-side audience check), visible today.
   const liveNotices = useSchoolQuery(api.notices.feed, live ? {} : "skip");
   const q = useQuery(() => services.notices.list(filters), [...deps, live], { enabled: !live });
   const [view, setView] = useState<NoticeView | null>(null);

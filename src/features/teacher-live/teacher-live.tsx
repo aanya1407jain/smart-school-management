@@ -132,24 +132,102 @@ export function LiveTeacherHomework() {
   );
 }
 
-function NewHomeworkModal({ assignments, onClose }: { assignments: { _id: string; sectionId: Id<"sections">; sectionName: string; subjectId: Id<"subjects">; subjectName: string }[]; onClose: () => void }) {
+function NewHomeworkModal({
+  assignments,
+  onClose,
+}: {
+  assignments: {
+    _id: string;
+    sectionId: Id<"sections">;
+    sectionName: string;
+    subjectId: Id<"subjects">;
+    subjectName: string;
+  }[];
+  onClose: () => void;
+}) {
   const { toast } = useToast();
   const create = useSchoolMutation(api.homework.create);
-  const [slot, setSlot] = useState(assignments[0]?._id ?? "");
+
+  const subjects = useMemo(() => {
+    const map = new Map<string, { id: Id<"subjects">; name: string }>();
+    for (const a of assignments) {
+      if (!map.has(a.subjectId)) {
+        map.set(a.subjectId, { id: a.subjectId, name: a.subjectName });
+      }
+    }
+    return [...map.values()];
+  }, [assignments]);
+
+  const [selectedSubjectId, setSelectedSubjectId] = useState<string>(
+    subjects[0]?.id ?? ""
+  );
+
+  const availableSections = useMemo(() => {
+    return assignments.filter((a) => a.subjectId === selectedSubjectId);
+  }, [assignments, selectedSubjectId]);
+
+  const [selectedSectionIds, setSelectedSectionIds] = useState<Id<"sections">[]>([]);
+
+  useEffect(() => {
+    setSelectedSectionIds(availableSections.map((s) => s.sectionId));
+  }, [availableSections]);
+
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const toggleSection = (id: Id<"sections">) => {
+    setSelectedSectionIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const selectAll = () => {
+    setSelectedSectionIds(availableSections.map((s) => s.sectionId));
+  };
+
+  const clearAll = () => {
+    setSelectedSectionIds([]);
+  };
+
   const save = async () => {
-    const a = assignments.find((x) => x._id === slot);
-    if (!a || !title.trim() || !description.trim() || !dueDate) return setError("Choose a class and fill in the title, instructions and due date.");
-    if (dueDate < todayISO()) return setError("The due date cannot be in the past.");
+    if (!selectedSubjectId || selectedSectionIds.length === 0) {
+      return setError("Please select a subject and at least one section.");
+    }
+    if (!title.trim() || !description.trim() || !dueDate) {
+      return setError("Please fill in the title, instructions and due date.");
+    }
+    if (dueDate < todayISO()) {
+      return setError("The due date cannot be in the past.");
+    }
+
     setBusy(true);
     setError(null);
+
     try {
-      await create({ sectionId: a.sectionId, subjectId: a.subjectId, title: title.trim(), description: description.trim(), dueDate });
-      toast({ title: "Homework set", description: `Class ${a.sectionName} was notified.` });
+      await Promise.all(
+        selectedSectionIds.map((secId) =>
+          create({
+            sectionId: secId,
+            subjectId: selectedSubjectId as Id<"subjects">,
+            title: title.trim(),
+            description: description.trim(),
+            dueDate,
+          })
+        )
+      );
+
+      const secNames = availableSections
+        .filter((s) => selectedSectionIds.includes(s.sectionId))
+        .map((s) => s.sectionName)
+        .join(", ");
+
+      toast({
+        title: "Homework set",
+        description: `Notified students in Class: ${secNames}.`,
+      });
       onClose();
     } catch (e) {
       setError(errText(e));
@@ -157,13 +235,106 @@ function NewHomeworkModal({ assignments, onClose }: { assignments: { _id: string
       setBusy(false);
     }
   };
+
   return (
-    <Modal open onOpenChange={(o) => !o && onClose()} title="New homework" size="md" footer={<><Button variant="outline" onClick={onClose}>Cancel</Button><Button loading={busy} onClick={save}>Set homework</Button></>}>
+    <Modal
+      open
+      onOpenChange={(o) => !o && onClose()}
+      title="New homework"
+      size="md"
+      footer={
+        <>
+          <Button variant="outline" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button loading={busy} onClick={save}>
+            Set homework
+          </Button>
+        </>
+      }
+    >
       <div className="space-y-4">
-        <FormField label="Class and subject" required><Select value={slot} onChange={(e) => setSlot(e.target.value)}>{assignments.map((a) => <option key={a._id} value={a._id}>{a.sectionName} · {a.subjectName}</option>)}</Select></FormField>
-        <FormField label="Title" required><Input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={150} /></FormField>
-        <FormField label="Instructions" required><Textarea rows={4} value={description} onChange={(e) => setDescription(e.target.value)} /></FormField>
-        <FormField label="Due date" required><Input type="date" min={todayISO()} value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></FormField>
+        <FormField label="Subject" required>
+          <Select
+            value={selectedSubjectId}
+            onChange={(e) => setSelectedSubjectId(e.target.value)}
+          >
+            {subjects.map((sub) => (
+              <option key={sub.id} value={sub.id}>
+                {sub.name}
+              </option>
+            ))}
+          </Select>
+        </FormField>
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-ink-muted">
+              Assign to Sections <span className="text-plum">*</span>
+            </span>
+            {availableSections.length > 1 && (
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-1.5 text-xs"
+                  onClick={selectAll}
+                >
+                  Select all
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-1.5 text-xs"
+                  onClick={clearAll}
+                >
+                  Clear
+                </Button>
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-wrap gap-3 rounded-xl border border-line/60 bg-paper-soft/40 p-3">
+            {availableSections.map((sec) => (
+              <Checkbox
+                key={sec._id}
+                label={`Class ${sec.sectionName}`}
+                checked={selectedSectionIds.includes(sec.sectionId)}
+                onChange={() => toggleSection(sec.sectionId)}
+              />
+            ))}
+          </div>
+        </div>
+
+        <FormField label="Title" required>
+          <Input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            maxLength={150}
+            placeholder="e.g. Exercise 4.2 - Trigonometry Problems"
+          />
+        </FormField>
+
+        <FormField label="Instructions" required>
+          <Textarea
+            rows={4}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Detailed instructions or problems to solve..."
+          />
+        </FormField>
+
+        <FormField label="Due date" required>
+          <Input
+            type="date"
+            min={todayISO()}
+            value={dueDate}
+            onChange={(e) => setDueDate(e.target.value)}
+          />
+        </FormField>
+
         {error && <p role="alert" className="text-[13px] text-plum">{error}</p>}
       </div>
     </Modal>
@@ -293,7 +464,6 @@ export function LiveMarksEntry({ area = "teacher" }: { area?: "teacher" | "admin
   const teaching = useSchoolQuery(api.academics.myTeaching, area === "teacher" ? {} : "skip");
   const sections = useSchoolQuery(api.academics.listSections, area === "teacher" ? {} : "skip");
   const progress = useSchoolQuery(api.exams.progress, area === "admin" && examId ? { examId: examId as Id<"exams"> } : "skip");
-  // Teachers: papers matching their persisted subject assignments. Admins (marks:enter:any): every paper × section.
   const slots = useMemo(() => {
     const out: { key: string; examSubjectId: Id<"examSubjects">; sectionId: Id<"sections">; label: string }[] = [];
     if (area === "admin") {
@@ -392,10 +562,8 @@ function MarksSheet({ examSubjectId, sectionId }: { examSubjectId: Id<"examSubje
 }
 
 // ------------------------------------------------------------------ dashboard (landing page)
-/** The live teacher landing page: today's work from Convex for the signed-in teacher only. */
 export function LiveTeacherDashboard() {
   const { user, hasModule } = useSession();
-  // Panels follow the school's module entitlements; a disabled module's query is not called.
   const A = hasModule("attendance"), AC = hasModule("academics"), AD = hasModule("administration");
   const d = useSchoolQuery(api.dashboards.teacherOverview, {});
   const notices = useSchoolQuery(api.notices.feed, AD ? {} : "skip");

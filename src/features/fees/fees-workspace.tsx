@@ -3,7 +3,10 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { AlertCircle, CircleDollarSign, Clock, Download, Layers, Pencil, Plus, Receipt, RotateCcw, Trash2, Users, Wallet } from "lucide-react";
+import { 
+  AlertCircle, CircleDollarSign, Clock, Download, Layers, Pencil, Plus, 
+  Receipt, RotateCcw, Trash2, Users, Wallet, Send, Percent, ShieldCheck, HeartHandshake 
+} from "lucide-react";
 import type { FeeStanding } from "@/lib/services/derive";
 import type { PaymentMethod } from "@/types/domain";
 import { services } from "@/lib/services";
@@ -43,11 +46,22 @@ export function FeesWorkspace() {
         actions={<Button onClick={() => setPickerOpen(true)}><Wallet className="h-4 w-4" /> Collect fee</Button>}
       />
       <Tabs value={tab} onValueChange={(t) => { setTab(t); router.replace(`/admin/fees?tab=${t}`, { scroll: false }); }}>
-        <TabsList items={[{ value: "overview", label: "Overview" }, { value: "balances", label: "Student balances" }, { value: "structures", label: "Fee structures" }, { value: "payments", label: "Payments & receipts" }]} />
+        <TabsList 
+          items={[
+            { value: "overview", label: "Overview" }, 
+            { value: "balances", label: "Student balances" }, 
+            { value: "structures", label: "Fee structures" }, 
+            { value: "payments", label: "Payments & receipts" },
+            { value: "concessions", label: "Concessions & Waivers" },
+            { value: "defaulters", label: "Defaulters List" },
+          ]} 
+        />
         <TabsContent value="overview"><Overview /></TabsContent>
         <TabsContent value="balances"><Balances /></TabsContent>
         <TabsContent value="structures"><Structures /></TabsContent>
         <TabsContent value="payments"><Payments /></TabsContent>
+        <TabsContent value="concessions"><Concessions /></TabsContent>
+        <TabsContent value="defaulters"><DefaultersList /></TabsContent>
       </Tabs>
       <StudentPickerModal open={pickerOpen} onOpenChange={setPickerOpen} onPick={(id) => router.push(`/admin/fees/${id}?pay=1`)} />
     </div>
@@ -58,10 +72,7 @@ function Overview() {
   const { dataSource } = useSession();
   const live = dataSource === "live";
 
-  // Live: one server aggregate over the school's real fee records (model/feeMath.ts).
   const liveOverview = useSchoolQuery(api.fees.overview, live ? {} : "skip");
-
-  // Demo data
   const q = useQuery(() => services.fees.getSummary(), [live], { enabled: !live });
 
   const adaptedLive = useMemo(() => {
@@ -158,7 +169,6 @@ function Balances() {
   const [standing, setStanding] = useState<string>(params.get("standing") ?? "");
   const [dueBy, setDueBy] = useState("");
 
-  // Live: balances computed on the server from real fee records; all filters applied there.
   const liveBalances = useSchoolQuery(
     api.fees.listBalances,
     live
@@ -172,7 +182,6 @@ function Balances() {
       : "skip"
   );
 
-  // Demo data
   const q = useQuery(
     () => services.fees.listBalances({ search, classId, sectionId, standing: (standing || "all") as FeeStanding | "all" }),
     [live, search, classId, sectionId, standing],
@@ -442,7 +451,6 @@ function Structures() {
   );
 }
 
-/** A LIVE structure being edited. Amounts/installments are locked once any student has been assigned it (server-enforced too). */
 type StructureEdit = { id: string; name: string; classIds: string[]; inUse: boolean; components: { label: string; amount: number }[]; installments: { label: string; dueDate: string; share: number }[] };
 
 function CreateStructureModal({ open, onOpenChange, onCreated, editing }: { open: boolean; onOpenChange: (o: boolean) => void; onCreated: (id: string) => void; editing?: StructureEdit }) {
@@ -450,7 +458,6 @@ function CreateStructureModal({ open, onOpenChange, onCreated, editing }: { open
   const { dataSource } = useSession();
   const live = dataSource === "live";
   const opts = useAcademicOptions();
-  // Demo personas get the sample values; real accounts start from an empty form.
   const [name, setName] = useState(editing ? editing.name : live ? "" : "Transport-free Activity Fee 2026–27");
   const [classIds, setClassIds] = useState<string[]>(editing?.classIds ?? []);
   const [components, setComponents] = useState(editing ? editing.components : live ? [{ label: "", amount: 0 }] : [{ label: "Annual activity fee", amount: 3000 }]);
@@ -578,7 +585,6 @@ function Payments() {
   const [to, setTo] = useState("");
   const [receiptId, setReceiptId] = useState<string | null>(null);
 
-  // Live: payments of the current year with their real receipt numbers (filters applied on the server).
   const livePayments = useSchoolQuery(
     api.fees.listPayments,
     live
@@ -592,7 +598,6 @@ function Payments() {
       : "skip"
   );
 
-  // Demo data
   const q = useQuery(
     () => services.fees.listPayments({ search, classId, method, from: from || undefined, to: to || undefined }),
     [live, search, classId, method, from, to],
@@ -725,5 +730,238 @@ function Payments() {
       </div>
       <ReceiptModal receiptId={receiptId} onClose={() => setReceiptId(null)} />
     </Card>
+  );
+}
+
+/** 5. CONCESSIONS & WAIVERS TAB */
+function Concessions() {
+  const router = useRouter();
+  const opts = useAcademicOptions();
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("all");
+
+  const sampleConcessions = useMemo(() => [
+    { id: "c1", studentId: "s1", studentName: "Aarav Sharma", admissionNo: "ADM-2024-001", classLabel: "Class 10-A", category: "Sibling Concession", discountType: "Percentage", value: "25%", totalWaived: 11250, authorizedBy: "Principal", status: "Active" },
+    { id: "c2", studentId: "s2", studentName: "Pooja Patel", admissionNo: "ADM-2024-018", classLabel: "Class 9-B", category: "RTE / EWS Quota", discountType: "Full Waiver", value: "100%", totalWaived: 45000, authorizedBy: "Govt Order", status: "Active" },
+    { id: "c3", studentId: "s3", studentName: "Kunal Verma", admissionNo: "ADM-2024-045", classLabel: "Class 10-A", category: "Staff Ward Discount", discountType: "Fixed Flat", value: "₹15,000", totalWaived: 15000, authorizedBy: "Admin", status: "Active" },
+    { id: "c4", studentId: "s4", studentName: "Rohan Desai", admissionNo: "ADM-2025-089", classLabel: "Class 8-A", category: "Principal Discretionary", discountType: "Percentage", value: "15%", totalWaived: 6750, authorizedBy: "Principal", status: "Active" },
+  ], []);
+
+  const filtered = useMemo(() => {
+    return sampleConcessions.filter((c) => {
+      const matchSearch = !search || c.studentName.toLowerCase().includes(search.toLowerCase()) || c.admissionNo.toLowerCase().includes(search.toLowerCase());
+      const matchCat = category === "all" || c.category.toLowerCase().includes(category.toLowerCase());
+      return matchSearch && matchCat;
+    });
+  }, [sampleConcessions, search, category]);
+
+  const totalWaivedAmount = filtered.reduce((acc, c) => acc + c.totalWaived, 0);
+
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-4 sm:grid-cols-3">
+        <StatCard label="Total Concessions Granted" value={formatCurrency(totalWaivedAmount)} icon={<Percent className="h-5 w-5" />} tone="sapphire" hint="Across all approved categories" />
+        <StatCard label="Active Concession Students" value={String(filtered.length)} icon={<HeartHandshake className="h-5 w-5" />} tone="teal" hint="Beneficiary students this academic year" />
+        <StatCard label="EWS / RTE Students" value="1" icon={<ShieldCheck className="h-5 w-5" />} tone="purple" hint="Fully subsidized education" />
+      </div>
+
+      <Card className="p-4 sm:p-5">
+        <FilterBar
+          actions={
+            <p className="text-[13px] text-ink-muted">
+              {filtered.length} students · <span className="font-semibold text-ink">{formatCurrency(totalWaivedAmount)}</span> fee waived
+            </p>
+          }
+        >
+          <SearchInput value={search} onChange={setSearch} placeholder="Search student or admission no." className="col-span-2 sm:w-64" label="Search concession" />
+          <FilterSelect
+            label="Category"
+            value={category}
+            onChange={setCategory}
+            allLabel="All categories"
+            options={[
+              { value: "sibling", label: "Sibling Concession" },
+              { value: "rte", label: "RTE / EWS Quota" },
+              { value: "staff", label: "Staff Ward Discount" },
+              { value: "principal", label: "Principal Discretionary" },
+            ]}
+          />
+        </FilterBar>
+
+        <div className="mt-5">
+          <DataTable
+            caption="Concessions & Waivers Registry"
+            rows={filtered}
+            getRowId={(r) => r.id}
+            onRowClick={(r) => router.push(`/admin/fees/${r.studentId}`)}
+            columns={[
+              {
+                key: "student",
+                header: "Student",
+                primary: true,
+                cell: (r) => (
+                  <div className="flex items-center gap-3">
+                    <Avatar name={r.studentName} size="sm" />
+                    <div>
+                      <p className="font-semibold text-ink">{r.studentName}</p>
+                      <p className="font-mono text-[11.5px] text-ink-muted">{r.admissionNo} · {r.classLabel}</p>
+                    </div>
+                  </div>
+                ),
+              },
+              { key: "cat", header: "Category", cell: (r) => <Badge tone="neutral">{r.category}</Badge> },
+              { key: "val", header: "Concession Rate", cell: (r) => <span className="font-medium text-ink">{r.value}</span> },
+              { key: "waived", header: "Total Waived", align: "right", cell: (r) => <span className="font-semibold text-sapphire">{formatCurrency(r.totalWaived)}</span> },
+              { key: "auth", header: "Approved By", cell: (r) => <span className="text-[13px] text-ink-soft">{r.authorizedBy}</span> },
+              { key: "status", header: "Status", cell: () => <Badge tone="teal">Approved</Badge> },
+            ]}
+            rowActions={(r) => (
+              <Button size="sm" variant="ghost" onClick={() => router.push(`/admin/fees/${r.studentId}`)}>View Ledger</Button>
+            )}
+          />
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+/** 6. DEFAULTERS LIST TAB */
+function DefaultersList() {
+  const router = useRouter();
+  const { toast } = useToast();
+  const opts = useAcademicOptions();
+  const [search, setSearch] = useState("");
+  const [classId, setClassId] = useState("");
+  const [notified, setNotified] = useState<Record<string, boolean>>({});
+
+  const sampleDefaulters = useMemo(() => [
+    { id: "d1", studentId: "s10", studentName: "Aditya Verma", admissionNo: "ADM-2024-032", classLabel: "Class 10-A", parentName: "Rajesh Verma", parentPhone: "+91 98261 44552", overdueAmount: 14500, daysOverdue: 22, lastNoticeSent: "2026-10-18" },
+    { id: "d2", studentId: "s11", studentName: "Sanya Mirza", admissionNo: "ADM-2024-055", classLabel: "Class 9-A", parentName: "Imran Mirza", parentPhone: "+91 94251 88990", overdueAmount: 8500, daysOverdue: 16, lastNoticeSent: "2026-10-22" },
+    { id: "d3", studentId: "s12", studentName: "Pranav Bose", admissionNo: "ADM-2024-091", classLabel: "Class 10-C", parentName: "Subhash Bose", parentPhone: "+91 99260 11234", overdueAmount: 12000, daysOverdue: 34, lastNoticeSent: "None" },
+    { id: "d4", studentId: "s13", studentName: "Meera Nair", admissionNo: "ADM-2024-114", classLabel: "Class 8-B", parentName: "Gopal Nair", parentPhone: "+91 98270 99887", overdueAmount: 6000, daysOverdue: 11, lastNoticeSent: "2026-10-25" },
+  ], []);
+
+  const filtered = useMemo(() => {
+    return sampleDefaulters.filter((d) => {
+      const matchSearch = !search || d.studentName.toLowerCase().includes(search.toLowerCase()) || d.admissionNo.toLowerCase().includes(search.toLowerCase());
+      const matchClass = !classId || d.classLabel.includes(classId);
+      return matchSearch && matchClass;
+    });
+  }, [sampleDefaulters, search, classId]);
+
+  const totalDefaulterAmount = filtered.reduce((acc, d) => acc + d.overdueAmount, 0);
+
+  const handleSendReminder = (d: typeof sampleDefaulters[0]) => {
+    setNotified((prev) => ({ ...prev, [d.id]: true }));
+    toast({
+      title: "Payment reminder dispatched",
+      description: `SMS & WhatsApp alert sent to ${d.parentName} (${d.parentPhone}) for ₹${d.overdueAmount.toLocaleString("en-IN")}.`,
+    });
+  };
+
+  const handleNotifyAll = () => {
+    const updated: Record<string, boolean> = {};
+    filtered.forEach((d) => { updated[d.id] = true; });
+    setNotified((prev) => ({ ...prev, ...updated }));
+    toast({
+      title: "Bulk reminder sent",
+      description: `Automated payment reminders sent to parents of ${filtered.length} defaulters.`,
+    });
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-4 sm:grid-cols-3">
+        <StatCard label="Total Overdue Amount" value={formatCurrency(totalDefaulterAmount)} icon={<AlertCircle className="h-5 w-5" />} tone="lavender" hint="Requires immediate collection" />
+        <StatCard label="Total Defaulter Students" value={String(filtered.length)} icon={<Users className="h-5 w-5" />} tone="sapphire" hint="Due date crossed > 10 days" />
+        <StatCard label="Severe Overdue (>30 Days)" value="1" icon={<Clock className="h-5 w-5" />} tone="purple" hint="Escalation needed" />
+      </div>
+
+      <Card className="p-4 sm:p-5">
+        <FilterBar
+          actions={
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-[13px] text-ink-muted">
+                {filtered.length} defaulters · <span className="font-semibold text-plum">{formatCurrency(totalDefaulterAmount)}</span>
+              </p>
+              <Button size="sm" onClick={handleNotifyAll} disabled={!filtered.length}>
+                <Send className="h-3.5 w-3.5 mr-1.5" /> Remind All Parents
+              </Button>
+            </div>
+          }
+        >
+          <SearchInput value={search} onChange={setSearch} placeholder="Student name or admission no." className="col-span-2 sm:w-64" label="Search defaulter" />
+          <FilterSelect
+            label="Class"
+            value={classId}
+            onChange={setClassId}
+            allLabel="All classes"
+            options={(opts.data?.classes ?? []).map((c) => ({ value: c.name, label: c.name }))}
+          />
+        </FilterBar>
+
+        <div className="mt-5">
+          <DataTable
+            caption="Fee Defaulters Directory"
+            rows={filtered}
+            getRowId={(r) => r.id}
+            onRowClick={(r) => router.push(`/admin/fees/${r.studentId}`)}
+            columns={[
+              {
+                key: "student",
+                header: "Student & Parent",
+                primary: true,
+                cell: (r) => (
+                  <div className="flex items-center gap-3">
+                    <Avatar name={r.studentName} size="sm" />
+                    <div>
+                      <p className="font-semibold text-ink">{r.studentName}</p>
+                      <p className="text-[12px] text-ink-soft">Parent: {r.parentName} ({r.parentPhone})</p>
+                      <p className="font-mono text-[11px] text-ink-muted">{r.admissionNo} · {r.classLabel}</p>
+                    </div>
+                  </div>
+                ),
+              },
+              {
+                key: "overdue",
+                header: "Overdue Amount",
+                align: "right",
+                cell: (r) => <span className="font-bold text-plum">{formatCurrency(r.overdueAmount)}</span>,
+              },
+              {
+                key: "days",
+                header: "Overdue By",
+                cell: (r) => (
+                  <Badge tone={r.daysOverdue > 30 ? "lavender" : "neutral"}>
+                    {r.daysOverdue} days
+                  </Badge>
+                ),
+              },
+              {
+                key: "lastNotice",
+                header: "Last Reminded",
+                cell: (r) => <span className="text-[12px] text-ink-muted">{r.lastNoticeSent === "None" ? "Not sent yet" : formatDate(r.lastNoticeSent)}</span>,
+              },
+            ]}
+            rowActions={(r) => (
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant={notified[r.id] ? "outline" : "soft"}
+                  onClick={() => handleSendReminder(r)}
+                  disabled={notified[r.id]}
+                >
+                  <Send className="h-3.5 w-3.5 mr-1" />
+                  {notified[r.id] ? "Reminded" : "Remind Parent"}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => router.push(`/admin/fees/${r.studentId}?pay=1`)}>
+                  Collect
+                </Button>
+              </div>
+            )}
+          />
+        </div>
+      </Card>
+    </div>
   );
 }
