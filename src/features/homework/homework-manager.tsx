@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, CheckCircle2, ClipboardList, Lock, MessageSquare, Paperclip, Pencil, Plus, Unlock, Users } from "lucide-react";
@@ -7,7 +7,7 @@ import type { HomeworkInput } from "@/lib/services/homework.service";
 import { services } from "@/lib/services";
 import { useQuery } from "@/lib/hooks/use-query";
 import {
-  Avatar, Badge, Button, Card, CardHeader, Drawer, EmptyState, FilterBar, FilterSelect, FormField, Input, LinkButton, Modal, PageHeader,
+  Avatar, Badge, Button, Card, CardHeader, Checkbox, Drawer, EmptyState, FilterBar, FilterSelect, FormField, Input, LinkButton, Modal, PageHeader,
   ProgressBar, QueryView, SearchInput, Select, StatusBadge, Textarea, useToast,
 } from "@/components/ui";
 import { FormError } from "@/features/shared/form-error";
@@ -99,8 +99,55 @@ function HomeworkFormModal({ open, onOpenChange, existing }: { open: boolean; on
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<Error | null>(null);
   const [busy, setBusy] = useState(false);
+
   const pairs = assignments.data?.assignments ?? [];
-  const pairKey = form.sectionId && form.subjectId ? `${form.sectionId}|${form.subjectId}` : "";
+
+  // Group unique subjects taught by this teacher
+  const subjects = useMemo(() => {
+    const map = new Map<string, { id: string; name: string }>();
+    for (const p of pairs) {
+      if (!map.has(p.subjectId)) {
+        map.set(p.subjectId, { id: p.subjectId, name: p.subject });
+      }
+    }
+    return [...map.values()];
+  }, [pairs]);
+
+  const [selectedSubjectId, setSelectedSubjectId] = useState<string>("");
+
+  useEffect(() => {
+    if (!existing && subjects.length > 0 && !selectedSubjectId) {
+      setSelectedSubjectId(subjects[0].id);
+    }
+  }, [subjects, selectedSubjectId, existing]);
+
+  // Sections that teach the selected subject
+  const availableSections = useMemo(() => {
+    return pairs.filter((p) => p.subjectId === selectedSubjectId);
+  }, [pairs, selectedSubjectId]);
+
+  // Multi-section selection state
+  const [selectedSectionIds, setSelectedSectionIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!existing && availableSections.length > 0) {
+      setSelectedSectionIds(availableSections.map((s) => s.sectionId));
+    }
+  }, [availableSections, existing]);
+
+  const toggleSection = (id: string) => {
+    setSelectedSectionIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const selectAll = () => {
+    setSelectedSectionIds(availableSections.map((s) => s.sectionId));
+  };
+
+  const clearAll = () => {
+    setSelectedSectionIds([]);
+  };
 
   const submit = async () => {
     setBusy(true); setError(null); setErrors({});
@@ -109,47 +156,131 @@ function HomeworkFormModal({ open, onOpenChange, existing }: { open: boolean; on
         await services.homework.update(existing.id, form);
         toast({ title: "Homework updated" });
       } else {
-        const r = await services.homework.create(form);
-        toast({ title: "Homework assigned", description: `Visible to Class ${r.sectionLabel} only · ${r.notified} students notified.` });
+        if (!selectedSubjectId || selectedSectionIds.length === 0) {
+          throw new Error("Please select a subject and at least one section.");
+        }
+        if (!form.title.trim() || !form.description.trim()) {
+          throw new Error("Title and instructions are required.");
+        }
+
+        // Create homework for each selected section
+        let totalNotified = 0;
+        const labels: string[] = [];
+
+        for (const secId of selectedSectionIds) {
+          const r = await services.homework.create({
+            ...form,
+            subjectId: selectedSubjectId,
+            sectionId: secId,
+          });
+          totalNotified += r.notified;
+          labels.push(r.sectionLabel);
+        }
+
+        toast({
+          title: "Homework assigned",
+          description: `Assigned to Class ${labels.join(", ")} · ${totalNotified} students notified.`,
+        });
+
         setForm({ title: "", description: "", subjectId: "", sectionId: "", dueDate: addDays(todayISO(), 3), attachmentName: null });
       }
       onOpenChange(false);
-    } catch (e) {
-      setError(e as Error);
+    } catch (e: any) {
+      setError(e instanceof Error ? e : new Error(String(e)));
       setErrors((e as { fieldErrors?: Record<string, string> }).fieldErrors ?? {});
     }
     setBusy(false);
   };
 
   return (
-    <Modal open={open} onOpenChange={onOpenChange} title={existing ? "Edit homework" : "Create homework"} description={existing ? undefined : "Choose one of your classes. Only students in that section will see it."} size="lg"
+    <Modal
+      open={open}
+      onOpenChange={onOpenChange}
+      title={existing ? "Edit homework" : "Create homework"}
+      description={existing ? undefined : "Choose a subject and select one or more sections to assign homework."}
+      size="lg"
       footer={
         <>
           {existing && (
-            <Button variant="ghost" className="mr-auto" onClick={async () => { await services.homework.setStatus(existing.id, existing.status === "closed" ? "active" : "closed"); toast({ title: existing.status === "closed" ? "Homework reopened" : "Homework closed" }); onOpenChange(false); }}>
+            <Button
+              variant="ghost"
+              className="mr-auto"
+              onClick={async () => {
+                await services.homework.setStatus(existing.id, existing.status === "closed" ? "active" : "closed");
+                toast({ title: existing.status === "closed" ? "Homework reopened" : "Homework closed" });
+                onOpenChange(false);
+              }}
+            >
               {existing.status === "closed" ? <><Unlock className="h-4 w-4" /> Reopen</> : <><Lock className="h-4 w-4" /> Close submissions</>}
             </Button>
           )}
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button loading={busy} onClick={submit}>{existing ? "Save changes" : "Assign homework"}</Button>
         </>
-      }>
+      }
+    >
       <div className="grid gap-4 sm:grid-cols-2">
-        <FormField label="Title" required error={errors.title} className="sm:col-span-2"><Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="e.g. Quadratic Equations — Exercise 4.4" /></FormField>
+        <FormField label="Title" required error={errors.title} className="sm:col-span-2">
+          <Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="e.g. Quadratic Equations — Exercise 4.4" />
+        </FormField>
+
         {!existing && (
-          <FormField label="Class & subject" required error={errors.sectionId ?? errors.subjectId} className="sm:col-span-2">
-            <Select value={pairKey} onChange={(e) => { const [sectionId, subjectId] = e.target.value.split("|"); setForm({ ...form, sectionId: sectionId ?? "", subjectId: subjectId ?? "" }); }}>
-              <option value="">Select one of your classes</option>
-              {pairs.map((p) => <option key={p.id} value={`${p.sectionId}|${p.subjectId}`}>Class {p.sectionLabel} · {p.subject} ({p.students} students)</option>)}
-            </Select>
-          </FormField>
+          <>
+            <FormField label="Subject" required className="sm:col-span-2">
+              <Select value={selectedSubjectId} onChange={(e) => setSelectedSubjectId(e.target.value)}>
+                {subjects.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+
+            <div className="space-y-2 sm:col-span-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold uppercase tracking-wider text-ink-muted">
+                  Assign to Sections <span className="text-plum">*</span>
+                </span>
+                {availableSections.length > 1 && (
+                  <div className="flex gap-2">
+                    <Button type="button" variant="ghost" size="sm" className="h-6 px-1.5 text-xs" onClick={selectAll}>
+                      Select all
+                    </Button>
+                    <Button type="button" variant="ghost" size="sm" className="h-6 px-1.5 text-xs" onClick={clearAll}>
+                      Clear
+                    </Button>
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-3 rounded-xl border border-line/60 bg-paper-soft/40 p-3">
+                {availableSections.map((p) => (
+                  <Checkbox
+                    key={p.id}
+                    label={`Class ${p.sectionLabel} (${p.students} students)`}
+                    checked={selectedSectionIds.includes(p.sectionId)}
+                    onChange={() => toggleSection(p.sectionId)}
+                  />
+                ))}
+              </div>
+            </div>
+          </>
         )}
-        <FormField label="Deadline" required error={errors.dueDate}><Input type="date" min={todayISO()} value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} /></FormField>
+
+        <FormField label="Deadline" required error={errors.dueDate}>
+          <Input type="date" min={todayISO()} value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} />
+        </FormField>
+
         <FormField label="Attachment" hint="File upload arrives with file storage — the name is saved for now.">
           <Input value={form.attachmentName ?? ""} onChange={(e) => setForm({ ...form, attachmentName: e.target.value || null })} placeholder="e.g. worksheet.pdf" />
         </FormField>
-        <FormField label="Instructions" required error={errors.description} className="sm:col-span-2"><Textarea rows={5} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What should students do? Mention pages, questions and format." /></FormField>
-        <div className="sm:col-span-2"><FormError error={error && !Object.keys(errors).length ? error : null} /></div>
+
+        <FormField label="Instructions" required error={errors.description} className="sm:col-span-2">
+          <Textarea rows={5} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What should students do? Mention pages, questions and format." />
+        </FormField>
+
+        <div className="sm:col-span-2">
+          <FormError error={error && !Object.keys(errors).length ? error : null} />
+        </div>
       </div>
     </Modal>
   );
