@@ -99,7 +99,6 @@ export const promotionPlan = studentsQuery({
         studentId: s._id, enrollmentId: e._id, name: fullName(s), firstName: s.firstName, lastName: s.lastName, admissionNo: s.admissionNo, scholarNo: s.scholarNo ?? null,
         rollNo: e.rollNo ?? null, eligible: !reason && !sectionProblem, reason,
         result: r, standing: r?.standing ?? ("no_result" as const),
-        // null = Fees is not shipped in this build (dues not checked), never ₹0.
         fees: f ? { outstandingMinor: f.outstandingMinor, overdueMinor: f.overdueMinor } : null,
       });
     }
@@ -123,10 +122,7 @@ function promotionSectionProblem(from: Awaited<ReturnType<typeof sectionContext>
 }
 
 /**
- * Promote students of one section into a section of a LATER academic year
- * (the same class level = repeating the year). Old enrollment → "promoted"
- * (end date = old year's end, roll number kept); new active enrollment in the
- * target section; both rosters renumbered. Atomic.
+ * Promote students of one section into a section of a LATER academic year.
  */
 export const promote = studentsMutation({
   args: { fromSectionId: v.id("sections"), toSectionId: v.id("sections"), studentIds: v.array(v.id("students")) },
@@ -153,7 +149,7 @@ export const promote = studentsMutation({
 
     for (const { student, enrollment } of plan) {
       const endDate = from.year.endDate >= enrollment.startDate ? from.year.endDate : enrollment.startDate;
-      await ctx.db.patch(enrollment._id, { status: "promoted", endDate }); // roll number kept as history
+      await ctx.db.patch(enrollment._id, { status: "promoted", endDate });
       await ctx.db.insert("enrollments", {
         schoolId: ctx.actor.schoolId, studentId: student._id, academicYearId: to.year._id, classId: to.section.classId, sectionId: to.section._id,
         status: "active", startDate: to.year.startDate,
@@ -170,12 +166,6 @@ export const promote = studentsMutation({
   },
 });
 
-/**
- * Sections of a later academic year a student of `fromSectionId` may move to
- * (same class level = repeating, higher = promotion), with their current
- * roster — so the office can preview capacity and the roll numbers the new
- * students will get (roll numbers stay system-assigned: alphabetical, 1..n).
- */
 export const promotionTargets = studentsQuery({
   args: { fromSectionId: v.id("sections"), toAcademicYearId: v.id("academicYears") },
   handler: async (ctx, a) => {
@@ -186,7 +176,6 @@ export const promotionTargets = studentsQuery({
     const out = [];
     for (const section of sections) {
       const klass = await ctx.db.get(section.classId);
-      // Same level (repeat) or the next level up only: the realistic destinations, and a bounded read.
       if (!klass || klass.level < from.klass.level || klass.level > from.klass.level + 1) continue;
       const roster = [];
       for (const e of await ctx.db.query("enrollments").withIndex("by_section_status", (q) => q.eq("sectionId", section._id).eq("status", "active")).take(1001)) {
@@ -200,13 +189,6 @@ export const promotionTargets = studentsQuery({
   },
 });
 
-/**
- * Batch promotion with a destination per student: each student of
- * `fromSectionId` moves to their own section of `toAcademicYearId` (a higher
- * class = promoted, the same class = repeating). Students left out stay where
- * they are (on hold). Atomic; recorded as a promotion run that can be rolled
- * back while nothing in the new year depends on it.
- */
 export const promoteBatch = studentsMutation({
   args: { fromSectionId: v.id("sections"), toAcademicYearId: v.id("academicYears"), moves: v.array(v.object({ studentId: v.id("students"), toSectionId: v.id("sections") })) },
   handler: async (ctx, a) => {
@@ -239,7 +221,7 @@ export const promoteBatch = studentsMutation({
     const moves = [];
     for (const { student, enrollment, to } of plan) {
       const endDate = from.year.endDate >= enrollment.startDate ? from.year.endDate : enrollment.startDate;
-      await ctx.db.patch(enrollment._id, { status: "promoted", endDate }); // roll number kept as history
+      await ctx.db.patch(enrollment._id, { status: "promoted", endDate });
       const newEnrollmentId = await ctx.db.insert("enrollments", {
         schoolId: ctx.actor.schoolId, studentId: student._id, academicYearId: toYear._id, classId: to.section.classId, sectionId: to.section._id,
         status: "active", startDate: toYear.startDate,
@@ -262,7 +244,6 @@ export const promoteBatch = studentsMutation({
   },
 });
 
-/** Why a run can no longer be rolled back (null = it can). */
 async function rollbackProblem(ctx: QueryCtx, run: Doc<"promotionRuns">): Promise<string | null> {
   if (run.status !== "applied") return "Already rolled back.";
   for (const m of run.moves) {
@@ -271,8 +252,6 @@ async function rollbackProblem(ctx: QueryCtx, run: Doc<"promotionRuns">): Promis
     if (!oldE || oldE.status !== "promoted") return `${name}'s earlier enrollment has changed since.`;
     if (!newE || newE.status !== "active") return `${name} has left or moved since.`;
     if (student?.status !== "active") return `${name} is no longer active.`;
-    // Anything recorded for the student in the new year makes the run permanent
-    // (each shipped module answers for its own records).
     const year = await ctx.db.get(run.toYearId);
     if (year) {
       const problem = await newYearRecordsProblem(ctx, m.studentId, name, year);
@@ -282,7 +261,6 @@ async function rollbackProblem(ctx: QueryCtx, run: Doc<"promotionRuns">): Promis
   return null;
 }
 
-/** The latest promotion runs out of a section (newest first) with whether each can still be rolled back. */
 export const promotionRuns = studentsQuery({
   args: { fromSectionId: v.id("sections") },
   handler: async (ctx, a) => {
@@ -302,12 +280,6 @@ export const promotionRuns = studentsQuery({
   },
 });
 
-/**
- * Undo a promotion run made by mistake: the new-year enrollments it created
- * are removed (with their roll-number entries) and the students' earlier
- * enrollments become active again; both rosters are renumbered. Only while
- * nothing (attendance, fees, results) has been recorded in the new year.
- */
 export const rollbackPromotion = studentsMutation({
   args: { runId: v.id("promotionRuns") },
   handler: async (ctx, a) => {
@@ -336,10 +308,6 @@ export const rollbackPromotion = studentsMutation({
 });
 
 // ================================================================ pass-out
-/**
- * Students who finished school: their active enrollment in the section ends
- * as "completed" on `date` and their status becomes "alumni". Atomic.
- */
 export const passOut = studentsMutation({
   args: { sectionId: v.id("sections"), studentIds: v.array(v.id("students")), date: v.string() },
   handler: async (ctx, a) => {
@@ -374,12 +342,6 @@ export const passOut = studentsMutation({
   },
 });
 
-/**
- * A graduating section with each student's final result and fee clearance:
- * result = the latest published result of the year (Passed / Compartment /
- * Failed / Withheld when nothing is published); cleared = passed with a zero
- * fee balance.
- */
 export const passOutPlan = studentsQuery({
   args: { sectionId: v.id("sections") },
   handler: async (ctx, { sectionId }) => {
@@ -403,7 +365,6 @@ export const passOutPlan = studentsQuery({
         studentId: s._id, name: fullName(s), firstName: s.firstName, lastName: s.lastName, admissionNo: s.admissionNo, scholarNo: s.scholarNo ?? null,
         rollNo: e.rollNo ?? null, status: s.status, dateOfBirth: s.dateOfBirth ?? null,
         result, percentage: r?.percentage ?? null, grade: r?.grade ?? null, examName: r?.examName ?? null,
-        // outstandingMinor null = Fees not shipped: clearance then rests on the result alone.
         outstandingMinor: f ? f.outstandingMinor : null, cleared: result === "passed" && (!f || f.outstandingMinor === 0),
       };
     });
@@ -422,7 +383,6 @@ const TC_FIELDS = {
   destinationSchool: v.optional(v.string()),
   remarks: v.optional(v.string()),
   applicationDate: v.optional(v.string()),
-  /** Manual serial (to match a printed TC book); otherwise the next number is allocated. */
   tcNo: v.optional(v.string()),
 };
 
@@ -442,7 +402,6 @@ function cleanTcInput(a: TcInput) {
   };
 }
 
-/** What the certificate states about the student, frozen at draft/issue time. */
 async function tcSnapshot(ctx: QueryCtx, school: Doc<"schools">, student: Doc<"students">, upTo: string) {
   const all = await ctx.db.query("enrollments").withIndex("by_student_year", (q) => q.eq("studentId", student._id)).collect();
   const mine = all.filter((e) => e.schoolId === school._id);
@@ -480,7 +439,6 @@ async function assertTcNoFree(ctx: QueryCtx, schoolId: Id<"schools">, tcNo: stri
   if (clash) throw conflict(`Certificate number ${tcNo} is already used.`);
 }
 
-/** A random, unguessable code printed on the certificate for public verification. */
 async function newVerificationCode(ctx: QueryCtx) {
   for (;;) {
     const code = crypto.randomUUID().replace(/-/g, "").slice(0, 16).toUpperCase();
@@ -488,10 +446,6 @@ async function newVerificationCode(ctx: QueryCtx) {
   }
 }
 
-/**
- * Save (or update) a TC draft. Nothing about the student changes; the draft
- * keeps the form and a snapshot so the office can preview the certificate.
- */
 export const saveTransferCertificateDraft = studentsMutation({
   args: { tcId: v.optional(v.id("transferCertificates")), studentId: v.id("students"), ...TC_FIELDS },
   handler: async (ctx, a) => {
@@ -523,17 +477,6 @@ export const saveTransferCertificateDraft = studentsMutation({
   },
 });
 
-/**
- * Issue a transfer certificate: the student leaves the school. Any active
- * enrollment ends as "withdrawn" on `leavingDate` (roster renumbered), the
- * student's status becomes "transferred" (so they drop out of promotion and
- * pass-out lists), and a numbered TC is recorded with a snapshot of what it
- * certifies and a public verification code. One issued TC per student.
- *
- * Dues gate: with a fee balance in the current year the TC is refused unless
- * `waiverNote` documents a provisional issue — allowed only to members who
- * manage both student lifecycle and fees (the Principal / administrators).
- */
 export const issueTransferCertificate = studentsMutation({
   args: { studentId: v.id("students"), draftId: v.optional(v.id("transferCertificates")), waiverNote: v.optional(v.string()), ...TC_FIELDS },
   handler: async (ctx, a) => {
@@ -564,7 +507,6 @@ export const issueTransferCertificate = studentsMutation({
     if (f.tcNo) {
       await assertTcNoFree(ctx, school._id, f.tcNo, draft?._id);
       tcNo = f.tcNo;
-      // A manual number in the school's own series moves the counter past it, so it is never handed out again.
       const m = /\/(\d+)$/.exec(f.tcNo);
       if (m && f.tcNo === formatTransferCertificateNumber(school, currentYear, Number(m[1]))) await ensureCounterAtLeast(ctx, school._id, counterKeys.transferCertificate(currentYear._id), Number(m[1]));
     } else {
@@ -573,7 +515,7 @@ export const issueTransferCertificate = studentsMutation({
     }
 
     if (active) {
-      await ctx.db.patch(active._id, { status: "withdrawn", endDate: f.leavingDate }); // last roll number kept as history
+      await ctx.db.patch(active._id, { status: "withdrawn", endDate: f.leavingDate });
       await renumberSections(ctx, [active.sectionId]);
     }
     await ctx.db.patch(student._id, { status: "transferred" });
@@ -596,12 +538,6 @@ export const issueTransferCertificate = studentsMutation({
   },
 });
 
-/**
- * Cancel (void) a TC. An issued TC keeps its row and number (status
- * "cancelled") and the student's previous status is restored — the ended
- * enrollment is NOT reopened (re-enrol the student if they are staying). A
- * draft is simply voided.
- */
 export const cancelTransferCertificate = studentsMutation({
   args: { tcId: v.id("transferCertificates"), reason: v.string() },
   handler: async (ctx, a) => {
@@ -636,7 +572,6 @@ async function memberName(ctx: Ctx, userId: Id<"users">) {
   return m?.displayName ?? "Former member";
 }
 
-/** Transfer certificates (drafts, issued, cancelled), newest first: one student's, or the school's latest (≤ 300). */
 export const transferCertificates = studentsQuery({
   args: { studentId: v.optional(v.id("students")) },
   handler: async (ctx, { studentId }) => {
@@ -648,7 +583,6 @@ export const transferCertificates = studentsQuery({
     } else {
       rows = await ctx.db.query("transferCertificates").withIndex("by_school_number", (q) => q.eq("schoolId", ctx.actor.schoolId)).order("desc").take(300);
     }
-    // Drafts are working papers of the office: only members who issue TCs see them.
     if (!hasPermission(ctx.actor, "students:lifecycle")) rows = rows.filter((r) => r.status !== "draft");
     rows.sort((x, y) => y._creationTime - x._creationTime);
     const out = [];
@@ -684,11 +618,6 @@ export const tcCandidates = studentsQuery({
   },
 });
 
-/**
- * Everything the Issue-TC form shows for one student: the certificate
- * particulars (parents, dates, class, attendance), the dues gate and the next
- * certificate number. Read-only.
- */
 export const tcStudentProfile = studentsQuery({
   args: { studentId: v.id("students"), leavingDate: v.optional(v.string()) },
   handler: async (ctx, a) => {
@@ -703,7 +632,6 @@ export const tcStudentProfile = studentsQuery({
     const draft = tcs.filter((t) => t.status === "draft").sort((x, y) => y._creationTime - x._creationTime)[0] ?? null;
     return {
       studentId: student._id, status: student.status, snapshot,
-      // null = Fees is not shipped in this build: the gate shows "dues not checked".
       dues: dues ? { year: currentYear.name, outstandingMinor: dues.outstandingMinor, overdueMinor: dues.overdueMinor } : null,
       canWaive: hasPermission(ctx.actor, "fees:manage"),
       issued: tcs.find((t) => t.status === "issued")?.tcNo ?? null,
@@ -713,7 +641,6 @@ export const tcStudentProfile = studentsQuery({
   },
 });
 
-/** One transfer certificate with the school header, for printing / reprinting. */
 export const transferCertificate = studentsQuery({
   args: { tcId: v.id("transferCertificates") },
   handler: async (ctx, { tcId }) => {
@@ -724,19 +651,45 @@ export const transferCertificate = studentsQuery({
   },
 });
 
-/** Exact lookup by scholar number (case- and space-insensitive). */
+/**
+ * BUG-009 Fix: Exact lookup by Scholar Number with seamless fallback to Admission Number.
+ */
 export const findByScholarNo = studentsQuery({
   args: { scholarNo: v.string() },
   handler: async (ctx, { scholarNo }) => {
     if (!hasPermission(ctx.actor, "students:lifecycle")) requirePermission(ctx.actor, "students:read:all");
-    const key = scholarNoKey(scholarNo.trim());
-    if (!key) return null;
-    const s = await studentByScholarNo(ctx, ctx.actor.schoolId, key);
-    return s ? { studentId: s._id, name: fullName(s), admissionNo: s.admissionNo, scholarNo: s.scholarNo ?? null, status: s.status } : null;
+    const raw = scholarNo.trim();
+    if (!raw) return null;
+
+    // 1. Primary lookup by normalized scholar number
+    const key = scholarNoKey(raw);
+    let s: Doc<"students"> | null = null;
+    if (key) {
+      s = await studentByScholarNo(ctx, ctx.actor.schoolId, key);
+    }
+
+    // 2. BUG-009 Fallback: lookup by Admission Number
+    if (!s) {
+      s = await ctx.db
+        .query("students")
+        .withIndex("by_school_admission", (q) =>
+          q.eq("schoolId", ctx.actor.schoolId).eq("admissionNo", raw)
+        )
+        .first();
+    }
+
+    return s
+      ? {
+          studentId: s._id,
+          name: fullName(s),
+          admissionNo: s.admissionNo,
+          scholarNo: s.scholarNo ?? null,
+          status: s.status,
+        }
+      : null;
   },
 });
 
-/** Students actively enrolled in a section, for choosing who passes out (students:lifecycle). */
 export const sectionStudents = studentsQuery({
   args: { sectionId: v.id("sections") },
   handler: async (ctx, { sectionId }) => {

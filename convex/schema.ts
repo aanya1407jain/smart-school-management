@@ -325,6 +325,8 @@ export default defineSchema({
     admissionNo: v.string(),
     firstName: v.string(),
     lastName: v.string(),
+    /** Normalized lowercase last name for case-insensitive duplicate matching (BUG-005). */
+    lastNameKey: v.optional(v.string()),
     gender: v.optional(vGender),
     dateOfBirth: v.optional(v.string()),
     admissionDate: v.optional(v.string()),
@@ -345,7 +347,8 @@ export default defineSchema({
   })
     .index("by_school_admission", ["schoolId", "admissionNo"])
     .index("by_school_status_name", ["schoolId", "status", "lastName"])
-    .index("by_school_scholar", ["schoolId", "scholarNoKey"]),
+    .index("by_school_scholar", ["schoolId", "scholarNoKey"])
+    .index("by_school_lastNameKey_dob", ["schoolId", "lastNameKey", "dateOfBirth"]),
 
   /**
    * Admission register (CSR / scholar register) — SCHOOL-DEFINED extra columns.
@@ -849,7 +852,6 @@ export default defineSchema({
     key: v.string(),
     value: v.number(), // last number handed out
   }).index("by_school_key", ["schoolId", "key"]),
-
 
   /**
    * A bulk student-account run (Admin → Accounts & Import). The scope is

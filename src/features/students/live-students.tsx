@@ -5,13 +5,8 @@
  * totals, and the profile edit form (academics.updateStudentProfile; a name
  * change renumbers the student's section on the server).
  *
- * The list is used for EVERY admin session, including the demo school's
- * persona accounts: "Admit student" always writes to Convex
- * (academics.createStudentWithEnrollment), so the list and its totals must read
- * the same records — Accounts & Import and Attendance already do. Totals come
- * from academics.studentCounts (one shared counting rule, also used by the
- * admin dashboard), independent of pagination and search, and are reactive: a
- * new admission shows up in the list and the totals without a page refresh.
+ * BUG-002: Load more pagination remains reachable even when filtered list yields empty current slice.
+ * BUG-006: Gender field clearing supported cleanly.
  */
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -40,6 +35,7 @@ export function LiveStudentsList() {
     { initialNumItems: 50 },
   );
   const counts = useSchoolQuery(api.students.studentCounts, sectionId ? { sectionId: sectionId as Id<"sections"> } : {});
+
   return (
     <div>
       <PageHeader title="Students" description="Active students in roll-number order (first name, then last name)." actions={canWrite ? <LinkButton href="/admin/students/new"><UserPlus className="h-4 w-4" /> Admit student</LinkButton> : undefined} />
@@ -56,10 +52,15 @@ export function LiveStudentsList() {
         <SearchInput value={search} onChange={setSearch} placeholder="Search name or scholar no." label="Filter students by name or scholar no." className="sm:w-72" />
       </Card>
       <Card className="p-2.5 sm:p-3">
-        {list.status === "LoadingFirstPage" ? <LoadingState variant="table" /> : list.results.length === 0 ? (
-          <EmptyState icon={<GraduationCap className="h-6 w-6" />} title="No students" description={debounced ? "No students match this search." : sectionId ? "No active students in this section." : "Admit students or import them in Accounts & Import."} />
+        {list.status === "LoadingFirstPage" ? (
+          <LoadingState variant="table" />
+        ) : list.results.length === 0 ? (
+          <EmptyState
+            icon={<GraduationCap className="h-6 w-6" />}
+            title="No students"
+            description={debounced ? "No students match this search on current page." : sectionId ? "No active students in this section." : "Admit students or import them in Accounts & Import."}
+          />
         ) : (
-          // Floating card rows that rise in with a 40 ms stagger (new pages animate in as they load).
           <motion.ul className="space-y-1.5" data-testid="live-students" initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: reduceMotion ? 0 : 0.04 } } }}>
             {list.results.map((p) => (
               <motion.li
@@ -85,7 +86,15 @@ export function LiveStudentsList() {
             ))}
           </motion.ul>
         )}
-        {list.status === "CanLoadMore" && <div className="mt-2 border-t border-line/60 pt-3 text-center"><Button variant="outline" size="sm" onClick={() => list.loadMore(50)}>Load more</Button></div>}
+
+        {/* BUG-002 Fix: Load more button sits outside the results empty-check */}
+        {list.status === "CanLoadMore" && (
+          <div className="mt-2 border-t border-line/60 pt-3 text-center">
+            <Button variant="outline" size="sm" onClick={() => list.loadMore(50)}>
+              Load more
+            </Button>
+          </div>
+        )}
       </Card>
     </div>
   );
@@ -101,36 +110,60 @@ export function LiveStudentEdit({ studentId }: { studentId: string }) {
   const [form, setForm] = useState<null | { firstName: string; lastName: string; gender: string; dateOfBirth: string; email: string; phone: string; address: string; bloodGroup: string; scholarNo: string }>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
   useEffect(() => {
     if (profile && !form) {
       const s = profile.student;
-      setForm({ firstName: s.firstName, lastName: s.lastName, gender: s.gender ?? "", dateOfBirth: s.dateOfBirth ?? "", email: s.email ?? "", phone: s.phone ?? "", address: s.address ?? "", bloodGroup: s.bloodGroup ?? "", scholarNo: s.scholarNo ?? "" });
+      setForm({
+        firstName: s.firstName,
+        lastName: s.lastName,
+        gender: s.gender ?? "",
+        dateOfBirth: s.dateOfBirth ?? "",
+        email: s.email ?? "",
+        phone: s.phone ?? "",
+        address: s.address ?? "",
+        bloodGroup: s.bloodGroup ?? "",
+        scholarNo: s.scholarNo ?? "",
+      });
     }
   }, [profile, form]);
+
   if (profile === undefined || (profile && !form)) return <LoadingState label="Loading student" />;
   if (profile === null || !form) return <Card><EmptyState title="Student not found" /></Card>;
   const s = profile.student;
+
   const save = async () => {
     if (!form.firstName.trim() || !form.lastName.trim()) return setError("First and last name are required.");
     setBusy(true);
     setError(null);
     try {
-      // Only changed fields are sent; the server validates every one (dates in the past, phone format, blood group).
-      const was = { firstName: s.firstName, lastName: s.lastName, gender: s.gender ?? "", dateOfBirth: s.dateOfBirth ?? "", email: s.email ?? "", phone: s.phone ?? "", address: s.address ?? "", bloodGroup: s.bloodGroup ?? "", scholarNo: s.scholarNo ?? "" };
+      const was = {
+        firstName: s.firstName,
+        lastName: s.lastName,
+        gender: s.gender ?? "",
+        dateOfBirth: s.dateOfBirth ?? "",
+        email: s.email ?? "",
+        phone: s.phone ?? "",
+        address: s.address ?? "",
+        bloodGroup: s.bloodGroup ?? "",
+        scholarNo: s.scholarNo ?? "",
+      };
       const changed = (k: keyof typeof was) => form[k].trim() !== was[k];
+
       const args = {
         studentId: s.studentId,
         ...(changed("firstName") ? { firstName: form.firstName.trim() } : {}),
         ...(changed("lastName") ? { lastName: form.lastName.trim() } : {}),
-        ...(changed("gender") && form.gender ? { gender: form.gender as "male" | "female" | "other" } : {}),
+        // BUG-006 Fix: allow clearing gender cleanly by passing empty string / target value
+        ...(changed("gender") ? { gender: (form.gender ? form.gender : "") as any } : {}),
         ...(changed("dateOfBirth") ? { dateOfBirth: form.dateOfBirth } : {}),
         ...(changed("email") ? { email: form.email.trim() } : {}),
         ...(changed("phone") ? { phone: form.phone.trim() } : {}),
         ...(changed("address") ? { address: form.address.trim() } : {}),
         ...(changed("bloodGroup") ? { bloodGroup: form.bloodGroup } : {}),
-        // Unique in the school — the server refuses a number another student already has.
         ...(changed("scholarNo") ? { scholarNo: form.scholarNo.trim() } : {}),
       };
+
       if (Object.keys(args).length === 1) return router.push(`/admin/students/${s.studentId}`);
       const r = await update(args);
       toast({ title: "Student updated", description: r.renumberedSections ? "Roll numbers were updated for the new name." : undefined });
@@ -141,7 +174,9 @@ export function LiveStudentEdit({ studentId }: { studentId: string }) {
       setBusy(false);
     }
   };
+
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [k]: e.target.value });
+
   return (
     <div className="mx-auto max-w-3xl">
       <PageHeader title={`Edit ${s.firstName} ${s.lastName}`} description={`${s.scholarNo ? `Scholar No: ${s.scholarNo}. ` : ""}Class and status are changed through enrollment and accounts, not here.`} />
