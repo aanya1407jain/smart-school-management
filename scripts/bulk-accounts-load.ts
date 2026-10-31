@@ -51,7 +51,7 @@ async function main() {
   // 2. Every section: roll numbers 1..n, alphabetical.
   let rosterOk = true;
   for (const s of sections) {
-    const roster = await c.query(api.academics.sectionRoster, { sectionId: s._id });
+    const roster = await c.query(api.students.sectionRoster, { sectionId: s._id });
     const nums = roster.students.map((x) => x.rollNo);
     const names = roster.students.map((x) => x.name.toLowerCase().replace(/\s+/g, " "));
     if (nums.some((n, i) => n !== i + 1) || names.some((n, i) => i > 0 && names[i - 1].split(" ")[0] > n.split(" ")[0])) rosterOk = false;

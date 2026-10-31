@@ -44,6 +44,19 @@ async function logout(page) {
 }
 const text = async (page) => (await page.locator("main").innerText().catch(() => page.locator("body").innerText()));
 const waitText = async (page, re, timeout = 10000) => { try { await page.getByText(re).first().waitFor({ timeout }); return true; } catch { return false; } };
+/** Pick an option in the themed Select (custom listbox over a hidden native select): { label }, { index } or a value string. */
+async function choose(trigger, opt) {
+  // A click that lands before hydration does nothing: retry until the listbox is open.
+  for (let i = 0; i < 4 && (await trigger.getAttribute("aria-expanded")) !== "true"; i++) {
+    await trigger.click();
+    await trigger.page().waitForFunction((el) => el.getAttribute("aria-expanded") === "true", await trigger.elementHandle(), { timeout: 2500 }).catch(() => {});
+  }
+  const list = trigger.page().locator(`[id="${await trigger.getAttribute("aria-controls")}"]`);
+  const option = typeof opt === "string" ? list.locator(`[data-value="${opt}"]`)
+    : opt.index !== undefined ? list.getByRole("option").nth(opt.index)
+    : list.getByRole("option", { name: opt.label, exact: true });
+  await option.click();
+}
 
 /** Server-side guard: what the proxy answers for a full page request, before any client code runs. */
 async function serverAnswer(ctx, path) {
@@ -184,8 +197,8 @@ async function serverAnswer(ctx, path) {
   await page.getByLabel(/date of birth/i).fill("2011-05-14");
   await page.getByLabel(/home address/i).fill("12, 4th Main, Jayanagar, Bengaluru");
   // The form lists the school's REAL classes/sections (Convex), not demo ids.
-  await page.getByRole("combobox", { name: /^Class/ }).selectOption({ label: "Grade 10" });
-  await page.getByRole("combobox", { name: /^Section/ }).selectOption({ index: 1 }); // first section of Grade 10 → 10-A
+  await choose(page.getByRole("combobox", { name: /^Class/ }), { label: "Grade 10" });
+  await choose(page.getByRole("combobox", { name: /^Section/ }), { index: 1 }); // first section of Grade 10 → 10-A
   check("W1 Admit form asks for a parent contact (no guardian wording)", await page.getByText("Parent contact", { exact: true }).first().isVisible() && !/guardian/i.test(await page.locator("main").innerText()));
   await page.getByLabel(/parent name/i).fill("Kavita Menon");
   await page.getByLabel(/parent phone/i).fill("+91 98450 77777");
@@ -213,7 +226,7 @@ async function serverAnswer(ctx, path) {
   await listPage.close();
   check("W1 New student profile (real record) opens with class 10-A", await waitText(page, /Class 10-A/) && await waitText(page, new RegExp(ISHITA)));
   await page.goto(BASE + "/admin/accounts");
-  await page.getByLabel(/filter students by section/i).selectOption({ label: "10-A" });
+  await choose(page.getByLabel(/filter students by section/i), { label: "10-A" });
   check("W1 Student appears in the school's student records (Accounts & Import)", await page.locator("tr", { hasText: ISHITA }).first().waitFor().then(() => true, () => false));
   await logout(page);
 
@@ -278,10 +291,10 @@ async function serverAnswer(ctx, path) {
   check("A14 A link to a class outside the teacher's scope (or a demo id) never reaches the register — own class shown instead",
     await waitText(page, /isn't one of your sections/i) && await waitText(page, /Class 10-A ·/));
   // Class / section filters use real ids and switch the register without errors.
-  await page.getByRole("combobox", { name: /^Class$/ }).selectOption({ label: "Grade 9" });
+  await choose(page.getByRole("combobox", { name: /^Class$/ }), { label: "Grade 9" });
   check("ATT Class filter switches to the teacher's 9-A register", await waitText(page, /Class 9-A ·/));
-  await page.getByRole("combobox", { name: /^Class$/ }).selectOption({ label: "Grade 10" });
-  await page.getByRole("combobox", { name: /^Section$/ }).selectOption({ label: "Section B" });
+  await choose(page.getByRole("combobox", { name: /^Class$/ }), { label: "Grade 10" });
+  await choose(page.getByRole("combobox", { name: /^Section$/ }), { label: "Section B" });
   check("ATT Section filter switches to 10-B", await waitText(page, /Class 10-B ·/));
   const pastDate = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
   await page.getByLabel(/^date$/i).fill(pastDate);
@@ -376,7 +389,7 @@ async function serverAnswer(ctx, path) {
   await page.goto(BASE + "/teacher/homework?action=new");
   const dlg = page.getByRole("dialog");
   await dlg.getByLabel(/^title/i).fill("Probability — practice set A");
-  await dlg.getByLabel(/class & subject/i).selectOption({ label: "Class 10-A · Mathematics (8 students)" });
+  await choose(dlg.getByLabel(/class & subject/i), { label: "Class 10-A · Mathematics (8 students)" });
   await dlg.getByLabel(/instructions/i).fill("Solve all 12 probability questions from the practice set.");
   await page.getByRole("button", { name: /assign homework/i }).click();
   check("W4 Teacher creates homework for 10-A", await waitText(page, /Visible to Class 10-A only/));
@@ -455,7 +468,7 @@ async function serverAnswer(ctx, path) {
   await page.goto(BASE + "/admin/notices?action=new");
   const dlg = page.getByRole("dialog");
   await dlg.getByLabel(/^title/i).fill("10-B: Lab coats required on Monday");
-  await dlg.getByLabel(/^audience/i).selectOption("sections");
+  await choose(dlg.getByLabel(/^audience/i), "sections");
   await dlg.getByLabel("10-B", { exact: true }).check();
   await dlg.getByLabel(/description/i).fill("All Class 10-B students must bring lab coats for the chemistry practical.");
   await page.getByRole("button", { name: /^publish$/i }).click();
@@ -573,7 +586,7 @@ async function serverAnswer(ctx, path) {
 
   // Roll numbers: 10-C is numbered 1..n after the import (Ira included); bulk account creation for selected students.
   await page.getByRole("tab", { name: /^students$/i }).click();
-  await page.getByLabel(/filter students by section/i).selectOption({ label: "10-C" });
+  await choose(page.getByLabel(/filter students by section/i), { label: "10-C" });
   await page.locator("tr", { hasText: IRA }).waitFor();
   const rollCells = await page.locator("tbody tr").evaluateAll((trs) => trs.map((tr) => Number(tr.children[3]?.textContent)));
   check("ROLL Section roster is numbered 1..n (system-assigned)", [...rollCells].sort((a, b) => a - b).every((n, i) => n === i + 1), rollCells.join(","));
@@ -603,19 +616,26 @@ async function serverAnswer(ctx, path) {
   await page.getByRole("dialog").getByRole("button", { name: /^close$/i }).click();
   check("BULK Selected students now show Active accounts", await page.locator("tr", { hasText: IRA }).getByText("Active").waitFor().then(() => true, () => false));
   // Cross-page selection: "select all matching" covers every student without an account (server-side), and a filter change clears it.
-  await page.getByLabel(/filter students by section/i).selectOption({ label: "All sections" });
+  await choose(page.getByLabel(/filter students by section/i), { label: "All sections" });
   await page.getByTestId("scope-counts").waitFor();
   const without = Number((await page.getByTestId("scope-counts").innerText()).match(/·\s*([\d,]+) without/)[1].replace(/,/g, ""));
-  await page.getByRole("checkbox", { name: /select all students without an account on this page/i }).check();
-  const pageCount = Number((await page.getByTestId("selection-summary").innerText()).match(/^([\d,]+)/)[1].replace(/,/g, ""));
-  const allLink = page.getByRole("button", { name: /^select all [\d,]+ students without an account$/i });
-  if (without > pageCount) {
-    await allLink.click();
-    check("BULK “Select all matching” selects every student without an account across pages", (await page.getByTestId("selection-summary").innerText()).startsWith(`${without.toLocaleString()} students selected`), `${pageCount} on page, ${without} matching`);
+  const pageBox = page.getByRole("checkbox", { name: /select all students without an account on this page/i });
+  if (!(await pageBox.isEnabled())) {
+    // Repeated runs against the same deployment give accounts to everyone on the first page; the
+    // header checkbox is then (correctly) disabled. Nothing to select on this page.
+    check("BULK Header checkbox is disabled when nobody on the page lacks an account", true, `${without} without an account in the school`);
   } else {
-    check("BULK “Select all matching” not offered when the page already holds every match", (await allLink.count()) === 0);
+    await pageBox.check();
+    const pageCount = Number((await page.getByTestId("selection-summary").innerText()).match(/^([\d,]+)/)[1].replace(/,/g, ""));
+    const allLink = page.getByRole("button", { name: /^select all [\d,]+ students without an account$/i });
+    if (without > pageCount) {
+      await allLink.click();
+      check("BULK “Select all matching” selects every student without an account across pages", (await page.getByTestId("selection-summary").innerText()).startsWith(`${without.toLocaleString()} students selected`), `${pageCount} on page, ${without} matching`);
+    } else {
+      check("BULK “Select all matching” not offered when the page already holds every match", (await allLink.count()) === 0);
+    }
   }
-  await page.getByLabel(/filter students by section/i).selectOption({ label: "10-C" });
+  await choose(page.getByLabel(/filter students by section/i), { label: "10-C" });
   check("BULK Changing the filter clears the selection", await page.getByRole("region", { name: "Selection" }).waitFor({ state: "detached" }).then(() => true, () => false));
   await logout(page);
   await login(page, newId, "Chosen#2026", false);

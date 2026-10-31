@@ -1,0 +1,4 @@
+{
+  "note": "Known module-boundary violations at the start of the extraction. This list may only shrink (tests/convex/module-boundaries.test.ts).",
+  "violations": []
+}

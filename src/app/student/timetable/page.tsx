@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
-import { StudentTimetable } from "@/features/timetable/timetable-pages";
-import { PortalPage, LiveTimetable } from "@/features/student-portal/live-portal";
+import { DemoSlot } from "@/lib/demo/demo-slot";
+import { PortalPage } from "@/features/live/portal";
+import { LiveTimetable } from "@/features/timetable/live-my-timetable";
 
 export const metadata: Metadata = { title: "My Timetable" };
 export default function Page() {
-  return <PortalPage demo={<StudentTimetable />} live={<LiveTimetable />} />;
+  return <PortalPage demo={<DemoSlot id="timetable.student" />} live={<LiveTimetable />} />;
 }

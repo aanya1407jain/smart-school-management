@@ -45,17 +45,17 @@ describe("restricted-admin accountant", () => {
     const { structureId } = await accountant.mutation(api.fees.createStructure, { name: "Tuition", classIds: [A.classId], components: [{ label: "Tuition", amountMinor: 1000 }], installments: [{ label: "T1", dueDate: "2026-06-01", amountMinor: 1000 }], activate: true });
     await accountant.mutation(api.fees.assignStructure, { structureId, target: { kind: "students", studentIds: [A.studentA] } });
     await accountant.mutation(api.fees.recordPayment, { studentId: A.studentA, amountMinor: 500, method: "cash", paidOn: "2026-06-01", clientRequestId: "acct-req-00001" });
-    expect((await accountant.query(api.reports.feeSummary, {})).classes.length).toBeGreaterThan(0);
+    expect((await accountant.query(api.feeReports.feeSummary, {})).classes.length).toBeGreaterThan(0);
     expect((await accountant.query(api.reports.adminDashboard, {})).overview).toBeNull();
 
     for (const call of [
       () => accountant.query(api.audit.list, {}),
-      () => accountant.query(api.reports.studentStatistics, {}),
-      () => accountant.query(api.reports.lowAttendance, {}),
+      () => accountant.query(api.studentReports.studentStatistics, {}),
+      () => accountant.query(api.attendanceReports.lowAttendance, {}),
       () => accountant.query(api.accounts.listStaffAccounts, {}),
       () => accountant.mutation(api.memberships.updateAccess, { targetMembershipId: A.memberships.admin, status: "suspended" }),
       () => accountant.mutation(api.academics.createClass, { name: "Grade 9", level: 9 }),
-      () => accountant.query(api.staff.listTeachers, {}),
+      () => accountant.query(api.teachers.listTeachers, {}),
       () => accountant.mutation(api.exams.create, { name: "X", classIds: [A.classId], startDate: "2026-10-20", endDate: "2026-10-21" }),
     ]) expect(await errorCode(call())).toBe("FORBIDDEN");
     // Students list without account details.
@@ -155,15 +155,15 @@ describe("student documents and enrollment history", () => {
     const A = await createSchool(t, "alpha");
     const B = await createSchool(t, "beta");
     const admin = await as(t, A.users.admin);
-    await admin.mutation(api.academics.enrollStudent, { studentId: A.studentA, sectionId: A.sectionB, startDate: "2026-07-01" });
-    const enr = (await admin.query(api.academics.enrollmentHistory, { studentId: A.studentA })).find((e) => e.status === "active")!;
-    await admin.mutation(api.academics.endEnrollment, { enrollmentId: enr.enrollmentId, status: "withdrawn", endDate: "2026-09-30" });
-    const h = await admin.query(api.academics.enrollmentHistory, { studentId: A.studentA });
+    await admin.mutation(api.students.enrollStudent, { studentId: A.studentA, sectionId: A.sectionB, startDate: "2026-07-01" });
+    const enr = (await admin.query(api.students.enrollmentHistory, { studentId: A.studentA })).find((e) => e.status === "active")!;
+    await admin.mutation(api.students.endEnrollment, { enrollmentId: enr.enrollmentId, status: "withdrawn", endDate: "2026-09-30" });
+    const h = await admin.query(api.students.enrollmentHistory, { studentId: A.studentA });
     expect(h.map((e) => [e.section, e.status])).toEqual([["8-B", "withdrawn"], ["8-A", "transferred"]]);
-    expect((await (await as(t, A.users.student)).query(api.academics.enrollmentHistory, { studentId: A.studentA })).length).toBe(2);
-    expect(await errorCode((await as(t, A.users.classTeacher)).query(api.academics.enrollmentHistory, { studentId: A.studentA }))).toBe("NOT_FOUND");
-    expect(await errorCode((await as(t, B.users.admin)).query(api.academics.enrollmentHistory, { studentId: A.studentA }))).toBe("NOT_FOUND");
-    expect(await errorCode((await as(t, A.users.student)).query(api.academics.enrollmentHistory, { studentId: A.studentB }))).toBe("NOT_FOUND");
+    expect((await (await as(t, A.users.student)).query(api.students.enrollmentHistory, { studentId: A.studentA })).length).toBe(2);
+    expect(await errorCode((await as(t, A.users.classTeacher)).query(api.students.enrollmentHistory, { studentId: A.studentA }))).toBe("NOT_FOUND");
+    expect(await errorCode((await as(t, B.users.admin)).query(api.students.enrollmentHistory, { studentId: A.studentA }))).toBe("NOT_FOUND");
+    expect(await errorCode((await as(t, A.users.student)).query(api.students.enrollmentHistory, { studentId: A.studentB }))).toBe("NOT_FOUND");
     expect(await audits(t, "enrollment.transferred")).toHaveLength(1);
     expect(await audits(t, "enrollment.ended")).toHaveLength(1);
   });
@@ -175,17 +175,17 @@ describe("teachers & staff", () => {
     const A = await createSchool(t, "alpha");
     const B = await createSchool(t, "beta");
     const admin = await as(t, A.users.admin);
-    const rows = await admin.query(api.staff.listTeachers, {});
+    const rows = await admin.query(api.teachers.listTeachers, {});
     expect(rows.map((r) => [r.name, r.classTeacherOf, r.subjectLoad])).toEqual([["Class T", ["8-A"], 1], ["Subject T", ["8-B"], 1]]);
-    await admin.mutation(api.staff.updateTeacher, { teacherId: A.classTeacher, title: "Mrs.", firstName: "Lata", designation: "Senior Teacher", specializationSubjectIds: [A.subjectId] });
+    await admin.mutation(api.teachers.updateTeacher, { teacherId: A.classTeacher, title: "Mrs.", firstName: "Lata", designation: "Senior Teacher", specializationSubjectIds: [A.subjectId] });
     const m = await t.run((ctx) => ctx.db.get(A.memberships.classTeacher));
     expect(m?.displayName).toBe("Mrs. Lata T");
-    expect(await errorCode(admin.mutation(api.staff.updateTeacher, { teacherId: A.classTeacher, email: "nope" }))).toBe("INVALID_ARGUMENT");
-    expect(await errorCode(admin.mutation(api.staff.updateTeacher, { teacherId: A.classTeacher, firstName: " " }))).toBe("INVALID_ARGUMENT");
-    expect(await errorCode(admin.mutation(api.staff.updateTeacher, { teacherId: B.classTeacher, firstName: "X" }))).toBe("NOT_FOUND");
-    expect(await errorCode((await as(t, A.users.classTeacher)).mutation(api.staff.updateTeacher, { teacherId: A.classTeacher, firstName: "Me" }))).toBe("FORBIDDEN");
-    expect(await errorCode((await as(t, A.users.classTeacher)).query(api.staff.listTeachers, {}))).toBe("FORBIDDEN");
-    await admin.mutation(api.staff.updateTeacher, { teacherId: A.subjectTeacher, status: "inactive" });
+    expect(await errorCode(admin.mutation(api.teachers.updateTeacher, { teacherId: A.classTeacher, email: "nope" }))).toBe("INVALID_ARGUMENT");
+    expect(await errorCode(admin.mutation(api.teachers.updateTeacher, { teacherId: A.classTeacher, firstName: " " }))).toBe("INVALID_ARGUMENT");
+    expect(await errorCode(admin.mutation(api.teachers.updateTeacher, { teacherId: B.classTeacher, firstName: "X" }))).toBe("NOT_FOUND");
+    expect(await errorCode((await as(t, A.users.classTeacher)).mutation(api.teachers.updateTeacher, { teacherId: A.classTeacher, firstName: "Me" }))).toBe("FORBIDDEN");
+    expect(await errorCode((await as(t, A.users.classTeacher)).query(api.teachers.listTeachers, {}))).toBe("FORBIDDEN");
+    await admin.mutation(api.teachers.updateTeacher, { teacherId: A.subjectTeacher, status: "inactive" });
     expect((await admin.query(api.staff.staffAttendanceByDate, { date: "2026-10-05" })).map((r) => r.name)).toEqual(["Mrs. Lata T"]);
     expect(await audits(t, "teacher.updated")).toHaveLength(2);
   });

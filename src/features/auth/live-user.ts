@@ -3,7 +3,7 @@
  * dependencies, so it can be unit-tested.
  */
 import type { Viewer } from "@convex/users";
-import type { CurrentUser } from "@/lib/services/auth.service";
+import type { UserAccount as CurrentUser } from "@/types/core";
 
 /**
  * The portal user for a student-portal membership that has no demo-data

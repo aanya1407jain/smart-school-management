@@ -5,7 +5,7 @@ import { useState } from "react";
 import { Bell, ChevronDown, ChevronRight, LogOut, Menu, Settings, UserRound, Search, CheckCheck } from "lucide-react";
 import { useSession } from "@/features/auth/session-provider";
 import { findNavItem, hasPermission, ROLE_LABELS } from "@/lib/permissions";
-import { services } from "@/lib/services";
+import { requireDemo } from "@/lib/demo/runtime";
 import { useQuery } from "@/lib/hooks/use-query";
 import { relativeTime } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils/cn";
@@ -18,7 +18,7 @@ import { useSchoolProfile } from "@/lib/hooks/use-school-profile";
 import { useToast } from "@/components/ui/toast";
 import { api } from "@convex/_generated/api";
 import { useSchoolMutation, useSchoolQuery } from "@/lib/convex/membership";
-import type { NotificationCategory } from "@/types/domain";
+import type { NotificationCategory } from "@/types/core";
 
 const AREA_LABEL: Record<string, string> = { admin: "Administration", teacher: "Teacher", student: "Student portal" };
 const SUBPAGE_LABEL: Record<string, string> = { new: "New", edit: "Edit" };
@@ -111,7 +111,7 @@ function NotificationBell() {
   const router = useRouter();
   const unread = useUnreadCount();
   const [open, setOpen] = useState(false);
-  const recent = useQuery(() => services.notifications.list(), [user?.id, open], { enabled: open });
+  const recent = useQuery(() => requireDemo().notifications.list(), [user?.id, open], { enabled: open });
   if (!user) return null;
   const base = `/${user.role}`;
   return (
@@ -130,7 +130,7 @@ function NotificationBell() {
         <div className="flex items-center justify-between px-4 pb-2 pt-3.5">
           <p className="text-sm font-semibold text-ink">Notifications</p>
           {unread > 0 && (
-            <button onClick={() => services.notifications.markAllRead()} className="inline-flex items-center gap-1 text-[12.5px] font-medium text-lagoon hover:underline">
+            <button onClick={() => requireDemo().notifications.markAllRead()} className="inline-flex items-center gap-1 text-[12.5px] font-medium text-lagoon hover:underline">
               <CheckCheck className="h-3.5 w-3.5" /> Mark all read
             </button>
           )}
@@ -139,7 +139,7 @@ function NotificationBell() {
           {(recent.data ?? []).slice(0, 6).map((n) => (
             <DropdownItem
               key={n.id}
-              onSelect={() => { services.notifications.markRead(n.id); if (n.href) router.push(n.href); }}
+              onSelect={() => { requireDemo().notifications.markRead(n.id); if (n.href) router.push(n.href); }}
               className="items-start py-2.5"
             >
               <CategoryIcon category={n.category} />

@@ -113,7 +113,7 @@ describe("roll numbers after imports and enrollment changes", () => {
     await importRows([row(2, { fullName: "Charu Das", className: "8", section: "A" }), row(3, { fullName: "Zubin Mehta", className: "8", section: "A" })]);
     expect(names(await roster(t, A.sectionA))).toEqual(["Asha S", "Charu Das", "Zubin Mehta"]);
     const charu = (await roster(t, A.sectionA))[1];
-    await admin.mutation(api.academics.enrollStudent, { studentId: charu.studentId, sectionId: A.sectionB, startDate: TODAY });
+    await admin.mutation(api.students.enrollStudent, { studentId: charu.studentId, sectionId: A.sectionB, startDate: TODAY });
     const a = await roster(t, A.sectionA), b = await roster(t, A.sectionB);
     expect([names(a), rolls(a)]).toEqual([["Asha S", "Zubin Mehta"], [1, 2]]);
     expect([names(b), rolls(b)]).toEqual([["Bala S", "Charu Das"], [1, 2]]);
@@ -126,10 +126,10 @@ describe("roll numbers after imports and enrollment changes", () => {
     await importRows([row(2, { fullName: "Aditi Rao", className: "8", section: "A" }), row(3, { fullName: "Mohan Lal", className: "8", section: "A" })]);
     const first = (await roster(t, A.sectionA))[0];
     expect(first.name).toBe("Aditi Rao");
-    await admin.mutation(api.academics.endEnrollment, { enrollmentId: first.enrollmentId as Id<"enrollments">, status: "withdrawn", endDate: TODAY });
+    await admin.mutation(api.students.endEnrollment, { enrollmentId: first.enrollmentId as Id<"enrollments">, status: "withdrawn", endDate: TODAY });
     const r = await roster(t, A.sectionA);
     expect([names(r), rolls(r)]).toEqual([["Asha S", "Mohan Lal"], [1, 2]]);
-    expect(await errorCode(admin.mutation(api.academics.endEnrollment, { enrollmentId: first.enrollmentId as Id<"enrollments">, status: "withdrawn", endDate: TODAY }))).toBe("CONFLICT");
+    expect(await errorCode(admin.mutation(api.students.endEnrollment, { enrollmentId: first.enrollmentId as Id<"enrollments">, status: "withdrawn", endDate: TODAY }))).toBe("CONFLICT");
   });
 
   test("a failed or duplicate import leaves enrollments and roll numbers unchanged", async () => {
@@ -149,12 +149,12 @@ describe("roll numbers after imports and enrollment changes", () => {
     const before = await roster(t, A.sectionA);
     const teacher = await as(t, A.users.classTeacher);
     expect(await errorCode(teacher.mutation(api.imports.commitStudentRows, { rows: [row(2, { fullName: "Aa Bb", className: "8", section: "A" })], createAccounts: false, today: TODAY }))).toBe("FORBIDDEN");
-    expect(await errorCode(teacher.mutation(api.academics.enrollStudent, { studentId: A.studentB, sectionId: A.sectionA, startDate: TODAY }))).toBe("FORBIDDEN");
-    expect(await errorCode(teacher.mutation(api.academics.endEnrollment, { enrollmentId: before[0].enrollmentId as Id<"enrollments">, status: "withdrawn", endDate: TODAY }))).toBe("FORBIDDEN");
-    expect(await errorCode((await as(t, A.users.student)).mutation(api.academics.enrollStudent, { studentId: A.studentB, sectionId: A.sectionA, startDate: TODAY }))).toBe("FORBIDDEN");
+    expect(await errorCode(teacher.mutation(api.students.enrollStudent, { studentId: A.studentB, sectionId: A.sectionA, startDate: TODAY }))).toBe("FORBIDDEN");
+    expect(await errorCode(teacher.mutation(api.students.endEnrollment, { enrollmentId: before[0].enrollmentId as Id<"enrollments">, status: "withdrawn", endDate: TODAY }))).toBe("FORBIDDEN");
+    expect(await errorCode((await as(t, A.users.student)).mutation(api.students.enrollStudent, { studentId: A.studentB, sectionId: A.sectionA, startDate: TODAY }))).toBe("FORBIDDEN");
     const otherAdmin = await as(t, B.users.admin);
-    expect(await errorCode(otherAdmin.mutation(api.academics.endEnrollment, { enrollmentId: before[0].enrollmentId as Id<"enrollments">, status: "withdrawn", endDate: TODAY }))).toBe("NOT_FOUND");
-    expect(await errorCode(otherAdmin.mutation(api.academics.enrollStudent, { studentId: A.studentB, sectionId: A.sectionA, startDate: TODAY }))).toBe("NOT_FOUND");
+    expect(await errorCode(otherAdmin.mutation(api.students.endEnrollment, { enrollmentId: before[0].enrollmentId as Id<"enrollments">, status: "withdrawn", endDate: TODAY }))).toBe("NOT_FOUND");
+    expect(await errorCode(otherAdmin.mutation(api.students.enrollStudent, { studentId: A.studentB, sectionId: A.sectionA, startDate: TODAY }))).toBe("NOT_FOUND");
     expect(await roster(t, A.sectionA)).toEqual(before);
   });
 

@@ -45,8 +45,8 @@ describe("createStudentWithEnrollment", () => {
   test("enrolls in the chosen section of the current year; whole roster renumbered alphabetically; no credentials returned", async () => {
     const { t, A, admin } = await setup();
     // Section A already has Asha S (roll 1). Aarav sorts before her, Zoya after.
-    const z = await admin.mutation(api.academics.createStudentWithEnrollment, form(A, { firstName: "Zoya", lastName: "Khan" }));
-    const a = await admin.mutation(api.academics.createStudentWithEnrollment, form(A, { firstName: "Aarav", lastName: "Mehta", contactPhone: "98450 22222" }));
+    const z = await admin.mutation(api.students.createStudentWithEnrollment, form(A, { firstName: "Zoya", lastName: "Khan" }));
+    const a = await admin.mutation(api.students.createStudentWithEnrollment, form(A, { firstName: "Aarav", lastName: "Mehta", contactPhone: "98450 22222" }));
     expect(await roster(t, A.sectionA)).toEqual([
       { name: "Aarav Mehta", rollNo: 1, studentId: a.studentId },
       { name: "Asha S", rollNo: 2, studentId: A.studentA },
@@ -64,8 +64,8 @@ describe("createStudentWithEnrollment", () => {
 
   test("admission numbers come from the atomic counter and are unique", async () => {
     const { admin, A } = await setup();
-    const r1 = await admin.mutation(api.academics.createStudentWithEnrollment, form(A, { firstName: "One", contactPhone: "98450 00001" }));
-    const r2 = await admin.mutation(api.academics.createStudentWithEnrollment, form(A, { firstName: "Two", contactPhone: "98450 00002" }));
+    const r1 = await admin.mutation(api.students.createStudentWithEnrollment, form(A, { firstName: "One", contactPhone: "98450 00001" }));
+    const r2 = await admin.mutation(api.students.createStudentWithEnrollment, form(A, { firstName: "Two", contactPhone: "98450 00002" }));
     expect(r1.admissionNo).toMatch(/^AL-2026-\d+$/);
     expect(r2.admissionNo).not.toBe(r1.admissionNo);
   });
@@ -80,25 +80,25 @@ describe("createStudentWithEnrollment", () => {
       return { classId, sectionId, oldSection };
     });
     const before = await Promise.all((["students", "enrollments", "guardians", "guardianLinks"] as const).map((x) => count(t, x)));
-    expect(await errorCode(admin.mutation(api.academics.createStudentWithEnrollment, form(A, { sectionId: other.sectionId })))).toBe("INVALID_RELATIONSHIP");
-    expect(await errorCode(admin.mutation(api.academics.createStudentWithEnrollment, form(A, { sectionId: other.oldSection })))).toBe("INVALID_RELATIONSHIP");
-    expect(await errorCode(admin.mutation(api.academics.createStudentWithEnrollment, form(A, { sectionId: B.sectionA })))).toBe("NOT_FOUND");
-    expect(await errorCode(admin.mutation(api.academics.createStudentWithEnrollment, form(A, { classId: B.classId })))).toBe("NOT_FOUND");
-    expect(await errorCode(admin.mutation(api.academics.createStudentWithEnrollment, form(A, { contactPhone: "call me" })))).toBe("INVALID_ARGUMENT");
+    expect(await errorCode(admin.mutation(api.students.createStudentWithEnrollment, form(A, { sectionId: other.sectionId })))).toBe("INVALID_RELATIONSHIP");
+    expect(await errorCode(admin.mutation(api.students.createStudentWithEnrollment, form(A, { sectionId: other.oldSection })))).toBe("INVALID_RELATIONSHIP");
+    expect(await errorCode(admin.mutation(api.students.createStudentWithEnrollment, form(A, { sectionId: B.sectionA })))).toBe("NOT_FOUND");
+    expect(await errorCode(admin.mutation(api.students.createStudentWithEnrollment, form(A, { classId: B.classId })))).toBe("NOT_FOUND");
+    expect(await errorCode(admin.mutation(api.students.createStudentWithEnrollment, form(A, { contactPhone: "call me" })))).toBe("INVALID_ARGUMENT");
     expect(await Promise.all((["students", "enrollments", "guardians", "guardianLinks"] as const).map((x) => count(t, x)))).toEqual(before);
   });
 
   test("teachers and students cannot admit students", async () => {
     const { t, A } = await setup();
-    expect(await errorCode((await as(t, A.users.classTeacher)).mutation(api.academics.createStudentWithEnrollment, form(A)))).toBe("FORBIDDEN");
-    expect(await errorCode((await as(t, A.users.student)).mutation(api.academics.createStudentWithEnrollment, form(A)))).toBe("FORBIDDEN");
+    expect(await errorCode((await as(t, A.users.classTeacher)).mutation(api.students.createStudentWithEnrollment, form(A)))).toBe("FORBIDDEN");
+    expect(await errorCode((await as(t, A.users.student)).mutation(api.students.createStudentWithEnrollment, form(A)))).toBe("FORBIDDEN");
   });
 
   test("a parent contact with the same phone is re-used (siblings); a missing class teacher is reported, not invented", async () => {
     const { t, A, admin } = await setup();
     await t.run((ctx) => ctx.db.patch(A.sectionB, { classTeacherId: undefined }));
-    const first = await admin.mutation(api.academics.createStudentWithEnrollment, form(A, { firstName: "Ira", sectionId: A.sectionB, contactPhone: "98450 55555" }));
-    const second = await admin.mutation(api.academics.createStudentWithEnrollment, form(A, { firstName: "Ivan", sectionId: A.sectionB, contactPhone: "98450 55555", contactName: "Someone Else" }));
+    const first = await admin.mutation(api.students.createStudentWithEnrollment, form(A, { firstName: "Ira", sectionId: A.sectionB, contactPhone: "98450 55555" }));
+    const second = await admin.mutation(api.students.createStudentWithEnrollment, form(A, { firstName: "Ivan", sectionId: A.sectionB, contactPhone: "98450 55555", contactName: "Someone Else" }));
     const contactOf = (id: Id<"students">) => t.run(async (ctx) => (await ctx.db.query("guardianLinks").withIndex("by_student", (q) => q.eq("studentId", id)).unique())!.guardianId);
     expect(await contactOf(first.studentId)).toBe(await contactOf(second.studentId));
     expect(second.warnings.some((w) => /already belongs to parent contact Meena Rao/.test(w))).toBe(true);
@@ -116,14 +116,14 @@ describe("createStudentWithEnrollment", () => {
       return { e };
     });
     await admin.mutation(api.imports.commitStudentRows, { rows: [{ rowNumber: 2, values: { fullName: "Mira Das", className: "Grade 8", section: "A", rollNo: "1" } }], createAccounts: false, today: "2026-07-01" });
-    await admin.mutation(api.academics.createStudentWithEnrollment, form(A, { firstName: "Asha", lastName: "Bose", contactPhone: "98450 77777" }));
+    await admin.mutation(api.students.createStudentWithEnrollment, form(A, { firstName: "Asha", lastName: "Bose", contactPhone: "98450 77777" }));
     expect((await roster(t, A.sectionA)).map((r) => [r.name, r.rollNo])).toEqual([["Asha Bose", 1], ["Asha S", 2], ["Mira Das", 3]]);
     expect(await t.run(async (ctx) => (await ctx.db.get(old.e))!.rollNo)).toBe(7);
   });
 
   test("an admitted student later gets an account through the existing account path — linked to the same record, no duplicates", async () => {
     const { t, A, admin } = await setup();
-    const r = await admin.mutation(api.academics.createStudentWithEnrollment, { ...form(A, { firstName: "Neel" }), scholarNo: "SR 501" });
+    const r = await admin.mutation(api.students.createStudentWithEnrollment, { ...form(A, { firstName: "Neel" }), scholarNo: "SR 501" });
     const students = await count(t, "students");
     const acc = await admin.action(api.accounts.create, { person: { kind: "student", studentId: r.studentId } });
     const m = await t.run((ctx) => ctx.db.get(acc.membershipId));

@@ -70,7 +70,7 @@ describe("cross-school ids are NOT_FOUND", () => {
     const admin = await as(t, A.users.admin);
     const sections = await admin.query(api.academics.listSections, {});
     expect(sections.map((s) => s._id).sort()).toEqual([A.sectionA, A.sectionB].sort());
-    expect(await errorCode(admin.query(api.academics.sectionRoster, { sectionId: B.sectionA }))).toBe("NOT_FOUND");
+    expect(await errorCode(admin.query(api.students.sectionRoster, { sectionId: B.sectionA }))).toBe("NOT_FOUND");
     expect(await errorCode(admin.query(api.attendance.getByDate, { sectionId: B.sectionA, date: pastMonday(), today: pastMonday() }))).toBe("NOT_FOUND");
     expect(await errorCode(admin.query(api.attendance.studentHistory, { studentId: B.studentA }))).toBe("NOT_FOUND");
     expect(await errorCode(admin.query(api.academics.listSections, { academicYearId: B.yearId }))).toBe("NOT_FOUND");
@@ -88,7 +88,7 @@ describe("cross-school ids are NOT_FOUND", () => {
     const admin = await as(t, A.users.admin);
     expect(await errorCode(admin.mutation(api.academics.setClassTeacher, { sectionId: A.sectionA, teacherId: B.classTeacher }))).toBe("NOT_FOUND");
     expect(await errorCode(admin.mutation(api.academics.setClassTeacher, { sectionId: B.sectionA, teacherId: null }))).toBe("NOT_FOUND");
-    expect(await errorCode(admin.mutation(api.academics.enrollStudent, { studentId: B.studentA, sectionId: A.sectionA, startDate: "2026-06-01" }))).toBe("NOT_FOUND");
+    expect(await errorCode(admin.mutation(api.students.enrollStudent, { studentId: B.studentA, sectionId: A.sectionA, startDate: "2026-06-01" }))).toBe("NOT_FOUND");
   });
 
   test("notifications of another school/user cannot be read or marked", async () => {

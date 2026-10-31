@@ -7,7 +7,7 @@
 import { describe, expect, test } from "vitest";
 import { api } from "../../convex/_generated/api";
 import { addDays, todayIn } from "../../convex/model/calendar";
-import { isSubjectTeacherOf } from "../../convex/core/authorization";
+import { isSubjectTeacherOf } from "../../convex/model/academicsRecords";
 import { as, createSchool, errorCode, makeTest } from "./fixtures";
 
 const TODAY = todayIn("Asia/Kolkata");
@@ -42,7 +42,7 @@ describe("A-01 direct backend calls", () => {
     expect(await errorCode(t.query(api.exams.list, {}))).toBe("UNAUTHENTICATED");
     expect(await errorCode(t.query(api.homework.listMine, {}))).toBe("UNAUTHENTICATED");
     expect(await errorCode(t.query(api.notices.feed, {}))).toBe("UNAUTHENTICATED");
-    expect(await errorCode(t.query(api.reports.enrollmentSummary, {}))).toBe("UNAUTHENTICATED");
+    expect(await errorCode(t.query(api.studentReports.enrollmentSummary, {}))).toBe("UNAUTHENTICATED");
     expect(await errorCode(t.mutation(api.staff.applyLeave, { type: "casual", fromDate: TODAY, toDate: TODAY, reason: "x" }))).toBe("UNAUTHENTICATED");
     void A;
   });
@@ -56,13 +56,13 @@ describe("A-01 direct backend calls", () => {
       expect(await errorCode(c.query(api.exams.list, {}))).toBe("FORBIDDEN");
       expect(await errorCode(c.query(api.homework.listMine, {}))).toBe("FORBIDDEN");
       expect(await errorCode(c.query(api.staff.listLeave, {}))).toBe("FORBIDDEN");
-      expect(await errorCode(c.query(api.reports.enrollmentSummary, {}))).toBe("FORBIDDEN");
+      expect(await errorCode(c.query(api.studentReports.enrollmentSummary, {}))).toBe("FORBIDDEN");
       expect(await errorCode(c.mutation(api.timetable.upsertPeriod, { index: 1, label: "P", startTime: "09:00", endTime: "10:00", isBreak: false }))).toBe("FORBIDDEN");
     }
     // Teachers: no admin writes.
     const teacher = await as(t, A.users.classTeacher);
     expect(await errorCode(teacher.mutation(api.exams.create, { name: "x", classIds: [A.classId], startDate: "2026-09-01", endDate: "2026-09-02" }))).toBe("FORBIDDEN");
-    expect(await errorCode(teacher.query(api.reports.feeSummary, {}))).toBe("FORBIDDEN");
+    expect(await errorCode(teacher.query(api.feeReports.feeSummary, {}))).toBe("FORBIDDEN");
   });
 
   test("subject-teacher scope comes from persisted assignments only", async () => {

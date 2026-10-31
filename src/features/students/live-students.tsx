@@ -16,15 +16,17 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { GraduationCap, UserPlus, Users } from "lucide-react";
+import { GraduationCap, Pencil, UserPlus, Users } from "lucide-react";
+import { motion, useReducedMotion } from "framer-motion";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { useSchoolMutation, useSchoolPaginatedQuery, useSchoolQuery } from "@/lib/convex/membership";
-import { Avatar, Button, Card, EmptyState, FormField, Input, LinkButton, LoadingState, PageHeader, SearchInput, Select, StatCard, Textarea, useToast } from "@/components/ui";
+import { Avatar, BadgeChip, Button, Card, EmptyState, FormField, Input, LinkButton, LoadingState, PageHeader, SearchInput, Select, StatCard, Textarea, useToast } from "@/components/ui";
 import { useSession } from "@/features/auth/session-provider";
 import { errorMessage } from "@/lib/convex/errors";
 
 export function LiveStudentsList() {
+  const reduceMotion = useReducedMotion();
   const { can } = useSession();
   const canWrite = can("students:write");
   const sections = useSchoolQuery(api.academics.listSections, {});
@@ -37,7 +39,7 @@ export function LiveStudentsList() {
     { kind: "student", ...(sectionId ? { sectionId: sectionId as Id<"sections"> } : {}), ...(debounced ? { search: debounced } : {}) },
     { initialNumItems: 50 },
   );
-  const counts = useSchoolQuery(api.academics.studentCounts, sectionId ? { sectionId: sectionId as Id<"sections"> } : {});
+  const counts = useSchoolQuery(api.students.studentCounts, sectionId ? { sectionId: sectionId as Id<"sections"> } : {});
   return (
     <div>
       <PageHeader title="Students" description="Active students in roll-number order (first name, then last name)." actions={canWrite ? <LinkButton href="/admin/students/new"><UserPlus className="h-4 w-4" /> Admit student</LinkButton> : undefined} />
@@ -53,25 +55,37 @@ export function LiveStudentsList() {
         </Select>
         <SearchInput value={search} onChange={setSearch} placeholder="Search name or scholar no." label="Filter students by name or scholar no." className="sm:w-72" />
       </Card>
-      <Card>
+      <Card className="p-2.5 sm:p-3">
         {list.status === "LoadingFirstPage" ? <LoadingState variant="table" /> : list.results.length === 0 ? (
           <EmptyState icon={<GraduationCap className="h-6 w-6" />} title="No students" description={debounced ? "No students match this search." : sectionId ? "No active students in this section." : "Admit students or import them in Accounts & Import."} />
         ) : (
-          <ul className="divide-y divide-line/60" data-testid="live-students">
+          // Floating card rows that rise in with a 40 ms stagger (new pages animate in as they load).
+          <motion.ul className="space-y-1.5" data-testid="live-students" initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: reduceMotion ? 0 : 0.04 } } }}>
             {list.results.map((p) => (
-              <li key={p.personId} className="flex items-center gap-3 px-5 py-3">
-                {sectionId && <span className="w-8 text-center text-sm font-bold text-sapphire">{p.rollNo ?? "—"}</span>}
-                <Avatar name={p.name} size="sm" />
-                <Link href={`/admin/students/${p.personId}`} className="min-w-0 flex-1 hover:text-lagoon">
-                  <span className="block font-semibold text-ink">{p.name}</span>
-                  <span className="block text-[12px] text-ink-muted">Scholar No: {p.number} · {p.detail}</span>
+              <motion.li
+                key={p.personId}
+                variants={{ hidden: reduceMotion ? { opacity: 0 } : { opacity: 0, y: 8 }, show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 420, damping: 32 } } }}
+                className="group flex items-center gap-3 rounded-xl border border-transparent bg-white/50 px-3.5 py-2.5 transition-all duration-200 ease-out hover:scale-[1.003] hover:border-teal/20 hover:bg-teal-soft/40 hover:shadow-ambient-lg"
+              >
+                {sectionId && <BadgeChip tone="sapphire" className="min-w-[2.5rem] justify-center" title="Roll number"><span className="sr-only">Roll </span>{p.rollNo ?? "—"}</BadgeChip>}
+                <Avatar name={p.name} size="md" className="transition-transform duration-200 group-hover:scale-105" />
+                <Link href={`/admin/students/${p.personId}`} className="min-w-0 flex-1 rounded-lg focus-visible:outline-none focus-visible:shadow-focus">
+                  <span className="block truncate font-semibold text-ink transition-colors group-hover:text-lagoon">{p.name}</span>
+                  <span className="mt-1 flex flex-wrap items-center gap-1.5 text-[12px] text-ink-muted">
+                    <BadgeChip title="Scholar number"><span className="sr-only">Scholar No: </span>{p.number}</BadgeChip>
+                    <span className="rounded-full bg-alabaster px-2 py-0.5 font-medium text-ink-soft ring-1 ring-inset ring-line/80">{p.detail}</span>
+                  </span>
                 </Link>
-                {canWrite && <Link href={`/admin/students/${p.personId}/edit`} className="text-[13px] font-medium text-lagoon hover:underline">Edit</Link>}
-              </li>
+                {canWrite && (
+                  <LinkButton href={`/admin/students/${p.personId}/edit`} variant="ghost" size="sm" className="opacity-80 group-hover:opacity-100">
+                    <Pencil className="h-3.5 w-3.5" aria-hidden /> Edit
+                  </LinkButton>
+                )}
+              </motion.li>
             ))}
-          </ul>
+          </motion.ul>
         )}
-        {list.status === "CanLoadMore" && <div className="border-t border-line/60 p-3 text-center"><Button variant="outline" size="sm" onClick={() => list.loadMore(50)}>Load more</Button></div>}
+        {list.status === "CanLoadMore" && <div className="mt-2 border-t border-line/60 pt-3 text-center"><Button variant="outline" size="sm" onClick={() => list.loadMore(50)}>Load more</Button></div>}
       </Card>
     </div>
   );
@@ -82,8 +96,8 @@ const BLOOD = ["", "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
 export function LiveStudentEdit({ studentId }: { studentId: string }) {
   const router = useRouter();
   const { toast } = useToast();
-  const profile = useSchoolQuery(api.academics.getStudentProfile, { studentId });
-  const update = useSchoolMutation(api.academics.updateStudentProfile);
+  const profile = useSchoolQuery(api.students.getStudentProfile, { studentId });
+  const update = useSchoolMutation(api.students.updateStudentProfile);
   const [form, setForm] = useState<null | { firstName: string; lastName: string; gender: string; dateOfBirth: string; email: string; phone: string; address: string; bloodGroup: string; scholarNo: string }>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

@@ -138,7 +138,7 @@ async function main() {
   const s10A = sec("10-A"), s10B = sec("10-B"), s10C = sec("10-C"), s8A = sec("8-A");
   const rahulSections = await rahul.query(api.academics.listSections, {});
   check("Teacher sees only sections in scope", rahulSections.map((s) => s.displayName).sort().join(",") === "10-A,10-B,9-A", rahulSections.map((s) => s.displayName).join(","));
-  await expectCode("Student cannot read a section roster", () => aarav.query(api.academics.sectionRoster, { sectionId: s10A }), "FORBIDDEN");
+  await expectCode("Student cannot read a section roster", () => aarav.query(api.students.sectionRoster, { sectionId: s10A }), "FORBIDDEN");
 
   // Find a past school day with no register for 10-A, 10-B and 10-C.
   const freeDay = async (): Promise<string> => {
@@ -192,7 +192,7 @@ async function main() {
   // ---------------------------------------------------------------- student scope
   const own = await aarav.query(api.attendance.studentHistory, { studentId: aaravId });
   check("Student reads own attendance", own.records.some((r) => r.date === day && r.status === "present"));
-  const roster10B = await admin.query(api.academics.sectionRoster, { sectionId: s10B });
+  const roster10B = await admin.query(api.students.sectionRoster, { sectionId: s10B });
   const amairaId = roster10B.students.find((s) => s.name === "Amaira Desai")!.studentId;
   await expectCode("Student cannot read another student", () => aarav.query(api.attendance.studentHistory, { studentId: amairaId }), "NOT_FOUND");
   await expectCode("Student portal refuses another student's id", () => aarav.query(api.studentPortal.myProfile, { studentId: amairaId }), "NOT_FOUND");
@@ -222,15 +222,15 @@ async function main() {
   await expectCode("listBySection rejects ranges over 366 days", () => admin.query(api.attendance.listBySection, { sectionId: s10A, from: "2025-01-01", to: "2026-12-31" }), "INVALID_ARGUMENT");
   const classes = await admin.query(api.academics.listClasses, {});
   const grade10 = classes.find((c) => c.level === 10)!;
-  const curriculum10 = await rahul.query(api.academics.listClassSubjects, { classId: grade10._id });
+  const curriculum10 = await rahul.query(api.subjects.listClassSubjects, { classId: grade10._id });
   check("Grade 10 curriculum is seeded (6 subjects incl. CS)", curriculum10.length === 6 && curriculum10.some((s) => s.code === "CS"));
   const grade8 = classes.find((c) => c.level === 8)!;
-  const subjects = await admin.query(api.academics.listSubjects, {});
+  const subjects = await admin.query(api.subjects.listSubjects, {});
   const cs = subjects.find((s) => s.code === "CS")!;
-  await expectCode("Subject teacher cannot be assigned a subject outside the class curriculum", () => admin.mutation(api.academics.assignSubjectTeacher, { sectionId: s8A, subjectId: cs._id, teacherId: vJoshi.teacher!.teacherId as Id<"teachers"> }), "INVALID_RELATIONSHIP");
+  await expectCode("Subject teacher cannot be assigned a subject outside the class curriculum", () => admin.mutation(api.subjects.assignSubjectTeacher, { sectionId: s8A, subjectId: cs._id, teacherId: vJoshi.teacher!.teacherId as Id<"teachers"> }), "INVALID_RELATIONSHIP");
   const currentYear = (await admin.query(api.academics.listAcademicYears, {})).find((y) => y.isCurrent)!;
-  await expectCode("Teacher cannot change a curriculum", () => rahul.mutation(api.academics.setClassSubjects, { classId: grade8._id, academicYearId: currentYear._id, subjectIds: [] }), "FORBIDDEN");
-  await expectCode("Curriculum subject with assigned teachers cannot be removed", () => admin.mutation(api.academics.setClassSubjects, { classId: grade8._id, academicYearId: currentYear._id, subjectIds: [] }), "INVALID_RELATIONSHIP");
+  await expectCode("Teacher cannot change a curriculum", () => rahul.mutation(api.subjects.setClassSubjects, { classId: grade8._id, academicYearId: currentYear._id, subjectIds: [] }), "FORBIDDEN");
+  await expectCode("Curriculum subject with assigned teachers cannot be removed", () => admin.mutation(api.subjects.setClassSubjects, { classId: grade8._id, academicYearId: currentYear._id, subjectIds: [] }), "INVALID_RELATIONSHIP");
 
   // ---------------------------------------------------------------- daily overview scope
   const overviewAdmin = await admin.query(api.attendance.dailyOverview, { date: day });
@@ -309,28 +309,28 @@ async function main() {
     // Every student-portal module resolves for the bulk-created account (real records, own only).
     const bulkClient = await signIn(cred.loginId, "BulkPortal#2026");
     const [tt, hw, res, fees, notices] = await Promise.all([
-      bulkClient.query(api.studentPortal.myTimetable, {}), bulkClient.query(api.studentPortal.myHomework, {}), bulkClient.query(api.studentPortal.myResults, {}),
-      bulkClient.query(api.studentPortal.myFees, {}), bulkClient.query(api.studentPortal.myNotices, { today: TODAY }),
+      bulkClient.query(api.timetable.myStudentTimetable, {}), bulkClient.query(api.homework.myHomework, {}), bulkClient.query(api.exams.myResults, {}),
+      bulkClient.query(api.fees.myFees, {}), bulkClient.query(api.studentPortal.myNotices, { today: TODAY }),
     ]);
     check("Bulk account: timetable, homework, results, fees and notices load from the deployment",
       tt.state === "ok" && tt.section === "10-C" && hw.state === "ok" && res.state === "ok" && fees.state === "ok" && notices.state === "ok" && notices.notices.length > 0,
       [tt.state, hw.state, res.state, fees.state, notices.state].join(","));
-    await expectCode("Bulk account: another student's fees are NOT_FOUND", () => bulkClient.query(api.studentPortal.myFees, { studentId: aaravId }), "NOT_FOUND");
-    await expectCode("Bulk account: another student's profile is NOT_FOUND", () => bulkClient.query(api.academics.getStudentProfile, { studentId: aaravId }), "NOT_FOUND");
-    const ownProfile = await bulkClient.query(api.academics.getStudentProfile, { studentId: bulkImported.studentId });
+    await expectCode("Bulk account: another student's fees are NOT_FOUND", () => bulkClient.query(api.fees.myFees, { studentId: aaravId }), "NOT_FOUND");
+    await expectCode("Bulk account: another student's profile is NOT_FOUND", () => bulkClient.query(api.students.getStudentProfile, { studentId: aaravId }), "NOT_FOUND");
+    const ownProfile = await bulkClient.query(api.students.getStudentProfile, { studentId: bulkImported.studentId });
     check("academics:getStudentProfile is deployed and returns the student's own explicit-field profile",
       ownProfile?.access === "own" && ownProfile.student.studentId === bulkImported.studentId && !("schoolId" in ownProfile.student) && !("_creationTime" in ownProfile.student));
   }
   // Demo student: real Convex records for every module (seeded data).
   {
-    const [res, fees] = await Promise.all([aarav.query(api.studentPortal.myResults, {}), aarav.query(api.studentPortal.myFees, {})]);
+    const [res, fees] = await Promise.all([aarav.query(api.exams.myResults, {}), aarav.query(api.fees.myFees, {})]);
     check("Demo student: published results and fee ledger come from the deployment", res.state === "ok" && res.results.length > 0 && fees.state === "ok" && fees.obligations.length > 0);
-    const adminView = await admin.query(api.academics.getStudentProfile, { studentId: aaravId });
-    const teacherView = await rahul.query(api.academics.getStudentProfile, { studentId: aaravId });
+    const adminView = await admin.query(api.students.getStudentProfile, { studentId: aaravId });
+    const teacherView = await rahul.query(api.students.getStudentProfile, { studentId: aaravId });
     check("Profile tiers: admin sees parent-contact phone + fees; assigned teacher sees neither",
       adminView?.access === "school" && !!adminView.parentContacts[0]?.phone && adminView.fees !== null &&
       teacherView?.access === "assigned" && teacherView.parentContacts.every((g) => g.phone === null) && teacherView.fees === null);
-    check("A malformed (demo) id is simply not found", (await admin.query(api.academics.getStudentProfile, { studentId: "stu_aarav" })) === null);
+    check("A malformed (demo) id is simply not found", (await admin.query(api.students.getStudentProfile, { studentId: "stu_aarav" })) === null);
   }
   check("After changing it: temp password stops working, the new one works, flag cleared",
     (await signInFails(newStudent.loginId!, temp)) !== null &&

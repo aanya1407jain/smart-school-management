@@ -12,6 +12,7 @@ import { UnauthorizedState } from "@/components/ui/states";
 import { LogoMark } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
 import { STORAGE_NAMESPACE } from "@/lib/constants/product";
+import { ChartGradients } from "@/components/charts/chart-card";
 import { Sidebar } from "./sidebar";
 import { MobileNav } from "./mobile-nav";
 import { Topbar } from "./topbar";
@@ -91,7 +92,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="ambient flex min-h-screen bg-bg">
+    <div className="ambient flex min-h-screen">
+      <ChartGradients />
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[70] focus:rounded-lg focus:bg-white focus:px-3 focus:py-2 focus:shadow-lift">
         Skip to content
       </a>

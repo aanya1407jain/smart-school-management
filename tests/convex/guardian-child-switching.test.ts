@@ -33,15 +33,15 @@ describe("legacy guardian sign-ins grant nothing", () => {
       ["session.viewer", () => g.query(api.users.viewer, {})],
       ["myProfile", () => g.query(api.studentPortal.myProfile, {})],
       ["myProfile(linked id)", () => g.query(api.studentPortal.myProfile, { studentId: A.studentA })],
-      ["myTimetable", () => g.query(api.studentPortal.myTimetable, { studentId: A.studentA })],
-      ["myHomework", () => g.query(api.studentPortal.myHomework, { studentId: A.studentA })],
-      ["myResults", () => g.query(api.studentPortal.myResults, { studentId: A.studentA })],
-      ["myFees", () => g.query(api.studentPortal.myFees, { studentId: A.studentA })],
+      ["myTimetable", () => g.query(api.timetable.myStudentTimetable, { studentId: A.studentA })],
+      ["myHomework", () => g.query(api.homework.myHomework, { studentId: A.studentA })],
+      ["myResults", () => g.query(api.exams.myResults, { studentId: A.studentA })],
+      ["myFees", () => g.query(api.fees.myFees, { studentId: A.studentA })],
       ["myNotices", () => g.query(api.studentPortal.myNotices, { studentId: A.studentA, today: TODAY })],
       ["attendance.studentHistory", () => g.query(api.attendance.studentHistory, { studentId: A.studentA })],
       ["fees.studentLedger", () => g.query(api.fees.studentLedger, { studentId: A.studentA })],
-      ["academics.getStudentProfile", () => g.query(api.academics.getStudentProfile, { studentId: A.studentA })],
-      ["academics.enrollmentHistory", () => g.query(api.academics.enrollmentHistory, { studentId: A.studentA })],
+      ["academics.getStudentProfile", () => g.query(api.students.getStudentProfile, { studentId: A.studentA })],
+      ["academics.enrollmentHistory", () => g.query(api.students.enrollmentHistory, { studentId: A.studentA })],
       ["files.listForOwner", () => g.query(api.files.listForOwner, { ownerType: "student", ownerId: A.studentA })],
       ["notifications.list", () => g.query(api.notifications.list, {})],
       ["other school student", () => g.query(api.studentPortal.myProfile, { studentId: B.studentA })],
@@ -88,12 +88,12 @@ describe("legacy guardian sign-ins grant nothing", () => {
     // A student login without a student record (as a guardian-style login would look without its
     // guardian link) reads no student's data, its "own" or anyone else's.
     const unlinked = await as(t, await mk({ role: "student" }));
-    expect(await unlinked.query(api.studentPortal.myFees, {})).toEqual({ state: "no_student_record" });
+    expect(await unlinked.query(api.fees.myFees, {})).toEqual({ state: "no_student_record" });
     for (const call of [
       () => unlinked.query(api.studentPortal.myProfile, { studentId: A.studentA }),
       () => unlinked.query(api.attendance.studentHistory, { studentId: A.studentA }),
       () => unlinked.query(api.fees.studentLedger, { studentId: A.studentA }),
-      () => unlinked.query(api.academics.getStudentProfile, { studentId: A.studentA }),
+      () => unlinked.query(api.students.getStudentProfile, { studentId: A.studentA }),
     ]) expect(["NOT_FOUND", "FORBIDDEN"]).toContain(await errorCode(call()));
     // A fourth role value cannot even be stored: the schema only accepts admin / teacher / student.
     for (const role of ["parent", "guardian"]) {
@@ -163,7 +163,7 @@ describe("migrations:removeGuardianAccounts", () => {
     expect(notes.some(([u]) => u === A.users.legacyGuardian)).toBe(false);
     // Students, enrollments and their parent contacts are untouched.
     expect(await t.run((ctx) => ctx.db.get(A.studentA))).not.toBeNull();
-    expect((await (await as(t, A.users.admin)).query(api.academics.getStudentProfile, { studentId: A.studentA }))?.parentContacts.map((c) => c.name)).toEqual(["Parent Contact"]);
+    expect((await (await as(t, A.users.admin)).query(api.students.getStudentProfile, { studentId: A.studentA }))?.parentContacts.map((c) => c.name)).toEqual(["Parent Contact"]);
     // The teacher still signs in as a teacher.
     const s = await (await as(t, A.users.classTeacher)).query(api.users.session, {});
     expect(s.status === "signedIn" && s.viewer.role).toBe("teacher");

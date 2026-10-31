@@ -1,7 +1,7 @@
 "use client";
 import type { ReactNode } from "react";
 import { GlassCard, CardHeader } from "@/components/ui/card";
-import { CHART_AXIS } from "@/lib/constants/theme";
+import { CHART_AXIS, CHART_FILL, CHART_GRID, CHART_GRID_DASH } from "@/lib/constants/theme";
 
 export function ChartCard({ title, description, action, children, className, height = 260 }: { title: string; description?: ReactNode; action?: ReactNode; children: ReactNode; className?: string; height?: number }) {
   return (
@@ -18,18 +18,62 @@ export const axisProps = {
   tickLine: false,
 } as const;
 
-/** Glass tooltip used by every chart. */
-export function ChartTooltip({ active, payload, label, format }: { active?: boolean; payload?: { name: string; value: number; color: string }[]; label?: string; format?: (v: number, name: string) => string }) {
-  if (!active || !payload?.length) return null;
+/** Muted dashed horizontal grid shared by every chart. */
+export const gridProps = { vertical: false, stroke: CHART_GRID, strokeDasharray: CHART_GRID_DASH } as const;
+
+/** Soft column highlight behind the hovered bar group. */
+export const barCursor = { fill: "rgb(13 148 136 / 0.06)", radius: 8 } as const;
+
+/** Rounded gradient bars that glow on hover. `role` picks the gradient from CHART_FILL. */
+export function barProps(role: keyof typeof CHART_FILL, { horizontal = false, top = true }: { horizontal?: boolean; top?: boolean } = {}) {
+  const r = 6;
+  return {
+    fill: CHART_FILL[role].fill,
+    radius: (top ? (horizontal ? [0, r, r, 0] : [r, r, 0, 0]) : [0, 0, 0, 0]) as [number, number, number, number],
+    activeBar: { style: { filter: `drop-shadow(0 4px 10px ${CHART_FILL[role].solid}66)` } },
+    animationDuration: 600,
+  };
+}
+
+/**
+ * The SVG gradients behind CHART_FILL. Mounted once by the app shell; every
+ * chart on the page references them with url(#chart-g-…).
+ */
+export function ChartGradients() {
   return (
-    <div className="glass-strong rounded-xl px-3 py-2 text-[12.5px]">
+    <svg width="0" height="0" aria-hidden focusable="false" style={{ position: "absolute" }}>
+      <defs>
+        {Object.entries(CHART_FILL).map(([k, g]) => (
+          <linearGradient key={k} id={`chart-g-${k}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor={g.from} />
+            <stop offset="1" stopColor={g.to} />
+          </linearGradient>
+        ))}
+      </defs>
+    </svg>
+  );
+}
+
+/** A gradient fill can't paint an HTML swatch; draw the role's gradient as CSS instead. */
+function swatch(color: string) {
+  const role = Object.values(CHART_FILL).find((g) => g.fill === color);
+  return role ? `linear-gradient(160deg, ${role.from}, ${role.to})` : color;
+}
+
+/** Floating glass tooltip used by every chart. `extra` adds lines under the series (e.g. counts). */
+export function ChartTooltip({ active, payload, label, format, extra }: { active?: boolean; payload?: { name: string; value: number; color: string; payload?: Record<string, unknown> }[]; label?: string; format?: (v: number, name: string) => string; extra?: (row: Record<string, unknown>) => ReactNode }) {
+  if (!active || !payload?.length) return null;
+  const row = payload[0]?.payload;
+  return (
+    <div className="glass-strong spatial animate-scale-in rounded-xl px-3 py-2 text-[12.5px]">
       {label && <p className="mb-1 font-semibold text-ink">{label}</p>}
       {payload.map((p) => (
         <p key={p.name} className="flex items-center gap-2 text-ink-soft">
-          <span className="h-2 w-2 rounded-full" style={{ background: p.color }} aria-hidden />
-          {p.name}: <span className="font-semibold text-ink">{format ? format(p.value, p.name) : p.value}</span>
+          <span className="h-2.5 w-2.5 rounded-full ring-2 ring-white" style={{ background: swatch(p.color) }} aria-hidden />
+          {p.name}: <span className="figures font-semibold text-ink">{format ? format(p.value, p.name) : p.value}</span>
         </p>
       ))}
+      {extra && row && <div className="figures mt-1 border-t border-line/60 pt-1 text-[11.5px] text-ink-muted">{extra(row)}</div>}
     </div>
   );
 }

@@ -17,14 +17,15 @@
  */
 import { v, type Infer } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import type { QueryCtx } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { schoolMutation, schoolQuery } from "./core/functions";
 import type { Actor } from "./core/actor";
 import { getInSchool, hasPermission, requireAnyPermission, requireStudentAccess } from "./core/authorization";
 import { conflict, forbidden, invalid, invalidRelationship, notFound } from "./core/errors";
 import { assertNonEmpty, vFileKind, vFileOwnerType } from "./core/validators";
 import { writeAudit } from "./model/audit";
-import { canReadHomework } from "./model/homeworkAccess";
+import { maybeProvider } from "./core/registry";
+import type { FileOwnerProvider } from "./contracts/providers";
 import { requireModule } from "./model/modules";
 import type { ModuleKey } from "./core/modules";
 
@@ -67,36 +68,40 @@ async function requireKindModule(ctx: Ctx, kind: FileKind) {
   if (module) await requireModule(ctx, ctx.actor.schoolId, module);
 }
 
-const OWNER_TABLE = { student: "students", teacher: "teachers", receipt: "receipts", result: "results", homework: "homework", submission: "homeworkSubmissions" } as const;
+const OWNER_TABLE = { student: "students", teacher: "teachers" } as const;
+
+/** Owner types attached to a module's records are authorised by that module (null when it is not shipped). */
+const MODULE_FILE_OWNERS = ["fees.receiptFiles", "examinations.resultFiles", "academics.homeworkFiles"] as const;
+function moduleOwner(ownerType: OwnerType): FileOwnerProvider | null {
+  for (const id of MODULE_FILE_OWNERS) {
+    const p = maybeProvider(id);
+    if (p && p.ownerTypes.includes(ownerType)) return p;
+  }
+  return null;
+}
 
 /** Most attachments per homework / submission. */
 export const MAX_ATTACHMENTS = 5;
 
 /**
- * Record-level write rule for homework and submission attachments:
- *  - homework: only the teacher who set it, while it is open;
- *  - submission: only the student who submitted it, before it is reviewed.
+ * Record-level write rule for attachments that their record lists (homework,
+ * submissions): decided by the owning module (FileOwnerProvider.writableRecord).
  */
-async function requireRecordWrite(ctx: Ctx, ownerType: OwnerType, ownerId: string) {
-  if (ownerType === "homework") {
-    const hw = await getInSchool(ctx, "homework", ownerId as Id<"homework">, "Owner");
-    if (!ctx.actor.teacherId || hw.teacherId !== ctx.actor.teacherId) throw forbidden("Only the teacher who set this homework can attach files to it.");
-    if (hw.status !== "active") throw conflict("This homework is closed.");
-    return hw;
-  }
-  if (ownerType === "submission") {
-    const sub = await getInSchool(ctx, "homeworkSubmissions", ownerId as Id<"homeworkSubmissions">, "Owner");
-    if (!ctx.actor.studentId || sub.studentId !== ctx.actor.studentId) throw forbidden("Only the student who submitted this work can attach files to it.");
-    if (sub.status === "reviewed") throw conflict("This submission has already been reviewed.");
-    return sub;
-  }
-  return null;
+async function requireRecordWrite(ctx: Ctx & MutationCtx, ownerType: OwnerType, ownerId: string) {
+  const owner = moduleOwner(ownerType);
+  return owner ? await owner.writableRecord(ctx, ownerType, ownerId) : null;
 }
 
 /** Resolve and tenant-check the owner record. Returns the owner doc (or the school id). */
 async function loadOwner(ctx: Ctx, ownerType: OwnerType, ownerId: string) {
   if (ownerType === "school") {
     if (ownerId !== ctx.actor.schoolId) throw notFound("Owner");
+    return { ownerType, doc: null };
+  }
+  if (ownerType !== "student" && ownerType !== "teacher") {
+    const owner = moduleOwner(ownerType);
+    if (!owner) throw notFound("Owner");
+    await owner.loadOwner(ctx, ownerType, ownerId);
     return { ownerType, doc: null };
   }
   const table = OWNER_TABLE[ownerType];
@@ -124,26 +129,11 @@ async function requireFileRead(ctx: Ctx, file: Doc<"files">) {
     case "teacher":
       if (hasPermission(ctx.actor, "staff:manage") || ctx.actor.teacherId === file.ownerId) return;
       throw notFound("File");
-    case "receipt": {
-      const receipt = await getInSchool(ctx, "receipts", file.ownerId as Id<"receipts">, "File");
-      await requireStudentAccess(ctx, receipt.studentId, { all: "fees:manage", own: "fees:read:own" });
-      return;
-    }
-    case "result": {
-      const result = await getInSchool(ctx, "results", file.ownerId as Id<"results">, "File");
-      await requireStudentAccess(ctx, result.studentId, { all: "exams:manage", assigned: "exams:read:assigned", own: "results:read:own" });
-      return;
-    }
-    case "homework": {
-      const hw = await getInSchool(ctx, "homework", file.ownerId as Id<"homework">, "File");
-      if (await canReadHomework(ctx, hw)) return;
-      throw notFound("File");
-    }
-    case "submission": {
-      const sub = await getInSchool(ctx, "homeworkSubmissions", file.ownerId as Id<"homeworkSubmissions">, "File");
-      const hw = await getInSchool(ctx, "homework", sub.homeworkId, "File");
-      if (hasPermission(ctx.actor, "homework:read:all") || (ctx.actor.teacherId && hw.teacherId === ctx.actor.teacherId)) return;
-      await requireStudentAccess(ctx, sub.studentId, { own: "homework:read:own" });
+    default: {
+      // Receipts, report cards, homework and submissions: the owning module decides.
+      const owner = moduleOwner(file.ownerType);
+      if (!owner) throw notFound("File");
+      await owner.requireRead(ctx, file.ownerType, file.ownerId);
       return;
     }
   }
@@ -168,7 +158,7 @@ export const register = schoolMutation({
     if (!teacherSelfPhoto && !hasPermission(ctx.actor, permission)) throw forbidden();
     await loadOwner(ctx, a.ownerType, a.ownerId);
     const record = await requireRecordWrite(ctx, a.ownerType, a.ownerId);
-    if (record && record.attachmentFileIds.length >= MAX_ATTACHMENTS) throw conflict(`At most ${MAX_ATTACHMENTS} files can be attached.`);
+    if (record && record.attachments >= MAX_ATTACHMENTS) throw conflict(`At most ${MAX_ATTACHMENTS} files can be attached.`);
 
     const meta = await ctx.db.system.get(a.storageId);
     if (!meta) throw notFound("Uploaded file");
@@ -183,7 +173,7 @@ export const register = schoolMutation({
       fileName: assertNonEmpty(a.fileName, "fileName", 200), contentType, size: meta.size, uploadedByUserId: ctx.actor.userId,
     });
     // Homework / submission attachments are linked to their record in the same transaction.
-    if (record) await ctx.db.patch(record._id, { attachmentFileIds: [...record.attachmentFileIds, id] });
+    if (record) await record.attach(id);
     await writeAudit(ctx, { schoolId: ctx.actor.schoolId, actor: ctx.actor, action: "file.uploaded", entity: { table: "files", id }, summary: `Uploaded ${a.kind.replace("_", " ")} "${a.fileName}"`, metadata: { ownerType: a.ownerType, ownerId: a.ownerId } });
     return id;
   },
@@ -224,7 +214,7 @@ export const remove = schoolMutation({
     const record = await requireRecordWrite(ctx, file.ownerType, file.ownerId);
     await ctx.storage.delete(file.storageId);
     await ctx.db.delete(file._id);
-    if (record) await ctx.db.patch(record._id, { attachmentFileIds: record.attachmentFileIds.filter((f) => f !== file._id) });
+    if (record) await record.detach(file._id);
     await writeAudit(ctx, { schoolId: ctx.actor.schoolId, actor: ctx.actor, action: "file.deleted", entity: { table: "files", id: file._id }, summary: `Deleted "${file.fileName}"`, metadata: { kind: file.kind, ownerType: file.ownerType, ownerId: file.ownerId } });
     return { ok: true };
   },

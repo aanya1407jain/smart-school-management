@@ -1,5 +1,5 @@
 import { CalendarDays, Megaphone, PartyPopper, Sun } from "lucide-react";
-import type { Notice } from "@/types/domain";
+import type { Notice } from "@/types/core";
 import { StatusBadge, Badge } from "@/components/ui/badge";
 import { formatDate, formatShortDate } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils/cn";

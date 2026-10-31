@@ -2,7 +2,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Briefcase, CalendarDays, GraduationCap, Mail, MapPin, Pencil, Phone, Plus } from "lucide-react";
-import type { LeaveType } from "@/types/domain";
+import type { LeaveType } from "@/types/attendance";
 import { services } from "@/lib/services";
 import type { TeacherProfile } from "@/lib/services/teachers.service";
 import { useQuery } from "@/lib/hooks/use-query";
@@ -14,7 +14,7 @@ import {
 import { FormError } from "@/features/shared/form-error";
 import { WeekGrid } from "@/features/timetable/week-grid";
 import { formatDate, formatShortDate, todayISO } from "@/lib/utils/dates";
-import { LEAVE_TYPE_LABELS } from "@/lib/constants/labels";
+import { LEAVE_TYPE_LABELS } from "@/features/attendance/labels";
 import { cn } from "@/lib/utils/cn";
 
 /** Used by admins (/admin/teachers/[id]) and by teachers for their own profile. */

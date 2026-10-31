@@ -27,11 +27,9 @@ import { useConvex, useConvexAuth, useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import type { Viewer } from "@convex/users";
-import { services, type CurrentUser } from "@/lib/services";
+import type { UserAccount as CurrentUser } from "@/types/core";
+import { demoRuntime, type DemoRuntime } from "@/lib/demo/runtime";
 import { SIGN_IN_FAILED, signInErrorMessage } from "./login-form";
-import type { BindResult } from "@/lib/services/auth.service";
-import { purgeLegacySessionStorage } from "@/lib/services/session-store";
-import { subscribeDb } from "@/lib/store/db";
 import { permissionsFor, type Permission } from "@/lib/permissions";
 import { isConvexConfigured } from "@/lib/convex/config";
 import { useMembership } from "@/lib/convex/membership";
@@ -101,7 +99,7 @@ const UNAVAILABLE_PREVIEW =
 
 // ------------------------------------------------------------------ no backend configured
 function UnconfiguredSessionProvider({ children }: { children: ReactNode }) {
-  useEffect(() => { purgeLegacySessionStorage(); services.auth.clearIdentity(); }, []);
+  useEffect(() => { demoRuntime()?.purgeLegacyStorage(); demoRuntime()?.auth.clearIdentity(); }, []);
   const value = useMemo<SessionContextValue>(() => ({
     status: "unauthenticated", user: null, viewer: null, notice: null, mustChangePassword: false, activeStudentId: null, dataSource: null,
     can: () => false, modules: [], modulesStatus: null, hasModule: () => false,
@@ -121,20 +119,22 @@ function ConvexSessionProvider({ children }: { children: ReactNode }) {
   const convex = useConvex();
   const session = useQuery(api.users.session, isAuthenticated ? (activeMembershipId ? { membershipId: activeMembershipId } : {}) : "skip");
 
-  const [bound, setBound] = useState<{ viewer: Viewer; result: BindResult } | null>(null);
+  const [bound, setBound] = useState<{ viewer: Viewer; result: ReturnType<DemoRuntime["auth"]["bindIdentity"]> } | null>(null);
   const [tick, setTick] = useState(0);
   const [verifying, setVerifying] = useState(false);
   const pending = useRef<PendingLogin | null>(null);
 
-  useEffect(() => { purgeLegacySessionStorage(); }, []);
+  useEffect(() => { demoRuntime()?.purgeLegacyStorage(); }, []);
 
   // Bind (or clear) the server identity for the mock domain services.
   const viewer = isAuthenticated && session?.status === "signedIn" ? session.viewer : null;
   useEffect(() => {
     if (viewer) {
-      setBound({ viewer, result: services.auth.bindIdentity(viewer) });
+      // Builds without the demo layer: every account is a live (Convex) account.
+      const demo = demoRuntime();
+      setBound({ viewer, result: demo ? demo.auth.bindIdentity(viewer) : { ok: false } });
     } else if (!authLoading && (!isAuthenticated || session !== undefined)) {
-      services.auth.clearIdentity();
+      demoRuntime()?.auth.clearIdentity();
       setBound(null);
     }
   }, [viewer, authLoading, isAuthenticated, session]);
@@ -142,9 +142,7 @@ function ConvexSessionProvider({ children }: { children: ReactNode }) {
   // Domain changes (active student, demo data) refresh the snapshot.
   useEffect(() => {
     const bump = () => setTick((t) => t + 1);
-    const a = services.auth.subscribe(bump);
-    const b = subscribeDb(bump);
-    return () => { a(); b(); };
+    return demoRuntime()?.subscribe(bump) ?? (() => {});
   }, []);
 
   const liveUser = useMemo(() => (viewer ? liveWorkspaceUser(viewer) : null), [viewer]);
@@ -168,7 +166,7 @@ function ConvexSessionProvider({ children }: { children: ReactNode }) {
       }
       return { status: "unavailable" as Status, ...none, notice: UNAVAILABLE_PREVIEW, viewer: session.viewer };
     }
-    const snap = services.auth.getSessionSnapshot();
+    const snap = demoRuntime()?.auth.getSessionSnapshot() ?? { user: null, activeStudentId: null };
     if (!snap.user) return { status: "loading" as Status, ...none };
     // Module entitlements always come from the server session, for demo personas too
     // (parsed fail-closed: a session without a valid list grants no module).
@@ -219,7 +217,7 @@ function ConvexSessionProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     await signOut();
-    services.auth.clearIdentity();
+    demoRuntime()?.auth.clearIdentity();
     setBound(null);
   }, [signOut]);
 

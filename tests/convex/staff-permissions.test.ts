@@ -117,7 +117,7 @@ describe("memberships.setPermissions (server)", () => {
     await principal.mutation(api.memberships.setPermissions, { targetMembershipId: office.membershipId, grants: [{ module: "attendance", actions: ["view"] }, { module: "students", actions: ["view", "create", "edit", "approve"] }] });
     const clerk = await as(t, office.userId);
     expect(await errorCode(clerk.mutation(api.attendance.mark, { sectionId: A.sectionA, date: pastMonday(), entries: [{ studentId: A.studentA, status: "present" }] }))).toBe("FORBIDDEN");
-    expect(await errorCode(clerk.query(api.academics.sectionRoster, { sectionId: A.sectionA }))).toBe("NO_ERROR");
+    expect(await errorCode(clerk.query(api.students.sectionRoster, { sectionId: A.sectionA }))).toBe("NO_ERROR");
   });
 
   test("refused: own access, students, other schools, teachers/office as callers, invalid cells", async () => {
@@ -149,14 +149,14 @@ describe("memberships.setPermissions (server)", () => {
       return { sectionC, studentC };
     });
     const teacher = await as(t, A.users.classTeacher);
-    expect(await errorCode(teacher.query(api.academics.sectionRoster, { sectionId: sectionC }))).toBe("FORBIDDEN");
+    expect(await errorCode(teacher.query(api.students.sectionRoster, { sectionId: sectionC }))).toBe("FORBIDDEN");
 
     await principal.mutation(api.memberships.setPermissions, {
       targetMembershipId: A.memberships.classTeacher,
       grants: [{ module: "students", actions: ["view"] }, { module: "attendance", actions: ["view"] }],
       sectionIds: [sectionC],
     });
-    expect(await errorCode(teacher.query(api.academics.sectionRoster, { sectionId: sectionC }))).toBe("NO_ERROR");
+    expect(await errorCode(teacher.query(api.students.sectionRoster, { sectionId: sectionC }))).toBe("NO_ERROR");
     expect(await errorCode(teacher.query(api.attendance.studentHistory, { studentId: studentC }))).toBe("NO_ERROR");
     // Still not school-wide, and still cannot mark another section's register.
     expect(await errorCode(teacher.query(api.accounts.listPeople, { kind: "student", paginationOpts: { numItems: 5, cursor: null } }))).toBe("FORBIDDEN");
@@ -167,7 +167,7 @@ describe("memberships.setPermissions (server)", () => {
       grants: [{ module: "academics", actions: ["view", "create", "edit", "delete", "approve"] }],
       accessProfile: "Exam coordinator",
     });
-    expect(await errorCode(teacher.query(api.academics.sectionRoster, { sectionId: sectionC }))).toBe("FORBIDDEN"); // section grant removed
+    expect(await errorCode(teacher.query(api.students.sectionRoster, { sectionId: sectionC }))).toBe("FORBIDDEN"); // section grant removed
     const v = await teacher.query(api.users.viewer, {});
     expect(v.role).toBe("teacher");
     expect(v.permissions).toContain("exams:publish");

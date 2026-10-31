@@ -1,15 +1,21 @@
-import { forwardRef, useId, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes, cloneElement, isValidElement, type ReactElement } from "react";
-import { AlertCircle, ChevronDown } from "lucide-react";
+import { forwardRef, useId, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes, cloneElement, isValidElement, type ReactElement } from "react";
+import { AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
+import { DateInput } from "./date-input";
 
+/** Glass text controls: frosted fill, teal hover border, glowing focus ring. */
 const control =
-  "w-full rounded-xl border bg-white/85 px-3.5 text-sm text-ink placeholder:text-ink-muted/70 transition-colors " +
-  "focus:outline-none focus:border-teal focus:shadow-focus disabled:cursor-not-allowed disabled:bg-alabaster disabled:text-ink-muted";
+  "w-full rounded-xl border bg-white/80 px-3.5 text-sm text-ink placeholder:text-ink-muted/70 backdrop-blur-md " +
+  "shadow-[0_1px_2px_rgb(6_49_84_/_0.04)] transition-[border-color,box-shadow,background-color] duration-200 hover:border-teal/40 " +
+  "focus:outline-none focus:border-teal focus:bg-white focus:shadow-focus disabled:cursor-not-allowed disabled:bg-alabaster disabled:text-ink-muted";
 
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean }>(function Input(
   { className, invalid, ...props }, ref,
 ) {
-  return <input ref={ref} aria-invalid={invalid || undefined} className={cn(control, "h-10", invalid ? "border-plum/60" : "border-line", className)} {...props} />;
+  const cls = cn(control, "h-10", invalid ? "border-plum/60" : "border-line", className);
+  // Dates get the themed calendar flyout over the same native input (same value/onChange/ref).
+  if (props.type === "date") return <DateInput ref={ref} aria-invalid={invalid || undefined} className={cls} {...props} />;
+  return <input ref={ref} aria-invalid={invalid || undefined} className={cls} {...props} />;
 });
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement> & { invalid?: boolean }>(function Textarea(
@@ -18,18 +24,8 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<H
   return <textarea ref={ref} rows={rows} aria-invalid={invalid || undefined} className={cn(control, "py-2.5 leading-relaxed", invalid ? "border-plum/60" : "border-line", className)} {...props} />;
 });
 
-export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSelectElement> & { invalid?: boolean }>(function Select(
-  { className, invalid, children, ...props }, ref,
-) {
-  return (
-    <div className="relative">
-      <select ref={ref} aria-invalid={invalid || undefined} className={cn(control, "h-10 appearance-none pr-9", invalid ? "border-plum/60" : "border-line", className)} {...props}>
-        {children}
-      </select>
-      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" aria-hidden />
-    </div>
-  );
-});
+// The themed, animated select (custom glass flyout over a hidden native <select>; same API).
+export { Select } from "./select";
 
 export const Checkbox = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement> & { label: ReactNode; description?: ReactNode }>(function Checkbox(
   { label, description, className, id, ...props }, ref,

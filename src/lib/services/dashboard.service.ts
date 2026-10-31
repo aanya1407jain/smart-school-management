@@ -43,7 +43,7 @@ function trend(db: Database, days: number, sectionIds?: Set<ID>) {
       if (v === "present" || (lateCounts && v === "late")) byDate[a.date].ok += 1;
     }
   }
-  return Object.entries(byDate).sort(([a], [b]) => a.localeCompare(b)).slice(-days).map(([date, v]) => ({ date, percentage: v.total ? (v.ok / v.total) * 100 : 0 }));
+  return Object.entries(byDate).sort(([a], [b]) => a.localeCompare(b)).slice(-days).map(([date, v]) => ({ date, percentage: v.total ? (v.ok / v.total) * 100 : 0, present: v.ok, counted: v.total }));
 }
 
 /** Placeholder sports / special-recognition entries for the demo school (spread across its students). */
@@ -156,6 +156,52 @@ export const mockDashboardService = {
       const unmarkedToday = isSchoolDay(today) ? yearSections.filter((s) => !db.attendance.some((a) => a.sectionId === s.id && a.date === today)).length : 0;
       const pendingLeave = db.leaveRequests.filter((l) => l.status === "pending").length;
 
+      const registered = db.students.length;
+      const activeCount = db.students.filter((s) => s.status === "active").length;
+      const tcIssued = db.students.filter((s) => s.status === "transferred").length;
+      const alumni = db.students.filter((s) => s.status === "alumni").length;
+      const inactive = db.students.filter((s) => s.status === "inactive").length;
+
+      const admissionsByMonth: Record<string, number> = {};
+      for (const s of db.students) {
+        if (s.admissionDate) {
+          const m = s.admissionDate.slice(0, 7);
+          admissionsByMonth[m] = (admissionsByMonth[m] ?? 0) + 1;
+        }
+      }
+      const admissionsOverTime = Object.entries(admissionsByMonth)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .slice(-12)
+        .map(([month, count]) => ({ month, count }));
+
+      const classSectionTotals = db.classes
+        .filter((c) => yearClassIds.has(c.id))
+        .sort((a, b) => a.grade - b.grade)
+        .map((cls) => {
+          const clsSecs = yearSections.filter((s) => s.classId === cls.id);
+          const secStats = clsSecs.map((sec) => {
+            const studs = studentsInSection(db, sec.id);
+            return {
+              sectionId: sec.id,
+              name: sec.name,
+              studentCount: studs.length,
+              capacity: sec.capacity ?? 40,
+            };
+          });
+          return {
+            classId: cls.id,
+            className: cls.name,
+            level: cls.grade,
+            studentCount: secStats.reduce((sum, s) => sum + s.studentCount, 0),
+            capacity: secStats.reduce((sum, s) => sum + s.capacity, 0),
+            sections: secStats,
+          };
+        });
+
+      const performanceAverage = performance.length
+        ? Math.round((performance.reduce((sum, p) => sum + p.average, 0) / performance.length) * 10) / 10
+        : null;
+
       return {
         school: db.school,
         stats: {
@@ -166,6 +212,16 @@ export const mockDashboardService = {
           attendance: { date: attDate, isToday: attDate === today, percentage: att.percentage, absent: att.absent, marked: att.marked, totalSections: yearSections.length, delta: att.percentage !== null && prevAtt?.percentage != null ? att.percentage - prevAtt.percentage : null },
           fees: { outstanding, overdue, overdueStudents, collected, collectionRate: net ? (collected / net) * 100 : 0 },
         },
+        studentBreakdown: {
+          registered,
+          active: activeCount,
+          tcIssued,
+          alumni,
+          inactive,
+        },
+        admissionsOverTime,
+        classSectionTotals,
+        academicPerformanceAverage: performanceAverage,
         attendanceTrend: trend(db, 15),
         feeByClass,
         performance: { examName: lastPublished?.name ?? null, rows: performance },
@@ -300,7 +356,7 @@ export const mockDashboardService = {
         const pcts = roster.map((s) => attendanceStats(db, s.id).percentage).filter((p): p is number => p !== null);
         return {
           sectionId: sid, label: info.label, grade: info.cls?.grade ?? 0, room: info.section?.room ?? "", isClassTeacher: info.section?.classTeacherId === scope.teacherId,
-          subjects, students: roster.length, avgAttendance: pcts.length ? pcts.reduce((a, b) => a + b, 0) / pcts.length : null,
+          subjects, students: roster.length, studentNames: roster.slice(0, 4).map(fullName), avgAttendance: pcts.length ? pcts.reduce((a, b) => a + b, 0) / pcts.length : null,
           markedToday: !!session, activeHomework: db.homework.filter((h) => h.sectionId === sid && h.teacherId === scope.teacherId && h.status === "active").length,
         };
       }).sort((a, b) => Number(b.isClassTeacher) - Number(a.isClassTeacher) || a.grade - b.grade || a.label.localeCompare(b.label));

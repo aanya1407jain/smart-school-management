@@ -12,7 +12,7 @@ import { ArrowRight, KeyRound, LogOut } from "lucide-react";
 import { LogoMark } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
 import { useSession } from "@/features/auth/session-provider";
-import { PasswordCard } from "@/features/profile/profile-page";
+import { PasswordCard } from "@/features/profile/password-card";
 import { landingRouteFor } from "@/lib/permissions";
 
 export function AccountPage() {

@@ -1,5 +1,5 @@
 "use client";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 
@@ -72,11 +72,17 @@ export function DataTable<T>({
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
+            {rows.map((row, i) => (
               <tr
                 key={getRowId(row)}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
-                className={cn("group transition-colors", onRowClick && "cursor-pointer", "hover:bg-teal-soft/40")}
+                // Staggered entrance; soft striping; a teal wash slides in on hover.
+                style={{ "--stagger-i": i } as CSSProperties}
+                className={cn(
+                  "stagger group transition-colors duration-200 ease-out even:bg-alabaster/30",
+                  "hover:bg-gradient-to-r hover:from-teal-soft/60 hover:via-teal-soft/25 hover:to-transparent",
+                  onRowClick && "cursor-pointer",
+                )}
               >
                 {columns.map((c) => (
                   <td key={c.key} className={cn("border-b border-line/50 px-4 align-middle text-ink-soft", dense ? "py-2" : "py-3", c.align === "right" && "text-right", c.align === "center" && "text-center", c.className)}>
@@ -92,14 +98,14 @@ export function DataTable<T>({
 
       {/* Mobile cards */}
       <ul className="space-y-2.5 md:hidden">
-        {rows.map((row) => (
-          <li key={getRowId(row)}>
+        {rows.map((row, i) => (
+          <li key={getRowId(row)} className="stagger" style={{ "--stagger-i": i } as CSSProperties}>
             <div
               role={onRowClick ? "button" : undefined}
               tabIndex={onRowClick ? 0 : undefined}
               onClick={onRowClick ? () => onRowClick(row) : undefined}
               onKeyDown={onRowClick ? (e) => { if (e.key === "Enter") onRowClick(row); } : undefined}
-              className="rounded-2xl border border-line/70 bg-white p-4 shadow-soft"
+              className="rounded-2xl border border-white/60 bg-white/80 p-4 shadow-ambient backdrop-blur-md transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-teal/30 hover:shadow-ambient-lg"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">{primary.cell(row)}</div>

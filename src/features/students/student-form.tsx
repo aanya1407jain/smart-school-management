@@ -1,17 +1,17 @@
 "use client";
-
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { CheckCircle2, KeyRound, Upload, User, FileText } from "lucide-react";
+import { CheckCircle2, KeyRound } from "lucide-react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useSchoolMutation, useSchoolQuery } from "@/lib/convex/membership";
 import { getAppError } from "@/lib/convex/errors";
-import { services, ServiceError } from "@/lib/services";
 import { useQuery } from "@/lib/hooks/use-query";
+import { fieldErrorsOf } from "@/lib/utils/errors";
+import type { StudentEditInput } from "@/types/students";
 import { useSchoolProfile } from "@/lib/hooks/use-school-profile";
 import { Button, Card, ConfirmDialog, FormField, FormSection, Input, LoadingState, Modal, PageHeader, Select, ErrorState, useToast, LinkButton } from "@/components/ui";
 import { FormError } from "@/features/shared/form-error";
@@ -19,7 +19,6 @@ import { useAcademicOptions } from "@/features/shared/use-academic-options";
 import { todayISO } from "@/lib/utils/dates";
 
 const phone = z.string().trim().regex(/^[+\d\s-]{8,}$/, "Enter a valid phone number");
-
 const schema = z.object({
   firstName: z.string().trim().min(1, "First name is required"),
   lastName: z.string().trim().min(1, "Last name is required"),
@@ -34,17 +33,7 @@ const schema = z.object({
   sectionId: z.string().min(1, "Select a section"),
   scholarNo: z.string().trim().max(30, "At most 30 characters"),
   status: z.enum(["active", "inactive", "transferred", "alumni"]),
-  
-  // Previous School & Incoming TC Tracking
-  isTransferStudent: z.boolean(),
-  previousSchoolName: z.string().optional(),
-  previousBoard: z.string().optional(),
-  lastClassPassed: z.string().optional(),
-  tcNumber: z.string().optional(),
-  tcIssueDate: z.string().optional(),
-  leavingReason: z.string().optional(),
-
-  // Parent contact
+  // Parent contact: contact details only (no account is created for this person).
   parentContact: z.object({
     name: z.string().trim().min(2, "Parent name is required"),
     relation: z.enum(["Mother", "Father", "Grandparent", "Other"]),
@@ -54,68 +43,50 @@ const schema = z.object({
   }),
   assignFees: z.boolean(),
 });
-
 type Values = z.infer<typeof schema>;
 
 const EMPTY: Values = {
   firstName: "", lastName: "", gender: "female", dateOfBirth: "", bloodGroup: "O+", email: "", phone: "", address: "",
   admissionDate: todayISO(), classId: "", sectionId: "", scholarNo: "", status: "active",
-  isTransferStudent: false,
-  previousSchoolName: "",
-  previousBoard: "",
-  lastClassPassed: "",
-  tcNumber: "",
-  tcIssueDate: "",
-  leavingReason: "",
   parentContact: { name: "", relation: "Mother", phone: "", email: "", occupation: "" }, assignFees: true,
 };
 
-export function StudentForm({ studentId }: { studentId?: string }) {
+/**
+ * Admit a student (live, Convex). Editing an existing record is the internal
+ * demo editor only: the demo slot "students.edit" passes `demoEdit` (the demo
+ * dataset's load/save); live records are edited in live-students.tsx.
+ */
+export type DemoStudentEdit = { load(): Promise<StudentEditInput>; save(input: StudentEditInput): Promise<unknown> };
+export function StudentForm({ studentId, demoEdit }: { studentId?: string; demoEdit?: DemoStudentEdit }) {
   const emailDomain = useSchoolProfile()?.emailDomain ?? "school.edu";
   const router = useRouter();
   const { toast } = useToast();
+  // Editing still works on the demo dataset (services.students); a NEW student is admitted in Convex,
+  // so its class/section choices come from the server's real records — never demo ids.
   const editing = !!studentId;
   const opts = useAcademicOptions();
   const liveClasses = useSchoolQuery(api.academics.listClasses, editing ? "skip" : {});
   const liveSections = useSchoolQuery(api.academics.listSections, editing ? "skip" : {});
-  const editable = useQuery(() => services.students.getEditable(studentId!), [studentId], { enabled: !!studentId });
+  const editable = useQuery(() => demoEdit!.load(), [studentId], { enabled: !!studentId && !!demoEdit });
   const [serverError, setServerError] = useState<Error | null>(null);
+  // A possible duplicate (same name + date of birth) the office must confirm is a different child.
   const [duplicate, setDuplicate] = useState<{ message: string; values: Values } | null>(null);
   const [created, setCreated] = useState<{ studentId: Id<"students">; admissionNo: string; scholarNo: string | null; section: string; rollNo: number | null; classTeacher: string | null; warnings: string[] } | null>(null);
 
-  // Photo preview state
-  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const createStudentWithEnrollment = useSchoolMutation(api.academics.createStudentWithEnrollment);
+  const createStudentWithEnrollment = useSchoolMutation(api.students.createStudentWithEnrollment);
 
   const { register, handleSubmit, watch, reset, setValue, setError, formState: { errors, isSubmitting } } = useForm<Values>({
     resolver: zodResolver(schema),
     defaultValues: EMPTY,
   });
 
-  const firstName = watch("firstName");
-  const isTransferStudent = watch("isTransferStudent");
-
   useEffect(() => {
     if (editable.data && opts.data) {
       const sec = opts.data.sections.find((s) => s.id === editable.data!.sectionId);
       const { guardian: contact, ...rest } = editable.data;
+      // The demo dataset may still hold a relation outside the current list; map it to "Other".
       const relation = (["Mother", "Father", "Grandparent"] as const).find((r) => r === contact.relation) ?? "Other";
-      reset({ 
-        ...rest, 
-        email: editable.data.email, 
-        classId: sec?.classId ?? "", 
-        assignFees: false, 
-        isTransferStudent: false,
-        previousSchoolName: "",
-        previousBoard: "",
-        lastClassPassed: "",
-        tcNumber: "",
-        tcIssueDate: "",
-        leavingReason: "",
-        parentContact: { ...contact, relation } 
-      });
+      reset({ ...rest, email: editable.data.email, classId: sec?.classId ?? "", assignFees: false, parentContact: { ...contact, relation } });
     }
   }, [editable.data, opts.data, reset]);
 
@@ -127,26 +98,16 @@ export function StudentForm({ studentId }: { studentId?: string }) {
     ? (opts.data?.sections ?? []).filter((s) => s.classId === classId).map((s) => ({ id: s.id, name: s.name, detail: s.room }))
     : (liveSections ?? []).filter((s) => s.classId === classId).map((s) => ({ id: s._id as string, name: s.name, detail: s.classTeacherName ? `Class teacher: ${s.classTeacherName}` : "No class teacher yet" }));
 
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 2 * 1024 * 1024) {
-        toast({ title: "Image too large", description: "Profile photo must be under 2MB." });
-        return;
-      }
-      setPhotoPreview(URL.createObjectURL(file));
-    }
-  };
-
   const onSubmit = async (v: Values, confirmNotDuplicate = false) => {
     setServerError(null);
     try {
       if (studentId) {
-        const { parentContact, isTransferStudent: _t, ...rest } = v;
-        await services.students.update(studentId, { ...rest, guardian: { ...parentContact } });
+        const { parentContact, ...rest } = v;
+        await demoEdit!.save({ ...rest, guardian: { ...parentContact } });
         toast({ title: "Student updated", description: `${v.firstName} ${v.lastName}'s details were saved.` });
         router.push(`/admin/students/${studentId}`);
       } else {
+        // The ids come from the server's own lists; the server re-validates class ↔ section ↔ year.
         const cls = (liveClasses ?? []).find((c) => c._id === v.classId);
         const section = (liveSections ?? []).find((s) => s._id === v.sectionId && s.classId === v.classId);
         if (!cls || !section) {
@@ -185,7 +146,7 @@ export function StudentForm({ studentId }: { studentId?: string }) {
         return;
       }
       setServerError(app ? new Error(app.message) : e instanceof Error ? e : new Error(String(e)));
-      const fieldErrors = app?.fields ?? (e instanceof ServiceError ? e.fieldErrors : undefined);
+      const fieldErrors = app?.fields ?? fieldErrorsOf(e);
       if (fieldErrors) {
         Object.entries(fieldErrors).forEach(([k, msg]) => setError(k as keyof Values, { message: msg }));
       }
@@ -203,53 +164,6 @@ export function StudentForm({ studentId }: { studentId?: string }) {
       />
       <form onSubmit={handleSubmit((v) => onSubmit(v))} noValidate>
         <Card className="space-y-7 p-5 sm:p-7">
-          
-          {/* Profile Photo Upload Header Section */}
-          <div className="flex flex-col sm:flex-row items-center gap-5 p-4 rounded-2xl bg-surface border border-line">
-            <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-full border-2 border-line bg-subtle flex items-center justify-center">
-              {photoPreview ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={photoPreview} alt="Student preview" className="h-full w-full object-cover" />
-              ) : firstName ? (
-                <span className="text-2xl font-bold text-sapphire">{firstName[0]?.toUpperCase()}</span>
-              ) : (
-                <User className="h-9 w-9 text-ink-muted opacity-60" />
-              )}
-            </div>
-            <div className="flex-1 text-center sm:text-left">
-              <h4 className="text-sm font-semibold text-ink">Student Profile Photo</h4>
-              <p className="text-xs text-ink-soft mt-0.5">Used for Identity Cards, Transfer Certificates, and attendance rosters.</p>
-              <div className="mt-2.5 flex items-center justify-center sm:justify-start gap-2">
-                <input
-                  type="file"
-                  accept="image/png, image/jpeg, image/webp"
-                  className="hidden"
-                  ref={fileInputRef}
-                  onChange={handlePhotoUpload}
-                />
-                <Button 
-                  type="button" 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <Upload className="h-3.5 w-3.5 mr-1.5" />
-                  {photoPreview ? "Change photo" : "Upload photo"}
-                </Button>
-                {photoPreview && (
-                  <Button 
-                    type="button" 
-                    variant="ghost" 
-                    size="sm" 
-                    onClick={() => setPhotoPreview(null)}
-                  >
-                    Remove
-                  </Button>
-                )}
-              </div>
-            </div>
-          </div>
-
           <FormSection title="Personal details" description="As recorded on the birth certificate.">
             <FormField label="First name" required error={errors.firstName?.message}><Input {...register("firstName")} placeholder="e.g. Ishita" /></FormField>
             <FormField label="Last name" required error={errors.lastName?.message}><Input {...register("lastName")} placeholder="e.g. Menon" /></FormField>
@@ -282,60 +196,6 @@ export function StudentForm({ studentId }: { studentId?: string }) {
             {editing && <FormField label="Status"><Select {...register("status")}><option value="active">Active</option><option value="inactive">Inactive</option><option value="transferred">Transferred</option><option value="alumni">Alumni</option></Select></FormField>}
           </FormSection>
 
-          {/* Previous School & Incoming TC Section */}
-          <div className="pt-2 border-t border-line/70">
-            <div className="flex items-center gap-2 mb-3">
-              <input
-                type="checkbox"
-                id="isTransferStudent"
-                {...register("isTransferStudent")}
-                className="h-4 w-4 rounded border-line text-sapphire focus:ring-sapphire cursor-pointer"
-              />
-              <label htmlFor="isTransferStudent" className="text-sm font-semibold text-ink cursor-pointer select-none">
-                Transfer student (admitted from another school)
-              </label>
-            </div>
-
-            {isTransferStudent && (
-              <div className="p-5 rounded-2xl border border-line bg-surface/60 space-y-4">
-                <div className="flex items-center gap-2 text-ink pb-2 border-b border-line/60">
-                  <FileText className="h-4 w-4 text-sapphire" />
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-ink-muted">Previous School &amp; Transfer Certificate (TC)</h4>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <FormField label="Previous school name">
-                    <Input {...register("previousSchoolName")} placeholder="e.g. St. Mary's High School" />
-                  </FormField>
-
-                  <FormField label="Previous affiliation / board">
-                    <Input {...register("previousBoard")} placeholder="e.g. CBSE / ICSE / State Board" />
-                  </FormField>
-
-                  <FormField label="Last class passed">
-                    <Input {...register("lastClassPassed")} placeholder="e.g. Class 9th" />
-                  </FormField>
-
-                  <FormField label="TC number">
-                    <Input {...register("tcNumber")} placeholder="e.g. TC-2026-9041" />
-                  </FormField>
-
-                  <FormField label="TC issue date">
-                    <Input type="date" {...register("tcIssueDate")} />
-                  </FormField>
-
-                  <FormField label="Scanned TC document" hint="PDF or clear photo">
-                    <Input type="file" accept=".pdf,image/*" />
-                  </FormField>
-
-                  <FormField label="Reason for leaving previous school" className="sm:col-span-2">
-                    <Input {...register("leavingReason")} placeholder="e.g. Parent relocation, closer to residence" />
-                  </FormField>
-                </div>
-              </div>
-            )}
-          </div>
-
           <FormSection title="Parent contact" description="Contact details only — no sign-in is created for this person. Siblings can share the same contact (matched by phone).">
             <FormField label="Parent name" required error={errors.parentContact?.name?.message}><Input {...register("parentContact.name")} placeholder="e.g. Kavita Menon" /></FormField>
             <FormField label="Relation" required><Select {...register("parentContact.relation")}><option>Mother</option><option>Father</option><option>Grandparent</option><option>Other</option></Select></FormField>
@@ -343,6 +203,7 @@ export function StudentForm({ studentId }: { studentId?: string }) {
             <FormField label="Parent email" error={errors.parentContact?.email?.message}><Input type="email" {...register("parentContact.email")} placeholder="Optional" /></FormField>
             <FormField label="Occupation"><Input {...register("parentContact.occupation")} placeholder="Optional" /></FormField>
           </FormSection>
+
 
           <FormError error={serverError} />
           <div className="flex flex-col-reverse gap-2 border-t border-line/70 pt-5 sm:flex-row sm:justify-end">
@@ -375,7 +236,6 @@ export function StudentForm({ studentId }: { studentId?: string }) {
               href="/admin/students/new"
               onClick={() => {
                 setCreated(null);
-                setPhotoPreview(null);
                 reset(EMPTY);
               }}
               variant="outline"

@@ -21,12 +21,15 @@ import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { moduleQuery, moduleMutation } from "./core/functions";
 import {
-  enrollmentFor, getInSchool, hasPermission, isSubjectTeacherOf, linkedStudentIds, requirePermission, requireSectionRead, requireSubjectTeacher, teacherSectionIds,
+  enrollmentFor, getInSchool, hasPermission, linkedStudentIds, requirePermission, requireSectionRead, teacherSectionIds,
 } from "./core/authorization";
 import { conflict, forbidden, invalid, invalidRelationship, notFound } from "./core/errors";
 import { assertIsoDate, assertNonEmpty } from "./core/validators";
-import { fullName, subjectInCurriculum, teacherDisplayName } from "./model/academics";
+import { fullName, teacherDisplayName } from "./model/academics";
+import { isSubjectTeacherOf, requireSubjectTeacher, subjectInCurriculum } from "./model/academicsRecords";
 import { canReadHomework } from "./model/homeworkAccess";
+import { homeworkFor } from "./model/academicsRecords";
+import { activeSection, resolvePortalStudent, vPortalStudent } from "./model/portalStudent";
 import { todayIn } from "./model/calendar";
 import { writeAudit } from "./model/audit";
 import { notifyUsers, userIdsForSection, userIdsForStudent } from "./model/notifications";
@@ -249,5 +252,18 @@ export const get = academicsQuery({
       canEdit: !!ctx.actor.teacherId && hw.teacherId === ctx.actor.teacherId,
       canTeacherView: teacherScope.has(hw.sectionId) || (await isSubjectTeacherOf(ctx, ctx.actor.teacherId, hw.sectionId, hw.subjectId)),
     };
+  },
+});
+
+// ================================================================ student portal
+/** Homework set for the signed-in student's current section, with their own submission status (moved from studentPortal.ts). */
+export const myHomework = academicsQuery({
+  args: vPortalStudent,
+  handler: async (ctx, { studentId }) => {
+    const student = await resolvePortalStudent(ctx, studentId, "homework:read:own");
+    if (!student) return { state: "no_student_record" as const };
+    const { section } = await activeSection(ctx, student);
+    if (!section) return { state: "not_enrolled" as const };
+    return { state: "ok" as const, section: section.displayName, homework: await homeworkFor(ctx, student, section) };
   },
 });

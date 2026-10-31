@@ -1,5 +1,6 @@
-import type { UserAccount } from "@/types/domain";
+import type { UserAccount } from "@/types/core";
 import type { ModuleKey } from "@convex/core/modules";
+import { CORE, MODULE_MANIFESTS } from "@/modules/registry.generated";
 import { hasAnyPermission, hasPermission, homeRouteFor, type Permission } from "./permissions";
 
 /**
@@ -15,10 +16,7 @@ export function moduleAllowed(user: Pick<NavUser, "modules"> | null | undefined,
   return !module || !!user?.modules?.includes(module);
 }
 
-/**
- * Navigation is derived from permissions, never hard-coded per page.
- * Icons are referenced by name and resolved in the UI layer.
- */
+/** Icons are referenced by name and resolved in the UI layer. */
 export type NavIcon =
   | "dashboard" | "students" | "academics" | "teachers" | "attendance" | "fees" | "exams" | "timetable"
   | "homework" | "notices" | "notifications" | "reports" | "settings" | "classes" | "results" | "profile" | "accounts" | "audit" | "remarks";
@@ -85,7 +83,6 @@ const TEACHER_NAV: NavGroup[] = [
       { label: "My Classes", href: "/teacher/classes", icon: "classes", anyOf: ["students:read:assigned"], live: true },
       { label: "Attendance", href: "/teacher/attendance", icon: "attendance", anyOf: ["attendance:read:assigned"], module: "attendance", live: true },
       { label: "Homework", href: "/teacher/homework", icon: "homework", anyOf: ["homework:manage:assigned"], module: "academics", live: true },
-      { label: "Remarks & Incidents", href: "/teacher/remarks", icon: "remarks", anyOf: ["area:teacher"], live: true },
       { label: "Examinations", href: "/teacher/examinations", icon: "exams", anyOf: ["marks:enter:assigned"], module: "academics", live: true },
       { label: "Timetable", href: "/teacher/timetable", icon: "timetable", anyOf: ["timetable:read:own"], module: "academics", live: true },
     ],

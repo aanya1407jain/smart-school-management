@@ -51,16 +51,16 @@ function moduleCalls(t: T, A: School) {
     finance: [
       ["fees.listStructures (admin read)", async () => (await admin()).query(api.fees.listStructures, {})],
       ["fees.createStructure (admin write)", async () => (await admin()).mutation(api.fees.createStructure, { ...plan, name: `Plan ${Math.random()}`, classIds: [A.classId] })],
-      ["reports.feeSummary (admin report)", async () => (await admin()).query(api.reports.feeSummary, {})],
-      ["studentPortal.myFees (student read)", async () => (await st()).query(api.studentPortal.myFees, {})],
+      ["reports.feeSummary (admin report)", async () => (await admin()).query(api.feeReports.feeSummary, {})],
+      ["studentPortal.myFees (student read)", async () => (await st()).query(api.fees.myFees, {})],
     ],
     academics: [
       ["exams.list (admin read)", async () => (await admin()).query(api.exams.list, {})],
       ["exams.create (admin write)", async () => (await admin()).mutation(api.exams.create, { name: `Term ${Math.random()}`, classIds: [A.classId], startDate: "2026-09-01", endDate: "2026-09-10" })],
       ["timetable.listPeriods (admin read)", async () => (await admin()).query(api.timetable.listPeriods, {})],
       ["homework.listMine (teacher read)", async () => (await ct()).query(api.homework.listMine, {})],
-      ["studentPortal.myTimetable (student read)", async () => (await st()).query(api.studentPortal.myTimetable, {})],
-      ["studentPortal.myResults (student read)", async () => (await st()).query(api.studentPortal.myResults, {})],
+      ["studentPortal.myTimetable (student read)", async () => (await st()).query(api.timetable.myStudentTimetable, {})],
+      ["studentPortal.myResults (student read)", async () => (await st()).query(api.exams.myResults, {})],
     ],
     attendance: [
       ["attendance.getByDate (class teacher read)", async () => (await ct()).query(api.attendance.getByDate, { sectionId: A.sectionA, date, today: date })],
@@ -74,14 +74,14 @@ function moduleCalls(t: T, A: School) {
       ["notices.createDraft (admin write)", async () => (await admin()).mutation(api.notices.createDraft, { title: "Trip", body: "Details", type: "notice", priority: "normal", publishDate: "2026-04-01", audience: { kind: "all" } })],
       ["notices.feed (teacher read)", async () => (await ct()).query(api.notices.feed, {})],
       ["events.list (admin read)", async () => (await admin()).query(api.events.list, { from: "2026-04-01", to: "2026-05-01" })],
-      ["reports.studentStatistics (admin report)", async () => (await admin()).query(api.reports.studentStatistics, {})],
+      ["reports.studentStatistics (admin report)", async () => (await admin()).query(api.studentReports.studentStatistics, {})],
       ["studentPortal.myNotices (student read)", async () => (await st()).query(api.studentPortal.myNotices, { today: "2026-10-12" })],
     ],
     students: [
-      ["academics.studentCounts (admin read)", async () => (await admin()).query(api.academics.studentCounts, {})],
-      ["academics.createStudentWithEnrollment (admin write)", async () => (await admin()).mutation(api.academics.createStudentWithEnrollment, admit(A, `S${Math.floor(Math.random() * 1e6)}`))],
-      ["academics.enrollmentHistory (admin read)", async () => (await admin()).query(api.academics.enrollmentHistory, { studentId: A.studentA })],
-      ["academics.listUnenrolledStudents (admin read)", async () => (await admin()).query(api.academics.listUnenrolledStudents, { academicYearId: A.yearId })],
+      ["academics.studentCounts (admin read)", async () => (await admin()).query(api.students.studentCounts, {})],
+      ["academics.createStudentWithEnrollment (admin write)", async () => (await admin()).mutation(api.students.createStudentWithEnrollment, admit(A, `S${Math.floor(Math.random() * 1e6)}`))],
+      ["academics.enrollmentHistory (admin read)", async () => (await admin()).query(api.students.enrollmentHistory, { studentId: A.studentA })],
+      ["academics.listUnenrolledStudents (admin read)", async () => (await admin()).query(api.students.listUnenrolledStudents, { academicYearId: A.yearId })],
     ],
   } satisfies Record<ModuleKey, [string, () => Promise<unknown>][]>;
 }
@@ -193,11 +193,11 @@ describe("enforcement on the server", () => {
     const admin = await as(t, A.users.admin);
     expect(await errorCode(teacher.query(api.fees.listStructures, {}))).toBe("FORBIDDEN");
     expect(await errorCode(student.mutation(api.exams.create, { name: "X", classIds: [A.classId], startDate: "2026-09-01", endDate: "2026-09-10" }))).toBe("FORBIDDEN");
-    expect(await errorCode(student.query(api.studentPortal.myFees, { studentId: A.studentB }))).toBe("NOT_FOUND"); // not their record
+    expect(await errorCode(student.query(api.fees.myFees, { studentId: A.studentB }))).toBe("NOT_FOUND"); // not their record
     // Attendance stays class-teacher-only: the Principal cannot mark even with the module on.
     expect(await errorCode(admin.mutation(api.attendance.mark, { sectionId: A.sectionA, date: pastMonday(), entries: [{ studentId: A.studentA, status: "present" }] }))).toBe("FORBIDDEN");
     // Tenant isolation is unchanged.
-    expect(await errorCode(admin.query(api.academics.enrollmentHistory, { studentId: B.studentA }))).toBe("NOT_FOUND");
+    expect(await errorCode(admin.query(api.students.enrollmentHistory, { studentId: B.studentA }))).toBe("NOT_FOUND");
   });
 
   test("core functions keep working with every module off; mixed views leave the disabled parts out", async () => {
@@ -214,7 +214,7 @@ describe("enforcement on the server", () => {
     expect(dash.modules).toEqual([]);
     expect(dash.fees).toBeNull();
     expect(dash.overview).toMatchObject({ students: null, teachersOnLeave: null, attendance: null, attendanceTrend: [], upcomingExams: [], notices: [], tasks: { unmarkedToday: null, pendingLeave: null } });
-    const profile = await admin.query(api.academics.getStudentProfile, { studentId: A.studentA });
+    const profile = await admin.query(api.students.getStudentProfile, { studentId: A.studentA });
     expect(profile).toMatchObject({ modules: [], fees: null, attendance: [], results: [], homework: [] });
     expect(profile?.parentContacts.map((c) => c.name)).toEqual(["Parent Contact"]); // core data still there
     const tdash = await teacher.query(api.dashboards.teacherOverview, {});
@@ -344,7 +344,7 @@ describe("future modules and dependencies", () => {
     expect(await t.run((ctx) => ctx.db.query("schoolModules").collect())).toEqual(rowsBefore);
     // Turning off students together with its dependants is accepted (nothing is enabled in its place).
     expect(await setModules(t, "alpha", ["administration"])).toMatchObject({ enabled: ["administration"], disabled: ["students", "academics", "attendance", "finance"] });
-    expect(await errorCode((await as(t, A.users.admin)).query(api.academics.studentCounts, {}))).toBe("MODULE_DISABLED");
+    expect(await errorCode((await as(t, A.users.admin)).query(api.students.studentCounts, {}))).toBe("MODULE_DISABLED");
   });
 });
 
@@ -370,12 +370,12 @@ describe("data is preserved while a module is off", () => {
     await setModules(t, "alpha", without("finance"));
     expect(await errorCode(admin.query(api.fees.studentLedger, { studentId: A.studentA }))).toBe("MODULE_DISABLED");
     expect(await errorCode(admin.mutation(api.fees.recordPayment, { studentId: A.studentA, amountMinor: 100, method: "cash", paidOn: "2026-06-02", clientRequestId: "req-0000002" }))).toBe("MODULE_DISABLED");
-    expect(await errorCode(student.query(api.studentPortal.myFees, {}))).toBe("MODULE_DISABLED");
+    expect(await errorCode(student.query(api.fees.myFees, {}))).toBe("MODULE_DISABLED");
     expect(await snapshot()).toEqual(before); // nothing deleted or changed
 
     await setModules(t, "alpha", ALL);
     expect(await admin.query(api.fees.studentLedger, { studentId: A.studentA })).toEqual(ledgerBefore);
-    const mine = await student.query(api.studentPortal.myFees, {});
+    const mine = await student.query(api.fees.myFees, {});
     expect(mine.state === "ok" && mine.totals.paidMinor).toBe(15000);
     // Still no access for roles that never had it.
     expect(await errorCode((await as(t, A.users.classTeacher)).query(api.fees.studentLedger, { studentId: A.studentA }))).not.toBe("NO_ERROR");
@@ -390,19 +390,26 @@ describe("source inventory: every public function is classified", () => {
     "timetable.ts": { module: "academics" },
     "homework.ts": { module: "academics" },
     "attendance.ts": { module: "attendance" },
-    "staff.ts": { module: "attendance", core: ["listTeachers", "updateTeacher"] },
+    "staff.ts": { module: "attendance" },
     "notices.ts": { module: "administration" },
     "events.ts": { module: "administration" },
-    "reports.ts": { module: "administration", core: ["adminDashboard"] },
-    "academics.ts": { module: "students", only: ["listUnenrolledStudents", "enrollStudent", "endEnrollment", "createStudentWithEnrollment", "updateStudentProfile", "enrollmentHistory", "rollNumberHistory", "studentCounts"] },
+    // Module reports keep the administration wrapper and also require their own module (checked below).
+    "studentReports.ts": { module: "administration" },
+    "attendanceReports.ts": { module: "administration" },
+    "feeReports.ts": { module: "administration" },
+    "examReports.ts": { module: "administration" },
+    "students.ts": { module: "students", core: ["getStudentProfile", "sectionRoster"] },
+    // Subjects and curriculum were never gated by an entitlement: the Academics file keeps core wrappers.
+    "subjects.ts": { module: "academics", only: [] },
     "imports.ts": { module: "students", only: ["previewStudents", "commitStudentRows"] },
     "studentLifecycle.ts": { module: "students" },
     "admissionRegister.ts": { module: "students" },
   };
   // studentPortal.ts maps functions to several modules.
-  const PORTAL: Record<string, ModuleKey | "core"> = { myProfile: "core", myTimetable: "academics", myHomework: "academics", myResults: "academics", myFees: "finance", myNotices: "administration" };
+  // The module portal queries moved to their modules (timetable.myStudentTimetable, homework.myHomework, exams.myResults, fees.myFees).
+  const PORTAL: Record<string, ModuleKey | "core"> = { myProfile: "core", myCertificates: "students", myNotices: "administration" };
   // Core files: no module (mixed views gate their parts inside: files.ts by kind, dashboards.ts by panel).
-  const CORE_FILES = ["account.ts", "accounts.ts", "audit.ts", "bulkAccounts.ts", "dashboards.ts", "files.ts", "memberships.ts", "notifications.ts", "profile.ts", "schools.ts", "users.ts"];
+  const CORE_FILES = ["academics.ts", "teachers.ts", "reports.ts", "account.ts", "accounts.ts", "audit.ts", "bulkAccounts.ts", "dashboards.ts", "files.ts", "memberships.ts", "notifications.ts", "profile.ts", "schools.ts", "tcVerification.ts", "users.ts"];
 
   const dir = join(__dirname, "../../convex");
   const files = readdirSync(dir).filter((f) => f.endsWith(".ts"));
@@ -436,8 +443,8 @@ describe("source inventory: every public function is classified", () => {
   });
 
   test("each report requires the module its data comes from", () => {
-    const src = readFileSync(join(dir, "reports.ts"), "utf8");
-    for (const [name, mod] of [["enrollmentSummary", "students"], ["studentStatistics", "students"], ["attendanceSummary", "attendance"], ["attendanceReport", "attendance"], ["lowAttendance", "attendance"], ["feeSummary", "finance"], ["examPerformance", "academics"]]) {
+    for (const [file, name, mod] of [["studentReports", "enrollmentSummary", "students"], ["studentReports", "studentStatistics", "students"], ["attendanceReports", "attendanceSummary", "attendance"], ["attendanceReports", "attendanceReport", "attendance"], ["attendanceReports", "lowAttendance", "attendance"], ["feeReports", "feeSummary", "finance"], ["examReports", "examPerformance", "academics"]]) {
+      const src = readFileSync(join(dir, `${file}.ts`), "utf8");
       const body = src.slice(src.indexOf(`export const ${name} =`), src.indexOf(`export const ${name} =`) + 600);
       expect([name, body.includes(`requireModule(ctx, ctx.actor.schoolId, "${mod}")`)]).toEqual([name, true]);
     }

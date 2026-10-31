@@ -1,10 +1,10 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
-import { CalendarX2, CheckCheck, CheckCircle2, History, Lock, Save, UserX, Loader2 } from "lucide-react";
+import { CalendarX2, Check, CheckCheck, CheckCircle2, Clock3, History, Lock, Save, UserX, Loader2, X } from "lucide-react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
-import type { AttendanceStatus } from "@/types/domain";
+import type { AttendanceStatus } from "@/types/attendance";
 import {
   Avatar, Badge, Button, Card, CardHeader, EmptyState, FormField, GlassCard, Input, PageHeader, Segmented, Select, StatusBadge,
   Tabs, TabsContent, TabsList, useToast, ProgressBar,
@@ -15,10 +15,11 @@ import { formatDate, formatDateTime, formatLongDate, isSchoolDay, previousSchool
 import { formatPercent } from "@/lib/utils/format";
 import { cn } from "@/lib/utils/cn";
 
-const STATUS_OPTIONS: { value: AttendanceStatus; label: string; short: string; activeClass: string }[] = [
-  { value: "present", label: "Present", short: "P", activeClass: "bg-teal text-white shadow-soft" },
-  { value: "absent", label: "Absent", short: "A", activeClass: "bg-plum text-white shadow-soft" },
-  { value: "late", label: "Late", short: "L", activeClass: "bg-mauve text-white shadow-soft" },
+// Tactile toggle chips: gradient fill + soft glow when chosen (white or plum text keeps AA contrast).
+const STATUS_OPTIONS: { value: AttendanceStatus; label: string; short: string; activeClass: string; icon: ReactNode }[] = [
+  { value: "present", label: "Present", short: "P", icon: <Check className="h-3.5 w-3.5" aria-hidden />, activeClass: "bg-gradient-to-br from-teal to-lagoon text-white shadow-[0_4px_14px_-4px_rgb(var(--c-teal)/0.65)]" },
+  { value: "absent", label: "Absent", short: "A", icon: <X className="h-3.5 w-3.5" aria-hidden />, activeClass: "bg-gradient-to-br from-purple to-plum text-white shadow-[0_4px_14px_-4px_rgb(var(--c-plum)/0.6)]" },
+  { value: "late", label: "Late", short: "L", icon: <Clock3 className="h-3.5 w-3.5" aria-hidden />, activeClass: "bg-gradient-to-br from-blush to-lavender text-plum shadow-[0_4px_14px_-4px_rgb(var(--c-mauve)/0.7)]" },
 ];
 
 /** Shared by Admin (all sections, view-only) and Teacher (assigned sections; only the class teacher can mark). */
@@ -330,10 +331,11 @@ function Register({ sectionId, date }: { sectionId: Id<"sections">; date: string
       )}
 
       <div className="flex flex-wrap gap-2 px-5 pt-4 text-[13px]">
-        <Badge tone="teal">{counts.present} present</Badge>
-        <Badge tone="plum">{counts.absent} absent</Badge>
-        <Badge tone="lavender">{counts.late} late</Badge>
-        <Badge tone="outline">{total - marked} unmarked</Badge>
+        <Badge tone="teal" className="figures">{counts.present} present</Badge>
+        <Badge tone="plum" className="figures">{counts.absent} absent</Badge>
+        <Badge tone="lavender" className="figures">{counts.late} late</Badge>
+        <Badge tone="outline" className="figures">{total - marked} unmarked</Badge>
+        {total > 0 && <ProgressBar value={(marked / total) * 100} label="Register marked" className="ml-auto w-32 self-center" />}
       </div>
 
       {total === 0 ? (
@@ -341,19 +343,20 @@ function Register({ sectionId, date }: { sectionId: Id<"sections">; date: string
       ) : (
         <ul className="divide-y divide-line/50 px-5 py-2">
           {r.students.map((s) => (
-            <li key={s.studentId} className="flex items-center justify-between gap-3 py-2.5">
+            <li key={s.studentId} className="-mx-2 flex items-center justify-between gap-3 rounded-xl px-2 py-2.5 transition-colors hover:bg-teal-soft/30">
               <div className="flex min-w-0 items-center gap-3">
-                <span className="w-6 shrink-0 text-right text-[12px] text-ink-muted">{s.rollNo ?? "—"}</span>
+                <span className="mono-id w-6 shrink-0 text-right text-ink-muted">{s.rollNo ?? "—"}</span>
                 <Avatar name={s.name} size="sm" />
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-ink">{s.name}</p>
-                  <p className="text-[12px] text-ink-muted">Adm: {s.admissionNo}</p>
+                  <p className="text-[12px] text-ink-muted">Adm: <span className="mono-id">{s.admissionNo}</span></p>
                 </div>
               </div>
               {writable ? (
                 <Segmented<AttendanceStatus>
                   label={`Attendance for ${s.name}`}
                   size="sm"
+                  variant="chips"
                   value={entries[s.studentId] ?? null}
                   onChange={(v) => {
                     setEntries((e) => ({ ...e, [s.studentId]: v }));
@@ -438,4 +441,4 @@ function SectionHistory({ sectionId }: { sectionId: Id<"sections"> }) {
       </div>
     </Card>
   );
-}
+}

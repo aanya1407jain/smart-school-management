@@ -40,7 +40,7 @@ describe("exam lifecycle and report cards", () => {
     const sec = await admin.query(api.exams.sectionResults, { examId, sectionId: A.sectionA });
     expect(JSON.stringify(sec)).toContain("Mathematics");
     expect(JSON.stringify(sec)).toContain("alpha-Asha");
-    const mine = await (await as(t, A.users.student)).query(api.studentPortal.myResults, {});
+    const mine = await (await as(t, A.users.student)).query(api.exams.myResults, {});
     expect(mine).toMatchObject({ state: "ok", school: "School alpha", student: { name: "Asha S", admissionNo: "alpha-Asha" } });
     expect(mine.state === "ok" && mine.results.length).toBe(1);
   });

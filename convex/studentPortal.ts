@@ -16,50 +16,18 @@
  */
 import { v } from "convex/values";
 import { internalQuery, type QueryCtx } from "./_generated/server";
-import type { Doc, Id } from "./_generated/dataModel";
 import { schoolQuery, moduleQuery } from "./core/functions";
-import type { Actor } from "./core/actor";
-import type { Permission } from "./core/permissions";
-import { getSchoolSettings, linkedStudentIds, requireOwnStudentAccess, requirePermission } from "./core/authorization";
+import { getSchoolSettings } from "./core/authorization";
 import { assertIsoDate } from "./core/validators";
 import { fullName } from "./model/academics";
-import {
-  currentYear, feeLedger, parentContactsOf, homeworkFor, noticesForStudent, placement, publishedResults, studentFields, timetableFor,
-} from "./model/studentRecords";
+import { currentYear, noticesForStudent, parentContactsOf, placement, studentFields } from "./model/studentRecords";
+import { activeSection, resolvePortalStudent, vPortalStudent } from "./model/portalStudent";
 
-// Module entitlements (model/modules.ts): myProfile is core; the other pages belong to their module.
-const academicsQuery = moduleQuery("academics");
-const financeQuery = moduleQuery("finance");
+// Module entitlements (model/modules.ts): myProfile is core; certificates are Students; notices are
+// Administration. Timetable, homework, results and fees live in their modules
+// (timetable.myTimetable, homework.myHomework, exams.myResults, fees.myFees).
+const studentsQuery = moduleQuery("students");
 const administrationQuery = moduleQuery("administration");
-
-type Ctx = QueryCtx & { actor: Actor };
-
-/**
- * The student this portal request is about: the signed-in student themself.
- * A `studentId` other than their own is NOT_FOUND. Never trusts a
- * browser-supplied id on its own.
- */
-async function resolvePortalStudent(ctx: Ctx, studentId: Id<"students"> | undefined, permission: Permission): Promise<Doc<"students"> | null> {
-  requirePermission(ctx.actor, "area:student");
-  requirePermission(ctx.actor, permission);
-  if (studentId) return await requireOwnStudentAccess(ctx, studentId);
-  for (const id of await linkedStudentIds(ctx, ctx.actor)) {
-    const s = await ctx.db.get(id);
-    if (s && s.schoolId === ctx.actor.schoolId) return s;
-  }
-  return null;
-}
-
-/** The student's active section in the current year (null when not actively enrolled). */
-async function activeSection(ctx: Ctx, student: Doc<"students">) {
-  const year = await currentYear(ctx, ctx.actor.schoolId);
-  const { row } = await placement(ctx, student, year);
-  if (!year || !row || row.status !== "active") return { year, row, section: null };
-  const section = await ctx.db.get(row.sectionId);
-  return { year, row, section: section && section.schoolId === ctx.actor.schoolId ? section : null };
-}
-
-const vPortalStudent = { studentId: v.optional(v.id("students")) };
 
 /**
  * My school record. Returns `{ state: "no_student_record" }` when this
@@ -87,50 +55,44 @@ export const myProfile = schoolQuery({
   },
 });
 
-/** Weekly timetable of the student's current section. */
-export const myTimetable = academicsQuery({
-  args: vPortalStudent,
-  handler: async (ctx, { studentId }) => {
-    const student = await resolvePortalStudent(ctx, studentId, "timetable:read:own");
-    if (!student) return { state: "no_student_record" as const };
-    const { section } = await activeSection(ctx, student);
-    if (!section) return { state: "not_enrolled" as const };
-    return { state: "ok" as const, section: section.displayName, ...(await timetableFor(ctx, section)) };
-  },
-});
+/** Most documents listed for one student. */
+const MAX_CERTIFICATES = 100;
 
-/** Homework set for the student's current section, with their own submission status. */
-export const myHomework = academicsQuery({
+/**
+ * Official certificates and verified documents belonging to the student
+ * (files of kind `student_document`, uploaded by the office). Read-only.
+ * Student documents belong to Student Management (files.ts KIND_MODULE), so
+ * this is a students-module query: MODULE_DISABLED when the school does not
+ * have it, exactly like files.listForOwner — the files themselves are kept.
+ */
+export const myCertificates = studentsQuery({
   args: vPortalStudent,
   handler: async (ctx, { studentId }) => {
-    const student = await resolvePortalStudent(ctx, studentId, "homework:read:own");
+    const student = await resolvePortalStudent(ctx, studentId, "profile:read:own");
     if (!student) return { state: "no_student_record" as const };
-    const { section } = await activeSection(ctx, student);
-    if (!section) return { state: "not_enrolled" as const };
-    return { state: "ok" as const, section: section.displayName, homework: await homeworkFor(ctx, student, section) };
-  },
-});
-
-/** Published exam results of the student. */
-export const myResults = academicsQuery({
-  args: vPortalStudent,
-  handler: async (ctx, { studentId }) => {
-    const student = await resolvePortalStudent(ctx, studentId, "results:read:own");
-    if (!student) return { state: "no_student_record" as const };
-    const school = (await ctx.db.get(ctx.actor.schoolId))!;
-    return { state: "ok" as const, school: school.name, student: { name: fullName(student), admissionNo: student.admissionNo }, results: await publishedResults(ctx, student) };
-  },
-});
-
-/** The student's fee obligations, payments and receipts for the current year. */
-export const myFees = financeQuery({
-  args: vPortalStudent,
-  handler: async (ctx, { studentId }) => {
-    const student = await resolvePortalStudent(ctx, studentId, "fees:read:own");
-    if (!student) return { state: "no_student_record" as const };
-    const year = await currentYear(ctx, ctx.actor.schoolId);
-    if (!year) return { state: "no_current_year" as const };
-    return { state: "ok" as const, ...(await feeLedger(ctx, student, year)) };
+    const files = (await ctx.db
+      .query("files")
+      .withIndex("by_owner", (q) =>
+        q.eq("schoolId", ctx.actor.schoolId).eq("ownerType", "student").eq("ownerId", student._id),
+      )
+      .take(MAX_CERTIFICATES * 2))
+      .filter((f) => f.kind === "student_document") // not profile photos
+      .slice(0, MAX_CERTIFICATES);
+    const certificates = await Promise.all(
+      files.map(async (f) => ({
+        fileId: f._id,
+        kind: f.kind,
+        fileName: f.fileName,
+        contentType: f.contentType,
+        size: f.size,
+        uploadedAt: f._creationTime,
+        url: await ctx.storage.getUrl(f.storageId),
+      })),
+    );
+    return {
+      state: "ok" as const,
+      certificates,
+    };
   },
 });
 

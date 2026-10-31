@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { Trash2 } from "lucide-react";
-import type { Period, Weekday } from "@/types/domain";
+import type { Period, Weekday } from "@/types/academics";
 import type { TimetableCell } from "@/lib/services/timetable.service";
 import { services } from "@/lib/services";
 import { useQuery } from "@/lib/hooks/use-query";

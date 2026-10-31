@@ -1,4 +1,4 @@
-import type { Role } from "@/types/domain";
+import type { Role } from "@/types/core";
 import { asterAcademy } from "@convex/seedData/asterAcademy";
 
 /**

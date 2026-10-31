@@ -280,7 +280,8 @@ export default defineSchema({
     phone: v.optional(v.string()),
     designation: v.optional(v.string()),
     qualification: v.optional(v.string()),
-    specializationSubjectIds: v.array(v.id("subjects")),
+    // Academics subject ids (plain ids: Core must not reference a module table in the schema).
+    specializationSubjectIds: v.array(v.string()),
     joiningDate: v.optional(v.string()),
     status: vStaffStatus,
     address: v.optional(v.string()),
@@ -388,9 +389,12 @@ export default defineSchema({
   transferCertificates: defineTable({
     schoolId: v.id("schools"),
     studentId: v.id("students"),
+    /** "" while a draft has no number yet (the next number is allocated when it is issued). */
     tcNo: v.string(),
-    status: v.union(v.literal("issued"), v.literal("cancelled")),
+    /** draft: saved form, student untouched · issued: student has left · cancelled: kept with its number. */
+    status: v.union(v.literal("draft"), v.literal("issued"), v.literal("cancelled")),
     issueDate: v.string(),
+    applicationDate: v.optional(v.string()),
     leavingDate: v.string(),
     reason: v.string(),
     conduct: v.optional(v.string()),
@@ -410,14 +414,48 @@ export default defineSchema({
       lastSection: v.optional(v.string()),
       academicYear: v.optional(v.string()),
       parentName: v.optional(v.string()),
+      fatherName: v.optional(v.string()),
+      motherName: v.optional(v.string()),
+      workingDays: v.optional(v.number()),
+      attendedDays: v.optional(v.number()),
     }),
+    /** Fee balance at issue and the authorised waiver that allowed a provisional issue with dues. */
+    duesWaiver: v.optional(v.object({ outstandingMinor: v.number(), note: v.string(), byUserId: v.id("users") })),
+    /** Random code printed on the certificate (and in its QR) for public verification. */
+    verificationCode: v.optional(v.string()),
+    /** Creator of a draft / issuer of the certificate. */
     issuedByUserId: v.id("users"),
     cancelledAt: v.optional(v.number()),
     cancelReason: v.optional(v.string()),
     cancelledByUserId: v.optional(v.id("users")),
   })
     .index("by_school_student", ["schoolId", "studentId"])
-    .index("by_school_number", ["schoolId", "tcNo"]),
+    .index("by_school_number", ["schoolId", "tcNo"])
+    .index("by_verification", ["verificationCode"]),
+
+  /**
+   * One batch promotion (Promotions & TC → Promote): which enrollment each
+   * student left and which one was created, so the run can be shown in the
+   * audit log and rolled back while nothing in the new year depends on it.
+   */
+  promotionRuns: defineTable({
+    schoolId: v.id("schools"),
+    fromSectionId: v.id("sections"),
+    fromYearId: v.id("academicYears"),
+    toYearId: v.id("academicYears"),
+    moves: v.array(v.object({
+      studentId: v.id("students"),
+      oldEnrollmentId: v.id("enrollments"),
+      newEnrollmentId: v.id("enrollments"),
+      toSectionId: v.id("sections"),
+      kind: v.union(v.literal("promote"), v.literal("repeat")),
+    })),
+    status: v.union(v.literal("applied"), v.literal("rolled_back")),
+    createdAt: v.number(),
+    createdByUserId: v.id("users"),
+    rolledBackAt: v.optional(v.number()),
+    rolledBackByUserId: v.optional(v.id("users")),
+  }).index("by_school_section", ["schoolId", "fromSectionId"]),
 
   /**
    * Parent contacts of students (name, phone, email…). CONTACT DATA ONLY — a

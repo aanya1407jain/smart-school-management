@@ -99,7 +99,7 @@ describe("publication and results", () => {
     expect(await errorCode(admin.mutation(api.exams.publish, { examId }))).toBe("CONFLICT");
     expect(await errorCode(admin.mutation(api.exams.update, { examId, name: "Renamed" }))).toBe("CONFLICT");
     // Visible to the student through the portal; notifications sent once per student account.
-    const mine = await (await as(t, A.users.student)).query(api.studentPortal.myResults, {});
+    const mine = await (await as(t, A.users.student)).query(api.exams.myResults, {});
     expect(mine.state === "ok" && mine.results[0].percentage === 90).toBe(true);
     const notes = await t.run(async (ctx) => (await ctx.db.query("notifications").collect()).filter((n) => n.type === "examination"));
     expect(new Set(notes.map((n) => n.userId)).size).toBe(notes.length);
@@ -107,7 +107,7 @@ describe("publication and results", () => {
 
   test("unpublished results are not visible to students or out-of-scope teachers", async () => {
     const { t, A, B, admin, examId } = await setup();
-    const mine = await (await as(t, A.users.student)).query(api.studentPortal.myResults, {});
+    const mine = await (await as(t, A.users.student)).query(api.exams.myResults, {});
     expect(mine.state === "ok" && mine.results.length === 0).toBe(true);
     expect(await errorCode(admin.query(api.exams.sectionResults, { examId, sectionId: A.sectionA }))).toBe("NOT_FOUND");
     expect(await errorCode((await as(t, B.users.admin)).query(api.exams.get, { examId }))).toBe("NOT_FOUND");
