@@ -45,7 +45,7 @@ export function DataTable<T>({
   return (
     <div className={className}>
       {/* Desktop / tablet */}
-      <div className="hidden overflow-x-auto md:block">
+      <div className="hidden relative overflow-x-auto md:block">
         <table className="w-full border-separate border-spacing-0 text-sm">
           {caption && <caption className="sr-only">{caption}</caption>}
           <thead>
@@ -80,7 +80,7 @@ export function DataTable<T>({
                 style={{ "--stagger-i": i } as CSSProperties}
                 className={cn(
                   "stagger group transition-colors duration-200 ease-out even:bg-alabaster/30",
-                  "hover:bg-gradient-to-r hover:from-teal-soft/60 hover:via-teal-soft/25 hover:to-transparent",
+                  "hover:bg-bg",
                   onRowClick && "cursor-pointer",
                 )}
               >
@@ -105,7 +105,7 @@ export function DataTable<T>({
               tabIndex={onRowClick ? 0 : undefined}
               onClick={onRowClick ? () => onRowClick(row) : undefined}
               onKeyDown={onRowClick ? (e) => { if (e.key === "Enter") onRowClick(row); } : undefined}
-              className="rounded-2xl border border-white/60 bg-white/80 p-4 shadow-ambient backdrop-blur-md transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-teal/30 hover:shadow-ambient-lg"
+              className="rounded-2xl border border-line bg-white p-4 shadow-ambient transition-colors duration-150 hover:border-ink-muted/30"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">{primary.cell(row)}</div>

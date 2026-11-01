@@ -50,8 +50,11 @@ export const core: CoreContributions = {
     { ...page("/teacher/notices", ["notices:read"], ["teacher"]), entitlementKey: "administration" },
     page("/teacher/notifications", ["notifications:read"], ["teacher"]),
     page("/teacher/profile", ["profile:read:own"], ["teacher"]),
+    // Personal account settings (password & security) — same access as the own profile.
+    page("/teacher/settings", ["profile:read:own"], ["teacher"]),
     page("/student", ["area:student"], ["student"]),
     page("/student/notifications", ["notifications:read"], ["student"]),
+    page("/student/settings", ["profile:read:own"], ["student"]),
   ],
   nav: [
     { role: "admin", group: "Overview", label: "Dashboard", href: "/admin/dashboard", icon: "dashboard", anyOf: ["reports:read", "fees:manage"], order: 0 },
@@ -69,7 +72,9 @@ export const core: CoreContributions = {
     { role: "teacher", group: "Updates", label: "Notices", href: "/teacher/notices", icon: "notices", anyOf: ["notices:read"], order: 30, entitlementKey: "administration" },
     { role: "teacher", group: "Updates", label: "Notifications", href: "/teacher/notifications", icon: "notifications", anyOf: ["notifications:read"], order: 31 },
     { role: "teacher", group: "Updates", label: "Profile", href: "/teacher/profile", icon: "profile", anyOf: ["profile:read:own"], order: 32 },
+    { role: "teacher", group: "Updates", label: "Settings", href: "/teacher/settings", icon: "settings", anyOf: ["profile:read:own"], order: 33 },
     { role: "student", group: "Updates", label: "Notifications", href: "/student/notifications", icon: "notifications", anyOf: ["notifications:read"], order: 31 },
+    { role: "student", group: "Updates", label: "Settings", href: "/student/settings", icon: "settings", anyOf: ["profile:read:own"], order: 33 },
   ],
   crons: [],
 };

@@ -23,7 +23,7 @@ export function LiveMyAttendance() {
     <div data-testid="live-attendance">
       <PageHeader title="My Attendance" description={`${p.academicYear.name} · ${formatDate(h.range.from)} – ${formatDate(h.range.to)}`} />
       <EnrollmentNotice p={p} />
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Card className="flex flex-col items-center justify-center gap-2 p-6">
           <ProgressRing value={h.percentage} label={h.percentage == null ? "—" : `${h.percentage}%`} sublabel="attendance" tone={below ? "plum" : "teal"} />
           <p className="text-center text-[13px] text-ink-muted">{h.percentage == null ? "No attendance has been marked yet this year." : below ? `Below the school's ${h.lowAttendanceThreshold}% requirement.` : `At or above the school's ${h.lowAttendanceThreshold}% requirement.`}</p>

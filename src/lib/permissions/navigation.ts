@@ -93,6 +93,7 @@ const TEACHER_NAV: NavGroup[] = [
       { label: "Notices", href: "/teacher/notices", icon: "notices", anyOf: ["notices:read"], module: "administration", live: true },
       { label: "Notifications", href: "/teacher/notifications", icon: "notifications", anyOf: ["notifications:read"], live: true },
       { label: "Profile", href: "/teacher/profile", icon: "profile", anyOf: ["profile:read:own"], live: true },
+      { label: "Settings", href: "/teacher/settings", icon: "settings", anyOf: ["profile:read:own"], live: true },
     ],
   },
 ];
@@ -115,6 +116,7 @@ const STUDENT_NAV: NavGroup[] = [
       { label: "Notices", href: "/student/notices", icon: "notices", anyOf: ["notices:read"], module: "administration", live: true },
       { label: "Notifications", href: "/student/notifications", icon: "notifications", anyOf: ["notifications:read"], live: true },
       { label: "Profile", href: "/student/profile", icon: "profile", anyOf: ["profile:read:own"], live: true },
+      { label: "Settings", href: "/student/settings", icon: "settings", anyOf: ["profile:read:own"], live: true },
     ],
   },
 ];

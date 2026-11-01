@@ -53,7 +53,7 @@ export function HomeworkManager({ area }: { area: Area }) {
         {(rows) => rows.length === 0 ? (
           <Card><EmptyState icon={<ClipboardList className="h-6 w-6" />} title="No homework assigned yet" description={area === "teacher" ? "Create homework for one of your classes." : "Homework set by teachers appears here."} action={area === "teacher" && <Button onClick={() => setCreateOpen(true)}>Create homework</Button>} /></Card>
         ) : (
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {rows.map((h) => (
               <Card key={h.id} className="flex flex-col p-5">
                 <div className="flex items-start justify-between gap-2">
@@ -219,7 +219,7 @@ function HomeworkFormModal({ open, onOpenChange, existing }: { open: boolean; on
         </>
       }
     >
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <FormField label="Title" required error={errors.title} className="sm:col-span-2">
           <Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="e.g. Quadratic Equations — Exercise 4.4" />
         </FormField>

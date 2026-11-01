@@ -1,25 +1,46 @@
 "use client";
 /** Students' parts of the admin dashboard (contributed, see src/modules/students/contributions.tsx). */
-import { GraduationCap, UserPlus } from "lucide-react";
+import { GraduationCap } from "lucide-react";
 import { api } from "@convex/_generated/api";
 import { useSchoolQuery } from "@/lib/convex/membership";
 import type { AdminDashboardPartProps } from "@/lib/contributions/types";
-import type { StudentAchievement } from "@/types/students";
-import { LinkButton, StatCard } from "@/components/ui";
-import { formatNumber } from "@/lib/utils/format";
-import { StudentAchievementsCard } from "@/features/dashboard/student-achievements";
+import type { AchievementCategory, StudentAchievement } from "@/types/students";
+import { Collapsible, MetricCard } from "@/features/dashboard/principal-ui";
+import { formatNumber, pluralize } from "@/lib/utils/format";
+import { formatShortDate } from "@/lib/utils/dates";
 
-export function AddStudentAction() {
-  return <LinkButton href="/admin/students/new" variant="outline"><UserPlus className="h-4 w-4" /> Add student</LinkButton>;
-}
+const CATEGORY: Record<AchievementCategory, string> = { sports: "Sports", academic: "Academic", special: "Special recognition" };
 
-export function StudentsStat({ d, live }: AdminDashboardPartProps) {
+export function StudentsMetric({ d, live }: AdminDashboardPartProps) {
   // The student total always follows the Students page's rule and records (students.studentCounts):
   // admissions are written to Convex for every admin, demo personas included.
   const counts = useSchoolQuery(api.students.studentCounts, live ? "skip" : {});
-  return <StatCard label="Students enrolled" value={<span data-testid="dash-students">{live ? formatNumber(d.stats.students ?? 0) : counts === undefined ? "—" : formatNumber(counts?.enrolled ?? d.stats.students ?? 0)}</span>} icon={<GraduationCap className="h-5 w-5" />} hint={live ? `Across ${d.stats.sections} sections` : counts ? `${counts.academicYear.name} · same count as the Students page` : `Across ${d.stats.sections} sections`} href="/admin/students" />;
+  const value = live ? formatNumber(d.stats.students ?? 0) : counts === undefined ? "—" : formatNumber(counts?.enrolled ?? d.stats.students ?? 0);
+  return (
+    <MetricCard
+      label="Students enrolled"
+      value={<span data-testid="dash-students">{value}</span>}
+      support={`Across ${pluralize(d.stats.sections, "section")}`}
+      icon={GraduationCap}
+      href="/admin/students"
+    />
+  );
 }
 
-export function AchievementsSection({ d, live }: AdminDashboardPartProps) {
-  return <StudentAchievementsCard achievements={d.achievements as StudentAchievement[]} live={live} />;
+/** Achievements have no page of their own yet, so they stay reachable here, collapsed. */
+export function AchievementsSecondary({ d }: AdminDashboardPartProps) {
+  const items = [...(d.achievements as StudentAchievement[])].sort((a, b) => b.date.localeCompare(a.date));
+  if (items.length === 0) return null;
+  return (
+    <Collapsible summary="Student achievements" hint={`${items.length} recorded this year`}>
+      <ul className="space-y-2.5" data-testid="dash-achievements">
+        {items.map((a) => (
+          <li key={a.id} className="text-[13px] leading-5">
+            <p className="break-words font-medium text-pd-ink">{a.studentName} <span className="font-normal text-pd-muted">· {a.classLabel}</span></p>
+            <p className="break-words text-pd-muted">{a.title} · {CATEGORY[a.category]} · {formatShortDate(a.date)}</p>
+          </li>
+        ))}
+      </ul>
+    </Collapsible>
+  );
 }

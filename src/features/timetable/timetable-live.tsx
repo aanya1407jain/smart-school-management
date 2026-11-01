@@ -436,7 +436,7 @@ function PeriodModal({ period, nextIndex, onClose }: { period?: Period; nextInde
         <Button variant="outline" onClick={onClose}>Cancel</Button><Button loading={busy} onClick={save}>Save</Button>
       </>}>
       <div className="space-y-4">
-        <div className="grid grid-cols-[5rem_1fr] gap-3">
+        <div className="grid grid-cols-[5rem_minmax(0,1fr)] gap-3">
           <FormField label="Position" required><Input type="number" min={1} max={20} value={index} onChange={(e) => setIndex(e.target.value)} /></FormField>
           <FormField label="Name" required><Input value={label} onChange={(e) => setLabel(e.target.value)} maxLength={40} /></FormField>
         </div>

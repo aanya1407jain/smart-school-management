@@ -204,6 +204,7 @@ export const mockDashboardService = {
 
       return {
         school: db.school,
+        term: db.academicYears.find((y) => y.id === yearId)?.name ?? null,
         stats: {
           students: activeStudents.length,
           sections: yearSections.length,

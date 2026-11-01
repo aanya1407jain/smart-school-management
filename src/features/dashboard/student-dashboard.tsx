@@ -26,8 +26,6 @@ export function StudentDashboard() {
           <div className="space-y-6">
             {/* Identity header */}
             <GlassCard className="relative overflow-hidden p-6">
-              <div aria-hidden className="pointer-events-none absolute -right-16 -top-20 h-56 w-56 rounded-full bg-lavender/40 blur-3xl" />
-              <div aria-hidden className="pointer-events-none absolute -bottom-24 right-40 h-48 w-48 rounded-full bg-teal/20 blur-3xl" />
               <div className="relative flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-4">
                   <Avatar name={d.student.name} size="lg" />
@@ -48,7 +46,7 @@ export function StudentDashboard() {
               </div>
             </GlassCard>
 
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
               {A && <Link href="/student/attendance" className="block rounded-2xl focus-visible:shadow-focus">
                 <GlassCard hover className="flex h-full items-center gap-4 p-5">
                   <ProgressRing value={d.attendance.percentage} size={84} stroke={8} tone={lowAttendance ? "plum" : "teal"} />
@@ -72,7 +70,7 @@ export function StudentDashboard() {
               />}
             </div>
 
-            {AC && <div className="grid gap-4 lg:grid-cols-3">
+            {AC && <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
               <GlassCard className="lg:col-span-2">
                 <CardHeader
                   title={d.day.isToday ? "Today's timetable" : `${WEEKDAY_NAMES[d.day.weekday]}'s timetable`}
@@ -82,7 +80,7 @@ export function StudentDashboard() {
                 />
                 <div className="p-5">
                   {d.upcomingClass && (
-                    <div className="mb-4 flex items-center gap-4 rounded-2xl bg-gradient-to-r from-sapphire to-lagoon p-4 text-white">
+                    <div className="mb-4 flex items-center gap-4 rounded-2xl bg-sapphire p-4 text-white">
                       <div className="grid h-11 w-11 place-items-center rounded-xl bg-white/15"><Clock className="h-5 w-5" aria-hidden /></div>
                       <div className="min-w-0 flex-1">
                         <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/60">{d.day.isToday ? "Up next" : "First class"}</p>
@@ -92,9 +90,9 @@ export function StudentDashboard() {
                     </div>
                   )}
                   {d.timetable.length === 0 ? <EmptyState title="No classes scheduled" /> : (
-                    <ul className="grid gap-2 sm:grid-cols-2">
+                    <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                       {d.timetable.map((e) => (
-                        <li key={e.id} className={cn("flex items-center gap-3 rounded-xl border border-line/70 bg-white/70 px-3.5 py-2.5", d.upcomingClass?.id === e.id && "border-teal/40 bg-teal-soft/60")}>
+                        <li key={e.id} className={cn("flex items-center gap-3 rounded-xl border border-line/70 bg-white px-3.5 py-2.5", d.upcomingClass?.id === e.id && "border-teal/40 bg-teal-soft/60")}>
                           <span className="w-16 shrink-0 text-[12px] font-medium text-ink-muted">{formatClock(e.startTime)}</span>
                           <span className="min-w-0">
                             <span className="block truncate text-sm font-semibold text-ink">{e.subject}</span>
@@ -137,7 +135,7 @@ export function StudentDashboard() {
               </div>
             </div>}
 
-            {(AD || AC) && <div className="grid gap-4 lg:grid-cols-3">
+            {(AD || AC) && <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
               {AD && <Card className="lg:col-span-2">
                 <CardHeader title="Latest notices" icon={<Megaphone className="h-4 w-4" />} action={<Link href="/student/notices" className="text-[13px] font-medium text-lagoon hover:underline">All notices</Link>} />
                 <ul className="divide-y divide-line/60 px-5 pb-3 pt-1">

@@ -113,7 +113,7 @@ function EventModal({ event, onClose }: { event?: EventRow; onClose: () => void 
   };
   return (
     <Modal open onOpenChange={(o) => !o && onClose()} title={event ? `Edit ${KIND_LABEL[event.kind].toLowerCase()}` : "Add to calendar"} size="md" footer={<><Button variant="outline" onClick={onClose}>Cancel</Button><Button loading={busy} onClick={save}>Save</Button></>}>
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <FormField label="Title" required className="sm:col-span-2"><Input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={150} /></FormField>
         <FormField label="Type" hint={kind === "holiday" ? "Holidays apply to the whole school and are not school days for attendance." : undefined}>
           <Select value={kind} onChange={(e) => setKind(e.target.value as Kind)} disabled={!!event}>{(Object.keys(KIND_LABEL) as Kind[]).map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}</Select>

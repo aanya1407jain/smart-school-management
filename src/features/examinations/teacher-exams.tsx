@@ -16,7 +16,7 @@ export function TeacherExams() {
   return (
     <div>
       <PageHeader title="Examinations" description="Date sheets for your classes and marks entry for the subjects you teach." />
-      <div className="grid gap-5 lg:grid-cols-[1fr_380px]">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
         <div className="space-y-4">
           <Card className="p-4"><FilterBar><FilterSelect label="Class" value={classId} onChange={setClassId} allLabel="All my classes" options={(opts.data?.classes ?? []).map((c) => ({ value: c.id, label: c.name }))} /></FilterBar></Card>
           <QueryView query={exams} loading="cards">
@@ -24,7 +24,7 @@ export function TeacherExams() {
               <ul className="space-y-3">
                 {rows.map((e) => (
                   <li key={e.id}>
-                    <Link href={`/teacher/examinations/${e.id}`} className="glass flex items-center gap-4 rounded-2xl p-4 transition-all hover:-translate-y-0.5 hover:shadow-lift">
+                    <Link href={`/teacher/examinations/${e.id}`} className="glass flex items-center gap-4 rounded-2xl p-4 transition-all hover:shadow-lift">
                       <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-teal-soft text-lagoon"><BookOpenCheck className="h-5 w-5" /></span>
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2"><p className="font-semibold text-sapphire">{e.name}</p><StatusBadge status={e.status} /></div>

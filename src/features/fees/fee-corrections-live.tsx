@@ -40,7 +40,7 @@ export function LiveFeeCorrections({ ledger }: { ledger: Ledger }) {
   return (
     <Card data-testid="live-fee-corrections">
       <CardHeader title="Corrections" description="Reverse a payment, revoke a concession or cancel an assignment. History is never deleted; each action needs a reason and is audited." />
-      <div className="grid gap-5 p-5 pt-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-5 p-5 pt-2 lg:grid-cols-3">
         <section aria-label="Payments">
           <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-ink-muted">Payments</h3>
           {ledger.payments.length === 0 ? <EmptyState title="No payments" className="py-4" /> : (

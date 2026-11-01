@@ -41,12 +41,12 @@ export interface GridLesson {
 
 // Soft per-subject colour accents (gradient wash + accent edge).
 const TINTS = [
-  "bg-gradient-to-br from-teal-soft/90 to-white/60 border-l-teal",
-  "bg-gradient-to-br from-sapphire/[0.07] to-white/60 border-l-sapphire/60",
-  "bg-gradient-to-br from-lavender/40 to-white/60 border-l-purple/70",
-  "bg-gradient-to-br from-blush/45 to-white/60 border-l-plum/40",
-  "bg-gradient-to-br from-cyan/[0.10] to-white/60 border-l-cyan",
-  "bg-gradient-to-br from-heather/30 to-white/60 border-l-lagoon/60",
+  "bg-teal-soft/80 border-l-teal",
+  "bg-sapphire/[0.06] border-l-sapphire/60",
+  "bg-lavender/25 border-l-purple/70",
+  "bg-blush/35 border-l-plum/40",
+  "bg-cyan/[0.08] border-l-cyan",
+  "bg-heather/25 border-l-lagoon/60",
 ];
 
 function tintMap(keys: Iterable<string>) {
@@ -63,7 +63,7 @@ export function daysWithLessons(lessonDays: number[]) {
 
 function TimeBadge({ start, end, className }: { start: string; end: string; className?: string }) {
   return (
-    <span className={cn("inline-flex w-fit items-center whitespace-nowrap rounded-md bg-white/70 px-1.5 py-0.5 font-mono text-[10.5px] leading-none tabular-nums text-ink-muted ring-1 ring-inset ring-line/60", className)}>
+    <span className={cn("inline-flex w-fit items-center whitespace-nowrap rounded-md bg-white px-1.5 py-0.5 font-mono text-[10.5px] leading-none tabular-nums text-ink-muted ring-1 ring-inset ring-line/60", className)}>
       {start} – {end}
     </span>
   );
@@ -75,7 +75,7 @@ function BreakBand({ period, compact }: { period: GridPeriod; compact?: boolean 
     <div className={cn("flex items-center justify-center gap-2 rounded-lg border border-line/60 px-3 text-[12px] font-medium text-ink-muted", HATCH, compact ? "py-2" : "py-2.5")}>
       <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
       <span className="truncate">{period.label}</span>
-      <TimeBadge start={period.startTime} end={period.endTime} className="bg-white/80" />
+      <TimeBadge start={period.startTime} end={period.endTime} className="bg-white" />
     </div>
   );
 }
@@ -170,7 +170,7 @@ export function TimetableGrid({
     const cls = cn(
       "flex h-full min-h-[88px] w-full min-w-0 flex-col gap-1 rounded-xl p-3 text-left transition-all duration-200 ease-out",
       // Spatial schedule card: subject tint + accent edge, soft depth, lift on hover.
-      l ? cn("border border-white/70 border-l-[3px] shadow-[inset_0_1px_0_rgb(255_255_255/0.7),0_1px_2px_rgb(6_49_84/0.05)] hover:-translate-y-0.5 hover:shadow-ambient-lg", tints.get(l.colorKey ?? l.subject)) : cn("border border-dashed border-line/70", HATCH),
+      l ? cn("border border-line border-l-[3px] shadow-[inset_0_1px_0_rgb(255_255_255/0.7),0_1px_2px_rgb(6_49_84/0.05)] hover:shadow-ambient-lg", tints.get(l.colorKey ?? l.subject)) : cn("border border-dashed border-line/70", HATCH),
       // Drag feedback only while dragging: the drop target lights up, the lesson being moved fades.
       isOver && "ring-2 ring-teal border-teal bg-teal-soft/60",
       isSource && "opacity-40",
@@ -191,7 +191,7 @@ export function TimetableGrid({
             onDragEnd={() => { setDragSource(null); setDragOverCell(null); }}
             onClick={() => onSlotClick(day, p)}
             aria-label={slotLabel?.(day, p, l) ?? `${WEEKDAY_NAMES[day]} ${p.label}: ${l ? l.subject : "empty"}`}
-            className={cn(cls, "hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal active:scale-[0.98]", !l && "hover:border-teal hover:bg-teal-soft/40")}
+            className={cn(cls, "focus:outline-none focus-visible:ring-2 focus-visible:ring-teal active:scale-[0.98]", !l && "hover:border-teal hover:bg-teal-soft/40")}
           >
             {body}
           </button>
@@ -247,7 +247,7 @@ export function TimetableGrid({
         <Segmented<string>
           label="Day"
           size="sm"
-          className="mb-3 flex w-full justify-between overflow-x-auto"
+          className="mb-3 flex w-full justify-between relative overflow-x-auto"
           value={String(mobileDay)}
           onChange={(v) => setMobileDay(Number(v))}
           options={days.map((d) => ({ value: String(d), label: WEEKDAY_NAMES[d].slice(0, 3) }))}

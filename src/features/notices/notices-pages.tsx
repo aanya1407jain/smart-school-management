@@ -630,7 +630,7 @@ function ComposeModal({ existing, onClose, teacherMode = false }: { existing?: N
         </>
       }
     >
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <FormField label="Title" required error={errors.title} className="sm:col-span-2">
           <Input
             value={form.title}
@@ -893,7 +893,7 @@ export function NoticeBoard() {
               />
             </Card>
           ) : (
-            <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
+            <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
               <Card>
                 <ul className="divide-y divide-line/60 px-5">
                   {noticeList.map((n: any) => (

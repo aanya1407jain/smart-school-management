@@ -198,7 +198,7 @@ export function ReceiptModal({ receiptId, onClose }: { receiptId: string | null;
                 <dt className="text-ink-muted">Recorded by</dt>
                 <dd className="text-right text-ink">{r.recordedBy}</dd>
               </dl>
-              <div className="flex items-center justify-between rounded-xl bg-gradient-to-r from-teal-soft to-cyan/10 px-4 py-3 ring-1 ring-inset ring-teal/20">
+              <div className="flex items-center justify-between rounded-xl bg-teal-soft px-4 py-3 ring-1 ring-inset ring-teal/20">
                 <span className="font-medium text-lagoon">Amount received</span>
                 <span className="figures text-xl font-bold text-sapphire">{formatCurrency(r.receipt.amount)}</span>
               </div>

@@ -136,7 +136,7 @@ function MarksSheet({ examSubjectId, sectionId }: { examSubjectId: Id<"examSubje
           const done = sheet.students.filter((s) => { const r = rows[s.studentId]; return !!r && (r.absent || r.marks !== ""); }).length;
           const pct = (done / sheet.students.length) * 100;
           return (
-            <div className="mb-3 flex items-center gap-3 rounded-xl bg-white/50 px-3 py-2 ring-1 ring-inset ring-line/60">
+            <div className="mb-3 flex items-center gap-3 rounded-xl bg-white px-3 py-2 ring-1 ring-inset ring-line/60">
               <span className="figures text-[12.5px] font-semibold text-ink-soft">{done}/{sheet.students.length} graded</span>
               <ProgressBar value={pct} label="Grading completion" className="flex-1" />
               <span className="figures w-10 text-right text-[12px] font-semibold text-lagoon">{Math.round(pct)}%</span>

@@ -52,7 +52,7 @@ export function MyFees() {
               </Card>
             ) : (
               <>
-                <div className="grid gap-4 lg:grid-cols-3">
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
                   <GlassCard className="spatial flex flex-col items-center gap-5 p-6 sm:flex-row lg:col-span-2">
                     <ProgressRing
                       value={l.totals.net ? (l.totals.paid / l.totals.net) * 100 : 0}
@@ -87,7 +87,7 @@ export function MyFees() {
                     </dl>
                   </GlassCard>
                   <Card className="spatial relative overflow-hidden p-6">
-                    <span aria-hidden className={l.nextDue?.status === "overdue" ? "absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-amber-400 to-rose-500" : "absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-400 to-teal"} />
+                    <span aria-hidden className={l.nextDue?.status === "overdue" ? "absolute inset-x-0 top-0 h-1 bg-pd-danger" : "absolute inset-x-0 top-0 h-1 bg-teal"} />
                     <p className="flex items-center gap-2 text-[13px] font-medium text-ink-muted">
                       <CalendarClock className="h-4 w-4" /> Next due
                     </p>

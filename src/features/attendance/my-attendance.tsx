@@ -63,7 +63,7 @@ function AttendanceOverview({ records, threshold, lateCountsAsPresent }: { recor
 
   return (
     <div className="space-y-5">
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <GlassCard className="flex flex-col items-center p-6 text-center">
           <ProgressRing value={percentage} size={150} stroke={12} sublabel="overall" tone={low ? "plum" : "teal"} />
           <p className={cn("mt-4 text-sm font-medium", percentage === null ? "text-ink-muted" : low ? "text-plum" : "text-lagoon")}>

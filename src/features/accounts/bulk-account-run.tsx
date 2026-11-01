@@ -243,7 +243,7 @@ export function BulkAccountRun({ jobId, onClose, autoPrepare }: { jobId: JobId; 
             </p>
           )}
           {job.failed > 0 && !busy && (
-            <div className="rounded-xl border border-plum/20 bg-white/70 px-4 py-3 text-[13px]" role="alert">
+            <div className="rounded-xl border border-plum/20 bg-white px-4 py-3 text-[13px]" role="alert">
               <p className="mb-1 flex items-center gap-1.5 font-medium text-plum"><AlertTriangle className="h-4 w-4" aria-hidden /> {job.failed} failed</p>
               <ul className="max-h-40 list-disc space-y-0.5 overflow-y-auto pl-5 text-ink-soft">
                 {(failedItems ?? []).map((f) => <li key={f.itemId}>{f.name} ({f.admissionNo}): {f.reason}</li>)}
@@ -275,7 +275,7 @@ export function BulkAccountRun({ jobId, onClose, autoPrepare }: { jobId: JobId; 
 
 function Stat({ label, value, hint, tone }: { label: string; value: number; hint?: string; tone?: "teal" | "plum" }) {
   return (
-    <div className="rounded-xl border border-line/80 bg-white/70 px-3 py-2">
+    <div className="rounded-xl border border-line/80 bg-white px-3 py-2">
       <dt className="text-[12px] text-ink-muted">{label}</dt>
       <dd className={tone === "teal" ? "text-lg font-semibold text-lagoon" : tone === "plum" ? "text-lg font-semibold text-plum" : "text-lg font-semibold text-ink"}>{value.toLocaleString()}</dd>
       {hint && <dd className="text-[11.5px] text-ink-muted">{hint}</dd>}

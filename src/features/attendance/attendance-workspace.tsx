@@ -17,9 +17,9 @@ import { cn } from "@/lib/utils/cn";
 
 // Tactile toggle chips: gradient fill + soft glow when chosen (white or plum text keeps AA contrast).
 const STATUS_OPTIONS: { value: AttendanceStatus; label: string; short: string; activeClass: string; icon: ReactNode }[] = [
-  { value: "present", label: "Present", short: "P", icon: <Check className="h-3.5 w-3.5" aria-hidden />, activeClass: "bg-gradient-to-br from-teal to-lagoon text-white shadow-[0_4px_14px_-4px_rgb(var(--c-teal)/0.65)]" },
-  { value: "absent", label: "Absent", short: "A", icon: <X className="h-3.5 w-3.5" aria-hidden />, activeClass: "bg-gradient-to-br from-purple to-plum text-white shadow-[0_4px_14px_-4px_rgb(var(--c-plum)/0.6)]" },
-  { value: "late", label: "Late", short: "L", icon: <Clock3 className="h-3.5 w-3.5" aria-hidden />, activeClass: "bg-gradient-to-br from-blush to-lavender text-plum shadow-[0_4px_14px_-4px_rgb(var(--c-mauve)/0.7)]" },
+  { value: "present", label: "Present", short: "P", icon: <Check className="h-3.5 w-3.5" aria-hidden />, activeClass: "bg-primary text-white" },
+  { value: "absent", label: "Absent", short: "A", icon: <X className="h-3.5 w-3.5" aria-hidden />, activeClass: "bg-plum text-white" },
+  { value: "late", label: "Late", short: "L", icon: <Clock3 className="h-3.5 w-3.5" aria-hidden />, activeClass: "bg-lavender/60 text-plum" },
 ];
 
 /** Shared by Admin (all sections, view-only) and Teacher (assigned sections; only the class teacher can mark). */
@@ -91,7 +91,7 @@ export function AttendanceWorkspace({ area }: { area: "admin" | "teacher" }) {
         }
       />
       <Card className="mb-5 p-4 sm:p-5">
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 md:grid-cols-4">
           <FormField label="Academic year">
             <Select value={year?._id ?? ""} disabled aria-label="Academic year">
               {year ? <option value={year._id}>{year.name}</option> : <option value="">{years === undefined ? "Loading…" : "Not set"}</option>}
@@ -126,7 +126,7 @@ export function AttendanceWorkspace({ area }: { area: "admin" | "teacher" }) {
         )}
       </Card>
 
-      <div className="grid gap-5 xl:grid-cols-[1fr_320px]">
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
         <Tabs defaultValue="register">
           <TabsList items={[{ value: "register", label: "Register" }, { value: "history", label: "History" }]} />
           <TabsContent value="register">
@@ -149,7 +149,7 @@ export function AttendanceWorkspace({ area }: { area: "admin" | "teacher" }) {
             ) : (
               <>
                 {area === "admin" && (
-                  <div className="mb-4 rounded-xl bg-white/70 p-3.5">
+                  <div className="mb-4 rounded-xl bg-white p-3.5">
                     <div className="flex items-end justify-between">
                       <p className="text-[13px] text-ink-muted">School attendance</p>
                       <p className="text-xl font-semibold text-sapphire">{formatPercent(overviewStats.percentage, 1)}</p>
@@ -179,7 +179,7 @@ export function AttendanceWorkspace({ area }: { area: "admin" | "teacher" }) {
                               ? "border-lagoon bg-lagoon text-white"
                               : r.marked
                               ? "border-teal/30 bg-teal-soft/60 hover:bg-teal-soft"
-                              : "border-dashed border-mauve/60 bg-white/60 hover:bg-white"
+                              : "border-dashed border-mauve/60 bg-white hover:bg-white"
                           )}
                         >
                           <span className="block text-sm font-semibold">{r.displayName}</span>
@@ -375,7 +375,7 @@ function Register({ sectionId, date }: { sectionId: Id<"sections">; date: string
       )}
 
       {writable && (
-        <div className="sticky bottom-0 flex flex-col gap-2 rounded-b-2xl border-t border-line/60 bg-white/95 p-4 backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+        <div className="sticky bottom-0 flex flex-col gap-2 rounded-b-2xl border-t border-line/60 bg-white/95 p-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-[13px] text-ink-muted">
             {marked === total ? (
               <span className="inline-flex items-center gap-1 text-lagoon"><CheckCircle2 className="h-4 w-4" /> All {total} students marked</span>
