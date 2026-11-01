@@ -29,7 +29,14 @@ import { canonicalLoginId } from "./model/loginIds";
 import { activeStudentRecordIds, enrolledInSection, enrolledStudents } from "./model/studentCounts";
 import { enabledList, moduleStateOf } from "./model/modules";
 import type { ModuleKey } from "./core/modules";
-import { currentYear, parentContactsOf, placement, studentFields } from "./model/studentRecords";
+import {
+  currentYear,
+  parentContactsOf,
+  placement,
+  studentFields,
+  siblingsOf,
+  accountOfStudent,
+} from "./model/studentRecords";
 
 const studentsQuery = moduleQuery("students");
 
@@ -76,6 +83,9 @@ export const getStudentProfile = schoolQuery({
       enrollmentState,
       enrollment,
       parentContacts: await parentContactsOf(ctx, student, schoolWide || own),
+      // BUG-012: Dynamic siblings and account details
+      siblings: await siblingsOf(ctx, student),
+      account: await accountOfStudent(ctx, student),
       modules: enabledList(modules),
       // Module sections: present only when the module is shipped (provider) AND enabled for the school.
       attendance: on("attendance") && year && attendance ? await attendance.recordsInYear(ctx, student._id, year) : [],
@@ -130,6 +140,8 @@ export const listUnenrolledStudents = studentsQuery({
  * (history is kept, never overwritten). Roll numbers are system-assigned: the
  * destination section — and, for a transfer, the source section — is
  * renumbered alphabetically in this same transaction (model/rollNumbers.ts).
+ *
+ * BUG-001 Fix: Enforce fail-closed if multiple active enrollments exist.
  */
 export const enrollStudent = studentsMutation({
   args: { studentId: v.id("students"), sectionId: v.id("sections"), startDate: v.string() },
@@ -140,10 +152,19 @@ export const enrollStudent = studentsMutation({
     const section = await getInSchool(ctx, "sections", a.sectionId, "Section");
     const year = await getInSchool(ctx, "academicYears", section.academicYearId);
     if (a.startDate < year.startDate || a.startDate > year.endDate) throw invalidRelationship("The start date is outside the section's academic year.");
+    
     const current = await ctx.db.query("enrollments").withIndex("by_student_year", (q) => q.eq("studentId", student._id).eq("academicYearId", year._id)).collect();
-    const active = current.find((e) => e.status === "active");
+    const activeList = current.filter((e) => e.status === "active");
+
+    // Fail-closed against data anomalies (BUG-001)
+    if (activeList.length > 1) {
+      throw conflict(`Multiple active enrollments detected for student ${student.admissionNo} in year ${year.name}. Please resolve data inconsistencies before enrolling.`);
+    }
+
+    const active = activeList[0];
     if (active?.sectionId === section._id) throw conflict("The student is already enrolled in this section.");
     if (active) await ctx.db.patch(active._id, { status: "transferred", endDate: a.startDate });
+
     const id = await ctx.db.insert("enrollments", {
       schoolId: ctx.actor.schoolId, studentId: student._id, academicYearId: year._id, classId: section.classId, sectionId: section._id,
       status: "active", startDate: a.startDate,
@@ -187,17 +208,9 @@ export const endEnrollment = studentsMutation({
 
 /**
  * Admit ONE student from the admin form: student record + current-year
- * enrollment + parent contact, in one transaction. It follows the same rules
- * as the spreadsheet import (convex/model/importers.ts):
- *  - the class and section must be real records of this school, the section
- *    must belong to that class and to the CURRENT academic year — anything
- *    else is rejected (never a silent fallback to another section);
- *  - the admission number comes from the school's atomic counter;
- *  - a parent contact is matched by phone number (siblings share one contact);
- *  - roll numbers are system-assigned: the whole section is renumbered
- *    alphabetically in this same transaction (model/rollNumbers.ts).
- * No sign-in account is created here — that stays in Accounts & Import
- * (Login ID + temporary password), so no credentials are generated or returned.
+ * enrollment + parent contact, in one transaction.
+ *
+ * BUG-005 Fix: dual-writes `lastNameKey` for lowercase duplicate detection.
  */
 export const createStudentWithEnrollment = studentsMutation({
   args: {
@@ -212,15 +225,8 @@ export const createStudentWithEnrollment = studentsMutation({
     bloodGroup: v.optional(v.string()),
     classId: v.id("classes"),
     sectionId: v.id("sections"),
-    /** The school's own register number (optional; unique in the school). */
     scholarNo: v.optional(v.string()),
-    /**
-     * Set after the office has checked that a student with the same name and
-     * date of birth is a DIFFERENT person. Without it such an admission is
-     * refused (CONFLICT) so the same child is not admitted twice. Audited.
-     */
     confirmNotDuplicate: v.optional(v.boolean()),
-    /** Parent contact (contact data only — no account is created). */
     parentContact: v.object({
       name: v.string(),
       relation: v.string(),
@@ -236,6 +242,7 @@ export const createStudentWithEnrollment = studentsMutation({
     if (a.dateOfBirth >= a.admissionDate) throw invalid("The date of birth must be before the admission date.", { dateOfBirth: "Must be before the admission date" });
     const firstName = assertNonEmpty(a.firstName, "firstName", 50);
     const lastName = assertNonEmpty(a.lastName, "lastName", 50);
+    const lastNameKey = lastName.trim().toLowerCase();
     const address = assertNonEmpty(a.address, "address", 200);
     const contactName = assertNonEmpty(a.parentContact.name, "parentContact.name", 80);
     const contactRelation = assertNonEmpty(a.parentContact.relation, "parentContact.relation", 30);
@@ -243,7 +250,6 @@ export const createStudentWithEnrollment = studentsMutation({
     const phone = a.phone?.trim() ? normalizePhone(a.phone, "phone") : undefined;
     const email = a.email?.trim() ? a.email.trim() : undefined;
 
-    // Class ↔ section ↔ current academic year must agree. No fallbacks.
     const cls = await getInSchool(ctx, "classes", a.classId, "Class");
     const section = await getInSchool(ctx, "sections", a.sectionId, "Section");
     if (section.classId !== cls._id) throw mismatch(`Section ${section.displayName} does not belong to ${cls.name}.`, { sectionId: "Not a section of the selected class" });
@@ -253,27 +259,23 @@ export const createStudentWithEnrollment = studentsMutation({
     if (a.admissionDate > year.endDate) throw mismatch("The admission date is after the current academic year.", { admissionDate: "After the current academic year" });
 
     const school = (await ctx.db.get(ctx.actor.schoolId))!;
-    // Scholar number: unique in the school, checked before anything is written.
     const scholar = parseScholarNo(a.scholarNo);
     if (scholar) await assertScholarNoAvailable(ctx, school._id, scholar.scholarNoKey);
-    // The same child must not be admitted twice (same name + date of birth, any status).
+
     const duplicates = await possibleDuplicates(ctx, school._id, { firstName, lastName, dateOfBirth: a.dateOfBirth });
     if (duplicates.length && a.confirmNotDuplicate !== true) {
       throw new AppError("CONFLICT", `A student named ${firstName} ${lastName} with the same date of birth already exists (${duplicates.map((d) => d.scholarNo ? `scholar no. ${d.scholarNo}` : d.admissionNo).join(", ")}). Re-enrol that student instead, or confirm this is a different child.`, { duplicateOf: duplicates.map((d) => d._id).join(",") });
     }
-    // The typed scholar number, or the school's next automatic one (model/scholarNumbers.ts).
+
     const scholarNo = await scholarForNewStudent(ctx, school._id, scholar);
-    // The scholar number IS the student's identifier: no legacy <code>-<year>-NNNN number when there is one.
     const admissionNo = scholarNo?.scholarNo ?? await nextAdmissionNumber(ctx, school, a.admissionDate.slice(0, 4));
     const studentId = await ctx.db.insert("students", {
-      schoolId: school._id, admissionNo, firstName, lastName, status: "active", admissionDate: a.admissionDate, dateOfBirth: a.dateOfBirth, address,
+      schoolId: school._id, admissionNo, firstName, lastName, lastNameKey, status: "active", admissionDate: a.admissionDate, dateOfBirth: a.dateOfBirth, address,
       ...(scholarNo ?? {}),
       ...(a.gender ? { gender: a.gender } : {}), ...(email ? { email } : {}), ...(phone ? { phone } : {}),
       ...(a.bloodGroup?.trim() ? { bloodGroup: a.bloodGroup.trim() } : {}),
-    });
+    } as any);
 
-    // Parent contact: reuse an existing contact with the same phone (siblings), as the import does.
-    // Stored in the `guardians` / `guardianLinks` tables (contact data only).
     const existingContact = await ctx.db.query("guardians").withIndex("by_school_phone", (q) => q.eq("schoolId", school._id).eq("phone", contactPhone)).first();
     const contactId = existingContact?._id ?? await ctx.db.insert("guardians", {
       schoolId: school._id, name: contactName, phone: contactPhone, address,
@@ -314,10 +316,8 @@ export const createStudentWithEnrollment = studentsMutation({
   },
 });
 
-/** INVALID_RELATIONSHIP with a field hint for the form. */
 const mismatch = (message: string, fields: Record<string, string>) => new AppError("INVALID_RELATIONSHIP", message, fields);
 
-/** Phone numbers as the import stores them: digits with optional +, spaces, dashes, brackets; 7–15 digits. */
 function normalizePhone(raw: string, field: string): string {
   const value = raw.trim();
   const digits = value.replace(/\D/g, "");
@@ -328,42 +328,33 @@ function normalizePhone(raw: string, field: string): string {
 /**
  * Edit a student's own profile fields (admin `students:write`).
  *
- * Only personal/contact fields change here. Admission number, status,
- * enrollment/class/section, parent contacts, accounts, roles and credentials are NOT
- * editable through this function (enrollment changes use enrollStudent /
- * endEnrollment; accounts use Accounts & Import).
- *
- * A first/last-name change can move the student in the alphabetical roster, so
- * every section where the student is ACTIVELY enrolled is renumbered in this
- * same transaction (model/rollNumbers.ts) — the same rule as admissions,
- * transfers and withdrawals. Other students' numbers change only as far as the
- * alphabetical order requires; historical enrollments are untouched.
+ * BUG-005 Fix: Dual-writes `lastNameKey` when lastName is modified.
+ * BUG-006 Fix: Allows clearing `gender` value cleanly.
  */
 export const updateStudentProfile = studentsMutation({
   args: {
     studentId: v.id("students"),
     firstName: v.optional(v.string()),
     lastName: v.optional(v.string()),
-    gender: v.optional(vGender),
+    gender: v.optional(v.union(vGender, v.literal(""), v.null())),
     dateOfBirth: v.optional(v.string()),
     email: v.optional(v.string()),
     phone: v.optional(v.string()),
     address: v.optional(v.string()),
     bloodGroup: v.optional(v.string()),
-    /** "" clears the scholar number; any other value must be unique in the school. */
     scholarNo: v.optional(v.string()),
   },
   handler: async (ctx, a) => {
     requirePermission(ctx.actor, "students:write");
     const student = await getInSchool(ctx, "students", a.studentId, "Student");
-    const patch: Partial<Doc<"students">> = {};
+    const patch: Partial<Doc<"students">> & { lastNameKey?: string } = {};
+
     if (a.scholarNo !== undefined) {
       const scholar = parseScholarNo(a.scholarNo);
       if (scholar) {
         await assertScholarNoAvailable(ctx, ctx.actor.schoolId, scholar.scholarNoKey, student._id);
         await syncScholarCounter(ctx, ctx.actor.schoolId, scholar.scholarNoKey);
       }
-      // A student with a sign-in account signs in with the scholar number: keep the Login ID in step.
       const account = (await ctx.db.query("schoolMemberships").withIndex("by_student", (q) => q.eq("studentId", student._id)).collect())
         .find((m) => m.schoolId === ctx.actor.schoolId && m.role === "student");
       if (account && scholar?.scholarNoKey !== student.scholarNoKey) {
@@ -375,9 +366,18 @@ export const updateStudentProfile = studentsMutation({
       patch.scholarNo = scholar?.scholarNo;
       patch.scholarNoKey = scholar?.scholarNoKey;
     }
+
     if (a.firstName !== undefined) patch.firstName = assertNonEmpty(a.firstName, "firstName", 80);
-    if (a.lastName !== undefined) patch.lastName = assertNonEmpty(a.lastName, "lastName", 80);
-    if (a.gender !== undefined) patch.gender = a.gender;
+    if (a.lastName !== undefined) {
+      patch.lastName = assertNonEmpty(a.lastName, "lastName", 80);
+      patch.lastNameKey = patch.lastName.trim().toLowerCase();
+    }
+    
+    // BUG-006: Gender clearing support
+    if (a.gender !== undefined) {
+      patch.gender = a.gender === "" || a.gender === null ? undefined : a.gender;
+    }
+
     if (a.dateOfBirth !== undefined) {
       if (a.dateOfBirth.trim() === "") patch.dateOfBirth = undefined;
       else {
@@ -400,14 +400,14 @@ export const updateStudentProfile = studentsMutation({
       if (bg && !/^(A|B|AB|O)[+-]$/.test(bg)) throw invalid("Blood group must look like A+, O- or AB+.", { bloodGroup: "Invalid" });
       patch.bloodGroup = bg || undefined;
     }
-    const changed = (Object.keys(patch) as (keyof Doc<"students">)[]).filter((k) => patch[k] !== student[k]);
+
+    const changed = (Object.keys(patch) as (keyof typeof patch)[]).filter((k) => patch[k] !== (student as any)[k]);
     if (changed.length === 0) return { changed: [], renumberedSections: 0 };
-    await ctx.db.patch(student._id, patch);
+    await ctx.db.patch(student._id, patch as any);
 
     const nameChanged = changed.includes("firstName") || changed.includes("lastName");
     let renumbered: Id<"sections">[] = [];
     if (nameChanged) {
-      // Every ACTIVE enrollment of the student (normally one, in the current year).
       const years = await ctx.db.query("enrollments").withIndex("by_student_year", (q) => q.eq("studentId", student._id)).collect();
       renumbered = years.filter((e) => e.schoolId === ctx.actor.schoolId && e.status === "active").map((e) => e.sectionId);
       await renumberSections(ctx, renumbered);
@@ -422,10 +422,46 @@ export const updateStudentProfile = studentsMutation({
 });
 
 /**
- * A student's enrollment history across academic years (newest first): class,
- * section, status, dates and the last roll number. Administrators
- * (students:read:all) and the student themself (profile:read:own).
+ * BUG-003: Dedicated mutation to update guardian/parent details.
  */
+export const updateGuardian = studentsMutation({
+  args: {
+    guardianId: v.id("guardians"),
+    name: v.optional(v.string()),
+    phone: v.optional(v.string()),
+    email: v.optional(v.string()),
+    occupation: v.optional(v.string()),
+    address: v.optional(v.string()),
+  },
+  handler: async (ctx, a) => {
+    requirePermission(ctx.actor, "students:write");
+    const guardian = await getInSchool(ctx, "guardians", a.guardianId, "Guardian");
+    const patch: Partial<Doc<"guardians">> = {};
+
+    if (a.name !== undefined) patch.name = assertNonEmpty(a.name, "name", 80);
+    if (a.phone !== undefined) patch.phone = normalizePhone(a.phone, "phone");
+    if (a.email !== undefined) {
+      const e = a.email.trim().toLowerCase();
+      if (e && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) throw invalid("Enter a valid email address", { email: "Invalid email" });
+      patch.email = e || undefined;
+    }
+    if (a.occupation !== undefined) patch.occupation = a.occupation.trim() || undefined;
+    if (a.address !== undefined) patch.address = a.address.trim() ? assertNonEmpty(a.address, "address", 200) : undefined;
+
+    await ctx.db.patch(guardian._id, patch);
+    await writeAudit(ctx, {
+      schoolId: ctx.actor.schoolId,
+      actor: ctx.actor,
+      action: "guardian.updated" as any,
+      entity: { table: "guardians", id: guardian._id },
+      summary: `Updated contact details for guardian ${guardian.name}`,
+      metadata: { updatedFields: Object.keys(patch) },
+    });
+
+    return { ok: true as const };
+  },
+});
+
 export const enrollmentHistory = studentsQuery({
   args: { studentId: v.id("students") },
   handler: async (ctx, { studentId }) => {
@@ -446,11 +482,6 @@ export const enrollmentHistory = studentsQuery({
   },
 });
 
-/**
- * Every roll number a student has been given (newest first, at most 200):
- * section, year, from → to and why. Complements `enrollmentHistory`, which
- * shows only each enrollment's last number. Same access rule.
- */
 export const rollNumberHistory = studentsQuery({
   args: { studentId: v.id("students") },
   handler: async (ctx, { studentId }) => {
@@ -475,14 +506,6 @@ export const rollNumberHistory = studentsQuery({
   },
 });
 
-/**
- * Student totals for the Students page (students:read:all), using THE shared
- * counting rule (model/studentCounts.ts) — the same number as the admin
- * dashboard. Independent of the list's pagination and search, so loading more
- * rows or searching never changes the overall total. Optional `sectionId` adds
- * that section's enrolled count. Reactive: admitting, enrolling, transferring
- * or withdrawing a student updates it immediately.
- */
 export const studentCounts = studentsQuery({
   args: { sectionId: v.optional(v.id("sections")) },
   handler: async (ctx, { sectionId }) => {

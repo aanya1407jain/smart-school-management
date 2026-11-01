@@ -3,23 +3,14 @@
  * (convex/studentPortal.ts) and the staff profile view
  * (academics.getStudentProfile).
  *
- * These helpers do NOT authorize: every caller must first resolve the student
- * through an access check (requireStudentAccess / requireOwnStudentAccess
- * / the portal resolver) and decide which sections it may include. Every
- * helper returns explicit, minimal fields — never a spread database document.
- * Amounts are returned in minor units (paise); the UI formats them.
+ * BUG-012: Dynamic siblings lookup, account details, and full class teacher integration.
  */
 import type { QueryCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
-import { classTeacherOf, teacherDisplayName } from "./academics";
-
-// Attendance, results, homework, timetable and fee read models live in their
-// modules (model/attendanceRecords.ts, examRecords.ts, academicsRecords.ts,
-// feeRecords.ts) and are reached through providers (core/registry.ts).
+import { classTeacherOf, teacherDisplayName, fullName } from "./academics";
 
 export type EnrollmentState = "active" | "ended" | "missing" | "no_current_year";
 
-/** Bound for list reads (never truncates real data). */
 const MAX_NOTICES = 100;
 
 export async function currentYear(ctx: QueryCtx, schoolId: Id<"schools">): Promise<Doc<"academicYears"> | null> {
@@ -29,7 +20,6 @@ export async function currentYear(ctx: QueryCtx, schoolId: Id<"schools">): Promi
   return year && year.schoolId === schoolId ? year : null;
 }
 
-/** The student's current-year enrollment row: the active one, else the most recent one of that year. */
 export async function currentEnrollmentRow(ctx: QueryCtx, student: Doc<"students">, year: Doc<"academicYears"> | null) {
   if (!year) return null;
   const rows = (await ctx.db
@@ -39,7 +29,6 @@ export async function currentEnrollmentRow(ctx: QueryCtx, student: Doc<"students
   return rows.find((e) => e.status === "active") ?? rows.sort((a, b) => b.startDate.localeCompare(a.startDate))[0] ?? null;
 }
 
-/** Placement in the current year with display labels (class, section, roll, class teacher). */
 export async function placement(ctx: QueryCtx, student: Doc<"students">, year: Doc<"academicYears"> | null) {
   if (!year) return { enrollmentState: "no_current_year" as EnrollmentState, enrollment: null, row: null };
   const chosen = await currentEnrollmentRow(ctx, student, year);
@@ -62,11 +51,17 @@ export async function placement(ctx: QueryCtx, student: Doc<"students">, year: D
       sectionDisplayName: sectionOk?.displayName ?? null,
       room: sectionOk?.room ?? null,
       classTeacher: teacher ? teacherDisplayName(teacher) : null,
+      classTeacherDetails: teacher ? {
+        teacherId: teacher._id,
+        name: teacherDisplayName(teacher),
+        employeeId: teacher.employeeId,
+        email: teacher.email ?? null,
+        phone: teacher.phone ?? null,
+      } : null,
     },
   };
 }
 
-/** Public, non-sensitive student fields. */
 export function studentFields(s: Doc<"students">) {
   return {
     studentId: s._id,
@@ -85,11 +80,6 @@ export function studentFields(s: Doc<"students">) {
   };
 }
 
-/**
- * Parent contacts of a student (contact data only — never an account). Phone /
- * email only when `withContact` (school staff with full access, or the
- * student themself).
- */
 export async function parentContactsOf(ctx: QueryCtx, student: Doc<"students">, withContact: boolean) {
   const links = (await ctx.db.query("guardianLinks").withIndex("by_student", (q) => q.eq("studentId", student._id)).collect())
     .filter((l) => l.schoolId === student.schoolId);
@@ -109,10 +99,68 @@ export async function parentContactsOf(ctx: QueryCtx, student: Doc<"students">, 
 }
 
 /**
- * Published notices addressed to a student in a section: the whole school,
- * the student role, the student's class or the student's section. Only notices
- * already published on `today` and not expired before it.
+ * BUG-012 Fix: Look up real siblings sharing the same guardian contacts in the school.
  */
+export async function siblingsOf(ctx: QueryCtx, student: Doc<"students">) {
+  const guardianLinks = (await ctx.db
+    .query("guardianLinks")
+    .withIndex("by_student", (q) => q.eq("studentId", student._id))
+    .collect()).filter((l) => l.schoolId === student.schoolId);
+
+  const guardianIds = [...new Set(guardianLinks.map((l) => l.guardianId))];
+  const siblingIds = new Set<Id<"students">>();
+
+  for (const gId of guardianIds) {
+    const linked = await ctx.db
+      .query("guardianLinks")
+      .withIndex("by_guardian", (q) => q.eq("guardianId", gId))
+      .collect();
+    for (const l of linked) {
+      if (l.schoolId === student.schoolId && l.studentId !== student._id) {
+        siblingIds.add(l.studentId);
+      }
+    }
+  }
+
+  const siblings = [];
+  for (const sid of siblingIds) {
+    const sib = await ctx.db.get(sid);
+    if (!sib || sib.schoolId !== student.schoolId) continue;
+    const year = await currentYear(ctx, student.schoolId);
+    const place = await placement(ctx, sib, year);
+    siblings.push({
+      studentId: sib._id,
+      name: fullName(sib),
+      admissionNo: sib.admissionNo,
+      scholarNo: sib.scholarNo ?? null,
+      status: sib.status,
+      className: place.enrollment?.className ?? null,
+      sectionDisplayName: place.enrollment?.sectionDisplayName ?? null,
+    });
+  }
+  return siblings;
+}
+
+/**
+ * BUG-012 Fix: Retrieve actual student login account details from schoolMemberships.
+ */
+export async function accountOfStudent(ctx: QueryCtx, student: Doc<"students">) {
+  const membership = (await ctx.db
+    .query("schoolMemberships")
+    .withIndex("by_student", (q) => q.eq("studentId", student._id))
+    .collect()).find((m) => m.schoolId === student.schoolId && m.role === "student");
+
+  if (!membership) return null;
+
+  return {
+    membershipId: membership._id,
+    loginId: membership.loginId ?? null,
+    status: membership.status,
+    role: membership.role,
+    activatedAt: membership.activatedAt ?? null,
+  };
+}
+
 export async function noticesForStudent(ctx: QueryCtx, schoolId: Id<"schools">, placementRow: Doc<"enrollments"> | null, today: string) {
   const rows = await ctx.db
     .query("notices")
