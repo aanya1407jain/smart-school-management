@@ -77,6 +77,7 @@ export function studentFields(s: Doc<"students">) {
     email: s.email ?? null,
     phone: s.phone ?? null,
     address: s.address ?? null,
+    previousSchool: s.previousSchool ?? null,
   };
 }
 

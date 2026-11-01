@@ -108,10 +108,12 @@ function liveNoticeView(n: LiveNotice, today: string): NoticeView {
     audienceLabel: n.audienceLabel,
     publishDate: n.publishDate,
     eventDate: n.eventDate ?? null,
+    endDate: n.endDate ?? null,
     priority: n.priority as NoticePriority,
     status: n.status,
     author: n.authorName ?? "School office",
-    isUpcoming: !!n.eventDate && n.eventDate >= today,
+    // A multi-day event stays upcoming until its last day.
+    isUpcoming: !!n.eventDate && (n.endDate ?? n.eventDate) >= today,
     createdBy: n.createdByUserId,
   };
 }
@@ -139,6 +141,7 @@ function toEditableNoticeInput(
     audience: Notice["audience"];
     publishDate: string;
     eventDate: string | null;
+    endDate?: string | null;
     priority: NoticePriority;
   },
   status: "draft" | "published" | "archived"
@@ -150,6 +153,7 @@ function toEditableNoticeInput(
     audience: n.audience,
     publishDate: n.publishDate,
     eventDate: n.eventDate,
+    endDate: n.endDate ?? null,
     priority: n.priority,
     status,
   };
@@ -305,7 +309,6 @@ export function NoticesManager() {
     <div>
       <PageHeader
         title="Notices & Events"
-        description="School-wide and class-specific notices, events and holidays. Each notice only reaches its audience."
         actions={
           <Button onClick={() => setCompose("new")}>
             <Plus className="h-4 w-4" /> New notice
@@ -498,6 +501,7 @@ function ComposeModal({ existing, onClose, teacherMode = false }: { existing?: N
           audience: existing.audience,
           publishDate: existing.publishDate,
           eventDate: existing.eventDate,
+          endDate: existing.endDate ?? null,
           priority: existing.priority,
           status: existing.status === "archived" ? "published" : existing.status,
         }
@@ -508,10 +512,14 @@ function ComposeModal({ existing, onClose, teacherMode = false }: { existing?: N
           audience: teacherMode ? { scope: "sections", sectionIds: [] } : { scope: "school" },
           publishDate: todayISO(),
           eventDate: null,
+          endDate: null,
           priority: "normal",
           status: "published",
         }
   );
+  // Multi-day events and holidays (restored from Trisha's Oct 31 work): eventDate is the first day, endDate the last.
+  const [multiDay, setMultiDay] = useState(Boolean(existing?.endDate));
+  const endDate = multiDay && form.type !== "notice" && form.endDate ? form.endDate : null;
   // Reach preview is computed from demo data only; live notices report who was notified when published.
   const reach = useQuery(() => requireDemo().notices.previewReach(form.audience), [JSON.stringify(form.audience), live], { enabled: !live });
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -575,9 +583,11 @@ function ComposeModal({ existing, onClose, teacherMode = false }: { existing?: N
         let noticeId: Id<"notices">;
         if (existing) {
           noticeId = existing.id as Id<"notices">;
-          await updateNoticeMutation({ noticeId, ...fields, eventDate: form.eventDate || "" });
+          // endDate is only sent when the notice has or gets one, so ordinary edits also work against a server
+          // that predates multi-day events.
+          await updateNoticeMutation({ noticeId, ...fields, eventDate: form.eventDate || "", ...(endDate || existing.endDate ? { endDate: endDate ?? "" } : {}) });
         } else {
-          noticeId = (await createNoticeMutation({ ...fields, eventDate: form.eventDate || undefined })).noticeId;
+          noticeId = (await createNoticeMutation({ ...fields, eventDate: form.eventDate || undefined, ...(endDate ? { endDate } : {}) })).noticeId;
         }
         if (status === "published") {
           const r = await publishNoticeMutation({ noticeId });
@@ -587,7 +597,7 @@ function ComposeModal({ existing, onClose, teacherMode = false }: { existing?: N
         }
         onClose();
       } else {
-        const payload = toEditableNoticeInput(form, status);
+        const payload = toEditableNoticeInput({ ...form, endDate }, status);
         if (existing) {
           await requireDemo().notices.update(existing.id, payload);
           toast({ title: status === "draft" ? "Draft saved" : "Notice updated" });
@@ -677,6 +687,16 @@ function ComposeModal({ existing, onClose, teacherMode = false }: { existing?: N
             onChange={(e) => setForm({ ...form, eventDate: e.target.value || null })}
           />
         </FormField>
+        {form.type !== "notice" && (
+          <>
+            <Checkbox label="Runs over several days" className="sm:col-span-2" checked={multiDay} onChange={(e) => setMultiDay(e.target.checked)} />
+            {multiDay && (
+              <FormField label="End date" required hint="The last day of the event or holiday." error={errors.endDate}>
+                <Input type="date" min={form.eventDate ?? undefined} value={form.endDate ?? ""} onChange={(e) => setForm({ ...form, endDate: e.target.value || null })} />
+              </FormField>
+            )}
+          </>
+        )}
 
         <FormField label="Audience" required error={errors.audience} className="sm:col-span-2">
           <Select value={form.audience.scope} onChange={(e) => setScope(e.target.value as NoticeAudienceScope)} disabled={teacherMode}>
@@ -825,7 +845,7 @@ function NoticeDetail({
           </div>
           {notice.eventDate && (
             <p className="flex items-center gap-2 text-sm font-medium text-sapphire">
-              <CalendarDays className="h-4 w-4" /> {formatLongDate(notice.eventDate)}
+              <CalendarDays className="h-4 w-4" /> {formatLongDate(notice.eventDate)}{notice.endDate && notice.endDate !== notice.eventDate ? ` – ${formatLongDate(notice.endDate)}` : ""}
             </p>
           )}
           <div className="rounded-xl bg-paper-soft/50 p-4">

@@ -135,4 +135,30 @@ describe("createStudentWithEnrollment", () => {
     expect(await count(t, "students")).toBe(students);
     expect(await errorCode(admin.action(api.accounts.create, { person: { kind: "student", studentId: r.studentId } }))).toBe("CONFLICT");
   });
+
+  test("a transfer student's previous school and incoming TC are stored trimmed and returned on the profile", async () => {
+    const { t, A, admin } = await setup();
+    const r = await admin.mutation(api.students.createStudentWithEnrollment, {
+      ...form(A, { firstName: "Ira" }),
+      previousSchool: { name: "  St. Mary's High School ", board: "CBSE", lastClassPassed: "Class 7", tcNumber: " TC-2026-9041 ", tcIssueDate: "2026-05-30", leavingReason: "" },
+    });
+    const stored = await t.run((ctx) => ctx.db.get(r.studentId));
+    // Empty optional fields are dropped, text is trimmed.
+    expect(stored?.previousSchool).toEqual({ name: "St. Mary's High School", board: "CBSE", lastClassPassed: "Class 7", tcNumber: "TC-2026-9041", tcIssueDate: "2026-05-30" });
+    const profile = await admin.query(api.students.getStudentProfile, { studentId: r.studentId });
+    expect(profile?.student.previousSchool).toEqual(stored?.previousSchool);
+    // A student admitted without one has none.
+    const plain = await admin.mutation(api.students.createStudentWithEnrollment, form(A, { firstName: "Omar", contactPhone: "98450 33333" }));
+    expect((await admin.query(api.students.getStudentProfile, { studentId: plain.studentId }))?.student.previousSchool).toBeNull();
+  });
+
+  test("invalid previous-school details are rejected and nothing is written", async () => {
+    const { t, A, admin } = await setup();
+    const before = await count(t, "students");
+    // The TC cannot be dated after the admission, the school name is required, dates must be real.
+    expect(await errorCode(admin.mutation(api.students.createStudentWithEnrollment, { ...form(A), previousSchool: { name: "Old School", tcIssueDate: "2026-07-01" } }))).toBe("INVALID_ARGUMENT");
+    expect(await errorCode(admin.mutation(api.students.createStudentWithEnrollment, { ...form(A), previousSchool: { name: "   " } }))).toBe("INVALID_ARGUMENT");
+    expect(await errorCode(admin.mutation(api.students.createStudentWithEnrollment, { ...form(A), previousSchool: { name: "Old School", tcIssueDate: "2026-02-30" } }))).toBe("INVALID_ARGUMENT");
+    expect(await count(t, "students")).toBe(before);
+  });
 });

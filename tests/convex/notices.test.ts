@@ -462,3 +462,33 @@ describe("Notices and school events (AP-02)", () => {
     expect(await noticeRow(t, noticeId)).toMatchObject({ status: "archived", body: "Transitions — details" });
   });
 });
+
+describe("multi-day events and holidays (notice end date)", () => {
+  test("an end date is stored and returned; a same-day end date is not stored", async () => {
+    const t = makeTest();
+    const A = await createSchool(t, "alpha");
+    const admin = await as(t, A.users.admin);
+    const { noticeId } = await admin.mutation(api.notices.createDraft, draft("Diwali break", { kind: "all" }, { type: "holiday", eventDate: "2026-11-08", endDate: "2026-11-12" }));
+    expect(await noticeRow(t, noticeId)).toMatchObject({ eventDate: "2026-11-08", endDate: "2026-11-12" });
+    expect(await admin.query(api.notices.get, { noticeId })).toMatchObject({ eventDate: "2026-11-08", endDate: "2026-11-12" });
+    const single = await admin.mutation(api.notices.createDraft, draft("Sports day", { kind: "all" }, { type: "event", eventDate: "2026-11-20", endDate: "2026-11-20" }));
+    expect((await noticeRow(t, single.noticeId))?.endDate).toBeUndefined();
+  });
+
+  test("an end date needs a start date and cannot be before it", async () => {
+    const t = makeTest();
+    const A = await createSchool(t, "alpha");
+    const admin = await as(t, A.users.admin);
+    expect(await errorCode(admin.mutation(api.notices.createDraft, draft("Trip", { kind: "all" }, { type: "event", eventDate: "2026-11-10", endDate: "2026-11-09" })))).toBe("INVALID_ARGUMENT");
+    expect(await errorCode(admin.mutation(api.notices.createDraft, draft("Trip", { kind: "all" }, { type: "event", endDate: "2026-11-09" })))).toBe("INVALID_ARGUMENT");
+    const { noticeId } = await admin.mutation(api.notices.createDraft, draft("Camp", { kind: "all" }, { type: "event", eventDate: "2026-11-10", endDate: "2026-11-12" }));
+    expect(await errorCode(admin.mutation(api.notices.update, { noticeId, endDate: "2026-11-01" }))).toBe("INVALID_ARGUMENT");
+    // Moving the start keeps the end; clearing the start clears the end with it.
+    await admin.mutation(api.notices.update, { noticeId, eventDate: "2026-11-11" });
+    expect(await noticeRow(t, noticeId)).toMatchObject({ eventDate: "2026-11-11", endDate: "2026-11-12" });
+    await admin.mutation(api.notices.update, { noticeId, eventDate: "" });
+    const row = await noticeRow(t, noticeId);
+    expect(row?.eventDate).toBeUndefined();
+    expect(row?.endDate).toBeUndefined();
+  });
+});

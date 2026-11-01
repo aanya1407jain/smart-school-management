@@ -13,7 +13,7 @@ import { useQuery } from "@/lib/hooks/use-query";
 import { fieldErrorsOf } from "@/lib/utils/errors";
 import type { StudentEditInput } from "@/types/students";
 import { useSchoolProfile } from "@/lib/hooks/use-school-profile";
-import { Button, Card, ConfirmDialog, FormField, FormSection, Input, LoadingState, Modal, PageHeader, Select, ErrorState, useToast, LinkButton } from "@/components/ui";
+import { Button, Card, Checkbox, ConfirmDialog, FormField, FormSection, Input, LoadingState, Modal, PageHeader, Select, ErrorState, useToast, LinkButton } from "@/components/ui";
 import { FormError } from "@/features/shared/form-error";
 import { useAcademicOptions } from "@/features/shared/use-academic-options";
 import { todayISO } from "@/lib/utils/dates";
@@ -42,13 +42,30 @@ const schema = z.object({
     occupation: z.string(),
   }),
   assignFees: z.boolean(),
+  // Transfer student: previous school and its incoming transfer certificate (stored as previousSchool).
+  transfer: z.object({
+    isTransfer: z.boolean(),
+    name: z.string().trim().max(120, "At most 120 characters"),
+    board: z.string().trim().max(60, "At most 60 characters"),
+    lastClassPassed: z.string().trim().max(40, "At most 40 characters"),
+    tcNumber: z.string().trim().max(60, "At most 60 characters"),
+    tcIssueDate: z.string(),
+    leavingReason: z.string().trim().max(200, "At most 200 characters"),
+  }),
+}).superRefine((v, ctx) => {
+  if (!v.transfer.isTransfer) return;
+  if (!v.transfer.name) ctx.addIssue({ code: "custom", path: ["transfer", "name"], message: "Previous school name is required" });
+  if (v.transfer.tcIssueDate && v.admissionDate && v.transfer.tcIssueDate > v.admissionDate) {
+    ctx.addIssue({ code: "custom", path: ["transfer", "tcIssueDate"], message: "Cannot be after the admission date" });
+  }
 });
 type Values = z.infer<typeof schema>;
+const NO_TRANSFER: Values["transfer"] = { isTransfer: false, name: "", board: "", lastClassPassed: "", tcNumber: "", tcIssueDate: "", leavingReason: "" };
 
 const EMPTY: Values = {
   firstName: "", lastName: "", gender: "female", dateOfBirth: "", bloodGroup: "O+", email: "", phone: "", address: "",
   admissionDate: todayISO(), classId: "", sectionId: "", scholarNo: "", status: "active",
-  parentContact: { name: "", relation: "Mother", phone: "", email: "", occupation: "" }, assignFees: true,
+  parentContact: { name: "", relation: "Mother", phone: "", email: "", occupation: "" }, assignFees: true, transfer: NO_TRANSFER,
 };
 
 /**
@@ -86,11 +103,12 @@ export function StudentForm({ studentId, demoEdit }: { studentId?: string; demoE
       const { guardian: contact, ...rest } = editable.data;
       // The demo dataset may still hold a relation outside the current list; map it to "Other".
       const relation = (["Mother", "Father", "Grandparent"] as const).find((r) => r === contact.relation) ?? "Other";
-      reset({ ...rest, email: editable.data.email, classId: sec?.classId ?? "", assignFees: false, parentContact: { ...contact, relation } });
+      reset({ ...rest, email: editable.data.email, classId: sec?.classId ?? "", assignFees: false, parentContact: { ...contact, relation }, transfer: NO_TRANSFER });
     }
   }, [editable.data, opts.data, reset]);
 
   const classId = watch("classId");
+  const isTransfer = watch("transfer.isTransfer");
   const classOptions = editing
     ? (opts.data?.classes ?? []).map((c) => ({ id: c.id, name: c.name }))
     : (liveClasses ?? []).filter((c) => c.active && (liveSections ?? []).some((s) => s.classId === c._id)).sort((a, b) => a.level - b.level).map((c) => ({ id: c._id as string, name: c.name }));
@@ -102,7 +120,7 @@ export function StudentForm({ studentId, demoEdit }: { studentId?: string; demoE
     setServerError(null);
     try {
       if (studentId) {
-        const { parentContact, ...rest } = v;
+        const { parentContact, transfer: _transfer, ...rest } = v;
         await demoEdit!.save({ ...rest, guardian: { ...parentContact } });
         toast({ title: "Student updated", description: `${v.firstName} ${v.lastName}'s details were saved.` });
         router.push(`/admin/students/${studentId}`);
@@ -128,6 +146,16 @@ export function StudentForm({ studentId, demoEdit }: { studentId?: string; demoE
           sectionId: section._id,
           ...(v.scholarNo.trim() ? { scholarNo: v.scholarNo.trim() } : {}),
           ...(confirmNotDuplicate ? { confirmNotDuplicate: true } : {}),
+          ...(v.transfer.isTransfer ? {
+            previousSchool: {
+              name: v.transfer.name,
+              board: v.transfer.board || undefined,
+              lastClassPassed: v.transfer.lastClassPassed || undefined,
+              tcNumber: v.transfer.tcNumber || undefined,
+              tcIssueDate: v.transfer.tcIssueDate || undefined,
+              leavingReason: v.transfer.leavingReason || undefined,
+            },
+          } : {}),
           parentContact: {
             name: v.parentContact.name,
             relation: v.parentContact.relation,
@@ -148,7 +176,8 @@ export function StudentForm({ studentId, demoEdit }: { studentId?: string; demoE
       setServerError(app ? new Error(app.message) : e instanceof Error ? e : new Error(String(e)));
       const fieldErrors = app?.fields ?? fieldErrorsOf(e);
       if (fieldErrors) {
-        Object.entries(fieldErrors).forEach(([k, msg]) => setError(k as keyof Values, { message: msg }));
+        // The server names previous-school fields previousSchool.*; the form keeps them under transfer.*.
+        Object.entries(fieldErrors).forEach(([k, msg]) => setError(k.replace(/^previousSchool\./, "transfer.") as keyof Values, { message: msg }));
       }
     }
   };
@@ -203,6 +232,23 @@ export function StudentForm({ studentId, demoEdit }: { studentId?: string; demoE
             <FormField label="Parent email" error={errors.parentContact?.email?.message}><Input type="email" {...register("parentContact.email")} placeholder="Optional" /></FormField>
             <FormField label="Occupation"><Input {...register("parentContact.occupation")} placeholder="Optional" /></FormField>
           </FormSection>
+
+          {!editing && (
+            <FormSection title="Previous school" description="For a student admitted from another school: the previous school and its transfer certificate (TC).">
+              <Checkbox label="Transfer student (admitted from another school)" className="sm:col-span-2" {...register("transfer.isTransfer")} />
+              {isTransfer && (
+                <>
+                  <FormField label="Previous school name" required error={errors.transfer?.name?.message}><Input {...register("transfer.name")} placeholder="e.g. St. Mary's High School" /></FormField>
+                  <FormField label="Previous affiliation / board" error={errors.transfer?.board?.message}><Input {...register("transfer.board")} placeholder="e.g. CBSE / ICSE / State Board" /></FormField>
+                  <FormField label="Last class passed" error={errors.transfer?.lastClassPassed?.message}><Input {...register("transfer.lastClassPassed")} placeholder="e.g. Class 7" /></FormField>
+                  <FormField label="TC number" error={errors.transfer?.tcNumber?.message}><Input {...register("transfer.tcNumber")} placeholder="e.g. TC-2026-9041" /></FormField>
+                  <FormField label="TC issue date" error={errors.transfer?.tcIssueDate?.message}><Input type="date" max={todayISO()} {...register("transfer.tcIssueDate")} /></FormField>
+                  <FormField label="Reason for leaving previous school" error={errors.transfer?.leavingReason?.message}><Input {...register("transfer.leavingReason")} placeholder="e.g. Family relocation" /></FormField>
+                  <p className="text-[13px] text-ink-muted sm:col-span-2">Upload the scanned TC on the student&apos;s Documents tab after admission.</p>
+                </>
+              )}
+            </FormSection>
+          )}
 
 
           <FormError error={serverError} />

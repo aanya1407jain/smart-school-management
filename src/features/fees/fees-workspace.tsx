@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { AlertCircle, CircleDollarSign, Clock, Download, Layers, Pencil, Plus, Receipt, RotateCcw, Trash2, Users, Wallet } from "lucide-react";
+import { AlertCircle, CircleDollarSign, Clock, Download, HeartHandshake, Layers, Pencil, Percent, Plus, Receipt, RotateCcw, ShieldCheck, Trash2, Users, Wallet } from "lucide-react";
 import type { FeeStanding } from "@/types/fees";
 import type { PaymentMethod } from "@/types/fees";
 import { demoCall } from "@/lib/demo/runtime";
@@ -21,7 +21,7 @@ import { ChartCard, ChartTooltip, axisProps, barCursor, barProps, gridProps } fr
 import { useAcademicOptions } from "@/features/shared/use-academic-options";
 import { FormError } from "@/features/shared/form-error";
 import { formatCurrency, formatPercent } from "@/lib/utils/format";
-import { formatDate, formatShortDate, todayISO } from "@/lib/utils/dates";
+import { daysBetween, formatDate, formatShortDate, todayISO } from "@/lib/utils/dates";
 import { downloadCsv } from "@/lib/utils/csv";
 import { PAYMENT_METHOD_LABELS } from "@/features/fees/labels";
 import { ReceiptModal } from "./fee-tables";
@@ -46,11 +46,13 @@ export function FeesWorkspace() {
         actions={<Button onClick={() => setPickerOpen(true)}><Wallet className="h-4 w-4" /> Collect fee</Button>}
       />
       <Tabs value={tab} onValueChange={(t) => { setTab(t); router.replace(`/admin/fees?tab=${t}`, { scroll: false }); }}>
-        <TabsList items={[{ value: "overview", label: "Overview" }, { value: "balances", label: "Student balances" }, { value: "structures", label: "Fee structures" }, { value: "payments", label: "Payments & receipts" }]} />
+        <TabsList items={[{ value: "overview", label: "Overview" }, { value: "balances", label: "Student balances" }, { value: "structures", label: "Fee structures" }, { value: "payments", label: "Payments & receipts" }, { value: "concessions", label: "Concessions & Waivers" }, { value: "defaulters", label: "Defaulters List" }]} />
         <TabsContent value="overview"><Overview /></TabsContent>
         <TabsContent value="balances"><Balances /></TabsContent>
         <TabsContent value="structures"><Structures /></TabsContent>
         <TabsContent value="payments"><Payments /></TabsContent>
+        <TabsContent value="concessions"><Concessions /></TabsContent>
+        <TabsContent value="defaulters"><DefaultersList /></TabsContent>
       </Tabs>
       <StudentPickerModal open={pickerOpen} onOpenChange={setPickerOpen} onPick={(id) => router.push(`/admin/fees/${id}?pay=1`)} />
     </div>
@@ -728,5 +730,166 @@ function Payments() {
       </div>
       <ReceiptModal receiptId={receiptId} onClose={() => setReceiptId(null)} />
     </Card>
+  );
+}
+
+/**
+ * Per-student balances for the Concessions and Defaulters tabs (restored from
+ * Trisha's Oct 31 work). Live schools read their real records (fees.listBalances);
+ * demo personas read the demo dataset — never sample names for a real school.
+ */
+type LedgerRow = { studentId: string; name: string; admissionNo: string; classLabel: string; gross: number; concession: number; net: number; paid: number; outstanding: number; overdue: number; standing: FeeStanding; nextDue: { label: string; dueDate: string } | null };
+function useLedgerRows(filters: { search: string; classId: string; standing?: FeeStanding }) {
+  const { dataSource } = useSession();
+  const live = dataSource === "live";
+  const liveBalances = useSchoolQuery(
+    api.fees.listBalances,
+    live ? { classId: (filters.classId as Id<"classes">) || undefined, standing: filters.standing, search: filters.search.trim() || undefined } : "skip",
+  );
+  const q = useQuery(
+    () => demoCall("fees.listBalances")({ search: filters.search, classId: filters.classId, standing: filters.standing ?? "all" }),
+    [live, filters.search, filters.classId, filters.standing],
+    { enabled: !live },
+  );
+  const rows = useMemo<LedgerRow[] | undefined>(() => {
+    if (live) {
+      return liveBalances?.rows.map((r) => ({
+        studentId: r.studentId, name: r.name, admissionNo: r.admissionNo, classLabel: r.classLabel,
+        gross: r.grossMinor / 100, concession: r.concessionMinor / 100, net: r.netMinor / 100, paid: r.paidMinor / 100,
+        outstanding: r.outstandingMinor / 100, overdue: r.overdueMinor / 100, standing: r.standing,
+        nextDue: r.nextDue ? { label: r.nextDue.label, dueDate: r.nextDue.dueDate } : null,
+      }));
+    }
+    return q.data as LedgerRow[] | undefined;
+  }, [live, liveBalances, q.data]);
+  const state = useMemo<QueryState<LedgerRow[]>>(
+    () => (live ? { isLoading: rows === undefined, isRefreshing: false, data: rows, error: null, refetch: () => {} } : { ...q, data: rows }),
+    [live, rows, q],
+  );
+  return { rows: rows ?? [], state };
+}
+
+/** Concessions & Waivers: every student whose fees carry a concession, with its value and rate. */
+function Concessions() {
+  const router = useRouter();
+  const opts = useAcademicOptions();
+  const [search, setSearch] = useState("");
+  const [classId, setClassId] = useState("");
+  const { rows: all, state } = useLedgerRows({ search, classId });
+  const rows = useMemo(() => all.filter((r) => r.concession > 0).sort((a, b) => b.concession - a.concession), [all]);
+  const totalWaived = rows.reduce((a, r) => a + r.concession, 0);
+  const avgRate = rows.length ? rows.reduce((a, r) => a + (r.gross ? (r.concession / r.gross) * 100 : 0), 0) / rows.length : null;
+  const fullWaivers = rows.filter((r) => r.gross > 0 && r.concession >= r.gross).length;
+  const exportCsv = () => downloadCsv(`concessions_${todayISO()}`,
+    ["Student Name", "Admission No", "Class", "Gross (INR)", "Concession (INR)", "Concession rate", "Net (INR)", "Outstanding (INR)"],
+    rows.map((r) => [r.name, r.admissionNo, r.classLabel, r.gross, r.concession, r.gross ? `${((r.concession / r.gross) * 100).toFixed(1)}%` : "—", r.net, r.outstanding]));
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <StatCard label="Total concessions granted" value={formatCurrency(totalWaived)} icon={<Percent className="h-5 w-5" />} tone="sapphire" hint="This academic year" />
+        <StatCard label="Students with a concession" value={String(rows.length)} icon={<HeartHandshake className="h-5 w-5" />} tone="teal" hint={avgRate === null ? "None granted yet" : `Average rate ${formatPercent(avgRate, 1)}`} />
+        <StatCard label="Full waivers" value={String(fullWaivers)} icon={<ShieldCheck className="h-5 w-5" />} tone="purple" hint="Concession covers the whole fee" />
+      </div>
+      <Card className="p-4 sm:p-5">
+        <FilterBar
+          actions={
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-[13px] text-ink-muted">{rows.length} students · <span className="font-semibold text-ink">{formatCurrency(totalWaived)}</span> waived</p>
+              <Button variant="outline" size="sm" onClick={exportCsv} disabled={!rows.length}><Download className="h-4 w-4" /> Export CSV</Button>
+            </div>
+          }
+        >
+          <SearchInput value={search} onChange={setSearch} placeholder="Student name or admission no." className="col-span-2 sm:w-64" label="Search concession" />
+          <FilterSelect label="Class" value={classId} onChange={setClassId} allLabel="All classes" options={(opts.data?.classes ?? []).map((c) => ({ value: c.id, label: c.name }))} />
+        </FilterBar>
+        <div className="mt-5">
+          <QueryView query={state} loading="table" wrapError={false}>
+            {() => (
+              <DataTable
+                caption="Concessions and waivers"
+                rows={rows}
+                getRowId={(r) => r.studentId}
+                onRowClick={(r) => router.push(`/admin/fees/${r.studentId}`)}
+                empty={<EmptyState title="No concessions" description={search || classId ? "No students with a concession match these filters." : "No concessions have been granted this year."} />}
+                columns={[
+                  { key: "student", header: "Student", primary: true, cell: (r) => <div className="flex items-center gap-3"><Avatar name={r.name} size="sm" /><div><p className="font-semibold text-ink">{r.name}</p><p className="font-mono text-[11.5px] text-ink-muted">{r.admissionNo} · {r.classLabel}</p></div></div> },
+                  { key: "gross", header: "Gross fees", align: "right", cell: (r) => formatCurrency(r.gross) },
+                  { key: "conc", header: "Concession", align: "right", cell: (r) => <span className="font-semibold text-sapphire">{formatCurrency(r.concession)}</span> },
+                  { key: "rate", header: "Rate", align: "right", cell: (r) => (r.gross ? formatPercent((r.concession / r.gross) * 100, 1) : "—") },
+                  { key: "net", header: "Net fees", align: "right", cell: (r) => formatCurrency(r.net) },
+                  { key: "out", header: "Outstanding", align: "right", cell: (r) => <span className={r.outstanding ? "font-semibold text-ink" : "text-ink-muted"}>{formatCurrency(r.outstanding)}</span> },
+                ]}
+                rowActions={(r) => <Button size="sm" variant="ghost" onClick={() => router.push(`/admin/fees/${r.studentId}`)}>View ledger</Button>}
+              />
+            )}
+          </QueryView>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+/** Defaulters List: students with overdue fees, longest overdue first. */
+function DefaultersList() {
+  const router = useRouter();
+  const opts = useAcademicOptions();
+  const [search, setSearch] = useState("");
+  const [classId, setClassId] = useState("");
+  const today = todayISO();
+  const { rows: all, state } = useLedgerRows({ search, classId, standing: "overdue" });
+  const rows = useMemo(() => all
+    .filter((r) => r.overdue > 0)
+    .map((r) => ({ ...r, daysOverdue: r.nextDue && r.nextDue.dueDate < today ? daysBetween(r.nextDue.dueDate, today) : null }))
+    .sort((a, b) => (b.daysOverdue ?? 0) - (a.daysOverdue ?? 0) || b.overdue - a.overdue), [all, today]);
+  const totalOverdue = rows.reduce((a, r) => a + r.overdue, 0);
+  const severe = rows.filter((r) => (r.daysOverdue ?? 0) > 30).length;
+  // A list for following up with families (calls, letters); the app does not send SMS/WhatsApp itself.
+  const exportCsv = () => downloadCsv(`fee_defaulters_${today}`,
+    ["Student Name", "Admission No", "Class", "Overdue (INR)", "Outstanding (INR)", "Oldest due", "Days overdue"],
+    rows.map((r) => [r.name, r.admissionNo, r.classLabel, r.overdue, r.outstanding, r.nextDue?.dueDate ?? "—", r.daysOverdue ?? "—"]));
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <StatCard label="Total overdue amount" value={formatCurrency(totalOverdue)} icon={<AlertCircle className="h-5 w-5" />} tone="lavender" hint="Past its due date and unpaid" />
+        <StatCard label="Defaulter students" value={String(rows.length)} icon={<Users className="h-5 w-5" />} tone="sapphire" hint="At least one installment overdue" />
+        <StatCard label="Overdue more than 30 days" value={String(severe)} icon={<Clock className="h-5 w-5" />} tone="purple" hint={severe ? "Needs escalation" : "None this long"} />
+      </div>
+      <Card className="p-4 sm:p-5">
+        <FilterBar
+          actions={
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-[13px] text-ink-muted">{rows.length} defaulters · <span className="font-semibold text-plum">{formatCurrency(totalOverdue)}</span></p>
+              <Button variant="outline" size="sm" onClick={exportCsv} disabled={!rows.length}><Download className="h-4 w-4" /> Export CSV</Button>
+            </div>
+          }
+        >
+          <SearchInput value={search} onChange={setSearch} placeholder="Student name or admission no." className="col-span-2 sm:w-64" label="Search defaulter" />
+          <FilterSelect label="Class" value={classId} onChange={setClassId} allLabel="All classes" options={(opts.data?.classes ?? []).map((c) => ({ value: c.id, label: c.name }))} />
+        </FilterBar>
+        <div className="mt-5">
+          <QueryView query={state} loading="table" wrapError={false}>
+            {() => (
+              <DataTable
+                caption="Fee defaulters"
+                rows={rows}
+                getRowId={(r) => r.studentId}
+                onRowClick={(r) => router.push(`/admin/fees/${r.studentId}`)}
+                empty={<EmptyState title="No defaulters" description={search || classId ? "No overdue students match these filters." : "No student has an overdue installment."} />}
+                columns={[
+                  { key: "student", header: "Student", primary: true, cell: (r) => <div className="flex items-center gap-3"><Avatar name={r.name} size="sm" /><div><p className="font-semibold text-ink">{r.name}</p><p className="font-mono text-[11.5px] text-ink-muted">{r.admissionNo} · {r.classLabel}</p></div></div> },
+                  { key: "overdue", header: "Overdue", align: "right", cell: (r) => <span className="font-semibold text-plum">{formatCurrency(r.overdue)}</span> },
+                  { key: "out", header: "Outstanding", align: "right", cell: (r) => formatCurrency(r.outstanding) },
+                  { key: "due", header: "Oldest due", cell: (r) => (r.nextDue ? <span className="text-[13px]">{r.nextDue.label} · {formatShortDate(r.nextDue.dueDate)}</span> : "—") },
+                  { key: "days", header: "Days overdue", align: "right", cell: (r) => (r.daysOverdue === null ? "—" : <span className={r.daysOverdue > 30 ? "font-semibold text-plum" : "text-ink"}>{r.daysOverdue}</span>) },
+                ]}
+                rowActions={(r) => <Button size="sm" variant="soft" onClick={() => router.push(`/admin/fees/${r.studentId}?pay=1`)}>Record payment</Button>}
+              />
+            )}
+          </QueryView>
+        </div>
+      </Card>
+    </div>
   );
 }

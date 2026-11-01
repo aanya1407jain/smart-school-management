@@ -2,13 +2,13 @@
 /**
  * LIVE teacher homework: list, set, edit and review submissions (Academics).
  */
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ClipboardList, Plus, Save } from "lucide-react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { useSchoolMutation, useSchoolQuery } from "@/lib/convex/membership";
-import { Badge, Button, Card, CardHeader, DataTable, EmptyState, FormField, Input, LoadingState, Modal, PageHeader, Select, StatusBadge, Textarea, useToast } from "@/components/ui";
+import { Badge, Button, Card, CardHeader, Checkbox, DataTable, EmptyState, FormField, Input, LoadingState, Modal, PageHeader, Select, StatusBadge, Textarea, useToast } from "@/components/ui";
 import { formatDate, todayISO } from "@/lib/utils/dates";
 import { AttachmentList, UploadButton } from "@/features/shared/attachments";
 import { getAppError } from "@/lib/convex/errors";
@@ -52,36 +52,68 @@ export function LiveTeacherHomework() {
   );
 }
 
+/**
+ * Set homework for one subject in one or more of the teacher's sections at once
+ * (multi-section assignment, restored from Trisha's Oct 31 work). One homework
+ * is created per section through the existing homework.create mutation.
+ */
 function NewHomeworkModal({ assignments, onClose }: { assignments: { _id: string; sectionId: Id<"sections">; sectionName: string; subjectId: Id<"subjects">; subjectName: string }[]; onClose: () => void }) {
   const { toast } = useToast();
   const create = useSchoolMutation(api.homework.create);
-  const [slot, setSlot] = useState(assignments[0]?._id ?? "");
+  const subjects = useMemo(() => {
+    const map = new Map<string, { id: Id<"subjects">; name: string }>();
+    for (const a of assignments) if (!map.has(a.subjectId)) map.set(a.subjectId, { id: a.subjectId, name: a.subjectName });
+    return [...map.values()];
+  }, [assignments]);
+  const [subjectId, setSubjectId] = useState<string>(subjects[0]?.id ?? "");
+  const sections = useMemo(() => assignments.filter((a) => a.subjectId === subjectId), [assignments, subjectId]);
+  // Every section of the chosen subject starts selected; the teacher unticks the ones to skip.
+  const [sectionIds, setSectionIds] = useState<Id<"sections">[]>([]);
+  useEffect(() => setSectionIds(sections.map((s) => s.sectionId)), [sections]);
+  const toggle = (id: Id<"sections">) => setSectionIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const save = async () => {
-    const a = assignments.find((x) => x._id === slot);
-    if (!a || !title.trim() || !description.trim() || !dueDate) return setError("Choose a class and fill in the title, instructions and due date.");
+    if (!subjectId || sectionIds.length === 0) return setError("Choose a subject and at least one section.");
+    if (!title.trim() || !description.trim() || !dueDate) return setError("Fill in the title, instructions and due date.");
     if (dueDate < todayISO()) return setError("The due date cannot be in the past.");
     setBusy(true);
     setError(null);
-    try {
-      await create({ sectionId: a.sectionId, subjectId: a.subjectId, title: title.trim(), description: description.trim(), dueDate });
-      toast({ title: "Homework set", description: `Class ${a.sectionName} was notified.` });
-      onClose();
-    } catch (e) {
-      setError(errText(e));
-    } finally {
-      setBusy(false);
-    }
+    const chosen = sections.filter((s) => sectionIds.includes(s.sectionId));
+    // One create per section; report any section that failed instead of hiding the ones that succeeded.
+    const results = await Promise.allSettled(chosen.map((s) => create({ sectionId: s.sectionId, subjectId: s.subjectId, title: title.trim(), description: description.trim(), dueDate })));
+    setBusy(false);
+    const done = chosen.filter((_, i) => results[i].status === "fulfilled").map((s) => s.sectionName);
+    const failed = chosen.map((s, i) => ({ s, r: results[i] })).filter((x) => x.r.status === "rejected");
+    if (done.length) toast({ title: "Homework set", description: `Class ${done.join(", ")} ${done.length === 1 ? "was" : "were"} notified.` });
+    if (!failed.length) return onClose();
+    setSectionIds(failed.map((x) => x.s.sectionId));
+    setError(`Could not set homework for ${failed.map((x) => x.s.sectionName).join(", ")}: ${errText((failed[0].r as PromiseRejectedResult).reason)}`);
   };
   return (
-    <Modal open onOpenChange={(o) => !o && onClose()} title="New homework" size="md" footer={<><Button variant="outline" onClick={onClose}>Cancel</Button><Button loading={busy} onClick={save}>Set homework</Button></>}>
+    <Modal open onOpenChange={(o) => !o && onClose()} title="New homework" size="md" footer={<><Button variant="outline" onClick={onClose} disabled={busy}>Cancel</Button><Button loading={busy} onClick={save}>Set homework</Button></>}>
       <div className="space-y-4">
-        <FormField label="Class and subject" required><Select value={slot} onChange={(e) => setSlot(e.target.value)}>{assignments.map((a) => <option key={a._id} value={a._id}>{a.sectionName} · {a.subjectName}</option>)}</Select></FormField>
-        <FormField label="Title" required><Input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={150} /></FormField>
+        <FormField label="Subject" required>
+          <Select value={subjectId} onChange={(e) => setSubjectId(e.target.value)}>{subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</Select>
+        </FormField>
+        <fieldset className="space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <legend className="text-[13px] font-medium text-ink-soft">Assign to sections <span className="text-plum" aria-hidden>*</span></legend>
+            {sections.length > 1 && (
+              <div className="flex gap-1">
+                <Button type="button" variant="ghost" size="sm" onClick={() => setSectionIds(sections.map((s) => s.sectionId))}>Select all</Button>
+                <Button type="button" variant="ghost" size="sm" onClick={() => setSectionIds([])}>Clear</Button>
+              </div>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-x-5 gap-y-3 rounded-xl border border-line bg-bg p-3">
+            {sections.map((s) => <Checkbox key={s._id} label={`Class ${s.sectionName}`} checked={sectionIds.includes(s.sectionId)} onChange={() => toggle(s.sectionId)} />)}
+          </div>
+        </fieldset>
+        <FormField label="Title" required><Input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={150} placeholder="e.g. Exercise 4.2 — Trigonometry problems" /></FormField>
         <FormField label="Instructions" required><Textarea rows={4} value={description} onChange={(e) => setDescription(e.target.value)} /></FormField>
         <FormField label="Due date" required><Input type="date" min={todayISO()} value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></FormField>
         {error && <p role="alert" className="text-[13px] text-plum">{error}</p>}

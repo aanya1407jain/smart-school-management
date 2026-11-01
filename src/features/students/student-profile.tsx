@@ -107,6 +107,7 @@ function normalizeProfile(raw: ServerProfile) {
     email: s.email ?? undefined,
     phone: s.phone ?? undefined,
     address: s.address ?? undefined,
+    previousSchool: s.previousSchool ?? null,
     documents: [] as { id?: string; name?: string; kind?: string; sizeKb?: number; uploadedAt?: string }[],
   };
   const classLabel = enrollment ? enrollment.sectionDisplayName ?? [enrollment.className, enrollment.sectionName].filter(Boolean).join(" - ") : "";
@@ -280,6 +281,26 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
               )}
             </Card>
           </div>
+          {s.previousSchool && (
+            <Card className="mt-4" data-testid="previous-school">
+              <CardHeader title="Previous school" description="Admitted from another school with a transfer certificate." />
+              <dl className="grid grid-cols-1 gap-x-6 gap-y-3 p-5 text-sm sm:grid-cols-3">
+                {[
+                  ["School", s.previousSchool.name],
+                  ["Board", s.previousSchool.board],
+                  ["Last class passed", s.previousSchool.lastClassPassed],
+                  ["TC number", s.previousSchool.tcNumber],
+                  ["TC issue date", s.previousSchool.tcIssueDate ? formatDate(s.previousSchool.tcIssueDate) : undefined],
+                  ["Reason for leaving", s.previousSchool.leavingReason],
+                ].map(([label, value]) => (
+                  <div key={label} className="min-w-0">
+                    <dt className="text-[12px] text-ink-muted">{label}</dt>
+                    <dd className="break-words font-medium text-ink">{value || "—"}</dd>
+                  </div>
+                ))}
+              </dl>
+            </Card>
+          )}
         </TabsContent>
 
         <TabsContent value="academic">

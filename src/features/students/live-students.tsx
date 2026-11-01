@@ -39,7 +39,7 @@ export function LiveStudentsList() {
 
   return (
     <div>
-      <PageHeader title="Students" description="Active students in roll-number order (first name, then last name) and full admission register." actions={canWrite ? <LinkButton href="/admin/students/new"><UserPlus className="h-4 w-4" /> Admit student</LinkButton> : undefined} />
+      <PageHeader title="Students" actions={canWrite ? <LinkButton href="/admin/students/new"><UserPlus className="h-4 w-4" /> Admit student</LinkButton> : undefined} />
       <Tabs defaultValue="roster">
         <TabsList
           items={[

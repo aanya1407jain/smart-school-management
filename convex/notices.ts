@@ -113,7 +113,7 @@ async function recipients(ctx: MutationCtx, schoolId: Id<"schools">, audience: A
 }
 
 function view(n: Doc<"notices">) {
-  return { noticeId: n._id, title: n.title, body: n.body, type: n.type, priority: n.priority, audience: n.audience, status: n.status, publishDate: n.publishDate, expiresOn: n.expiresOn ?? null, eventDate: n.eventDate ?? null, createdByUserId: n.createdByUserId, publishedAt: n.publishedAt ?? null };
+  return { noticeId: n._id, title: n.title, body: n.body, type: n.type, priority: n.priority, audience: n.audience, status: n.status, publishDate: n.publishDate, expiresOn: n.expiresOn ?? null, eventDate: n.eventDate ?? null, endDate: n.endDate ?? null, createdByUserId: n.createdByUserId, publishedAt: n.publishedAt ?? null };
 }
 
 /** `view` plus who wrote it and a readable audience (class / section names resolved inside the school). */
@@ -163,29 +163,36 @@ async function editable(ctx: Ctx, noticeId: Id<"notices">) {
   return n;
 }
 
-function validateDates(publishDate: string, expiresOn?: string, eventDate?: string) {
+function validateDates(publishDate: string, expiresOn?: string, eventDate?: string, endDate?: string) {
   assertIsoDate(publishDate, "publishDate");
   if (expiresOn) {
     assertIsoDate(expiresOn, "expiresOn");
     if (expiresOn < publishDate) throw invalid("A notice cannot expire before it is published.", { expiresOn: "Before publish date" });
   }
   if (eventDate) assertIsoDate(eventDate, "eventDate");
+  // A multi-day event or holiday: endDate is its last day.
+  if (endDate) {
+    assertIsoDate(endDate, "endDate");
+    if (!eventDate) throw invalid("An end date needs a start date.", { endDate: "Set the start date first" });
+    if (endDate < eventDate) throw invalid("The end date cannot be before the start date.", { endDate: "Before the start date" });
+  }
 }
 
 // ================================================================ writes
 export const createDraft = administrationMutation({
   args: {
     title: v.string(), body: v.string(), type: vNoticeType, priority: vPriority, audience: vAudience,
-    publishDate: v.string(), expiresOn: v.optional(v.string()), eventDate: v.optional(v.string()),
+    publishDate: v.string(), expiresOn: v.optional(v.string()), eventDate: v.optional(v.string()), endDate: v.optional(v.string()),
   },
   handler: async (ctx, a) => {
     requireAnyPermission(ctx.actor, ["notices:manage", "area:teacher"]);
     const audience = await validateAudience(ctx, a.audience);
-    validateDates(a.publishDate, a.expiresOn, a.eventDate);
+    validateDates(a.publishDate, a.expiresOn, a.eventDate, a.endDate);
     const noticeId = await ctx.db.insert("notices", {
       schoolId: ctx.actor.schoolId, title: assertNonEmpty(a.title, "title", 150), body: assertNonEmpty(a.body, "body", 5000),
       type: a.type, priority: a.priority, audience, status: "draft", publishDate: a.publishDate,
-      ...(a.expiresOn ? { expiresOn: a.expiresOn } : {}), ...(a.eventDate ? { eventDate: a.eventDate } : {}), createdByUserId: ctx.actor.userId,
+      ...(a.expiresOn ? { expiresOn: a.expiresOn } : {}), ...(a.eventDate ? { eventDate: a.eventDate } : {}),
+      ...(a.endDate && a.endDate !== a.eventDate ? { endDate: a.endDate } : {}), createdByUserId: ctx.actor.userId,
     });
     await writeAudit(ctx, { schoolId: ctx.actor.schoolId, actor: ctx.actor, action: "notice.created", entity: { table: "notices", id: noticeId }, summary: `Drafted notice "${a.title.trim()}"` });
     return { noticeId };
@@ -196,7 +203,7 @@ export const createDraft = administrationMutation({
 export const update = administrationMutation({
   args: {
     noticeId: v.id("notices"), title: v.optional(v.string()), body: v.optional(v.string()), type: v.optional(vNoticeType), priority: v.optional(vPriority),
-    audience: v.optional(vAudience), publishDate: v.optional(v.string()), expiresOn: v.optional(v.string()), eventDate: v.optional(v.string()),
+    audience: v.optional(vAudience), publishDate: v.optional(v.string()), expiresOn: v.optional(v.string()), eventDate: v.optional(v.string()), endDate: v.optional(v.string()),
   },
   handler: async (ctx, a) => {
     const n = await editable(ctx, a.noticeId);
@@ -211,8 +218,12 @@ export const update = administrationMutation({
     // "" clears an optional date.
     const expiresOn = a.expiresOn === "" ? undefined : (a.expiresOn ?? n.expiresOn);
     const eventDate = a.eventDate === "" ? undefined : (a.eventDate ?? n.eventDate);
-    validateDates(publishDate, expiresOn, eventDate);
-    Object.assign(patch, { publishDate, expiresOn, eventDate });
+    // A stored end date goes with a cleared start date; a newly sent one is validated.
+    let endDate = a.endDate === "" ? undefined : (a.endDate ?? n.endDate);
+    if (!eventDate && a.endDate === undefined) endDate = undefined;
+    if (endDate && endDate === eventDate) endDate = undefined;
+    validateDates(publishDate, expiresOn, eventDate, endDate);
+    Object.assign(patch, { publishDate, expiresOn, eventDate, endDate });
     await ctx.db.patch(n._id, patch);
     await writeAudit(ctx, { schoolId: ctx.actor.schoolId, actor: ctx.actor, action: "notice.updated", entity: { table: "notices", id: n._id }, summary: `Updated notice "${patch.title ?? n.title}"` });
     return { ok: true };
