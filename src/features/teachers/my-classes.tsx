@@ -7,41 +7,23 @@ import { services } from "@/lib/services";
 import { useQuery } from "@/lib/hooks/use-query";
 import { Avatar, Badge, Card, CardHeader, DataTable, EmptyState, GlassCard, LinkButton, PageHeader, ProgressBar, QueryView, SearchInput } from "@/components/ui";
 import { AttendancePill } from "@/features/students/students-list";
+import { ClassesDashboard } from "@/features/students/classes-dashboard";
 import { formatPercent } from "@/lib/utils/format";
 import { dueLabel } from "@/lib/utils/dates";
 
 export function MyClasses() {
   const q = useQuery(() => services.dashboard.getTeacherClasses(), []);
   return (
-    <div>
-      <PageHeader title="My Classes" description="Sections assigned to you this year. Only your assigned classes and their students are visible." />
-      <QueryView query={q} loading="cards">
-        {(rows) => rows.length === 0 ? <Card><EmptyState icon={<Presentation className="h-6 w-6" />} title="No classes assigned yet" description="The school office will assign your classes in Academics." /></Card> : (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {rows.map((c) => (
-              <Link key={c.sectionId} href={`/teacher/classes/${c.sectionId}`} className="glass group block rounded-2xl p-5 transition-all hover:-translate-y-0.5 hover:shadow-lift">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="text-2xl font-semibold text-sapphire">Class {c.label}</p>
-                    <p className="text-[13px] text-ink-muted">{c.room}</p>
-                  </div>
-                  {c.isClassTeacher && <Badge tone="lavender"><Star className="h-3 w-3" /> Class teacher</Badge>}
-                </div>
-                <div className="mt-3 flex flex-wrap gap-1.5">{c.subjects.map((s) => <Badge key={s} tone="teal">{s}</Badge>)}</div>
-                <dl className="mt-4 grid grid-cols-3 gap-2 border-t border-white/70 pt-3 text-sm">
-                  <div><dt className="text-[11.5px] text-ink-muted">Students</dt><dd className="font-semibold text-ink">{c.students}</dd></div>
-                  <div><dt className="text-[11.5px] text-ink-muted">Attendance</dt><dd className="font-semibold text-ink">{formatPercent(c.avgAttendance)}</dd></div>
-                  <div><dt className="text-[11.5px] text-ink-muted">Homework</dt><dd className="font-semibold text-ink">{c.activeHomework} active</dd></div>
-                </dl>
-                {c.isClassTeacher ? (
-                  <p className="mt-3 text-[12.5px]">{c.markedToday ? <span className="inline-flex items-center gap-1 text-lagoon"><CheckCircle2 className="h-3.5 w-3.5" /> Today&apos;s attendance marked</span> : <span className="text-plum">Today&apos;s attendance not marked</span>}</p>
-                ) : <p className="mt-3 text-[12.5px] text-ink-muted">Attendance is marked by the class teacher</p>}
-              </Link>
-            ))}
-          </div>
-        )}
-      </QueryView>
-    </div>
+    <QueryView query={q} loading="cards">
+      {(rows) => (
+        <ClassesDashboard
+          classes={rows.map((c) => ({
+            sectionId: c.sectionId, label: c.label, room: c.room || null, subjects: c.subjects, students: c.students, studentNames: c.studentNames,
+            attendancePct: c.avgAttendance, activeHomework: c.activeHomework, isClassTeacher: c.isClassTeacher, markedToday: c.isClassTeacher ? c.markedToday : null,
+          }))}
+        />
+      )}
+    </QueryView>
   );
 }
 
@@ -75,7 +57,7 @@ export function TeacherClassDetail({ sectionId }: { sectionId: string }) {
                 </div>
               </GlassCard>
               <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
-                <Card className="p-4 sm:p-5">
+                <Card id="roster" className="scroll-mt-20 p-4 sm:p-5">
                   <div className="mb-4 flex items-center justify-between gap-3">
                     <h2 className="flex items-center gap-2 font-semibold text-sapphire"><Users className="h-4 w-4" /> Students</h2>
                     <SearchInput value={search} onChange={setSearch} placeholder="Search students" className="w-56" label="Search students" />

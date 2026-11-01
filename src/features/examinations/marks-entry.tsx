@@ -4,7 +4,7 @@ import { useSearchParams } from "next/navigation";
 import { Lock, Save } from "lucide-react";
 import { services } from "@/lib/services";
 import { useQuery } from "@/lib/hooks/use-query";
-import { Badge, Button, Card, Checkbox, EmptyState, Input, LinkButton, PageHeader, QueryView, useToast, Avatar } from "@/components/ui";
+import { Badge, Button, Card, Checkbox, EmptyState, Input, LinkButton, PageHeader, ProgressBar, QueryView, useToast, Avatar } from "@/components/ui";
 import { gradeFor, percentOf } from "@/lib/utils/grades";
 import { formatDate } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils/cn";
@@ -124,8 +124,13 @@ export function MarksEntry({ area }: { area: "admin" | "teacher" }) {
             )}
             <Card>
               <div className="flex flex-wrap items-center gap-2 border-b border-line/60 px-5 py-3.5 text-[13px]">
-                <Badge tone="sapphire">{stats.entered}/{d.students.length} entered</Badge>
-                <Badge tone="teal">Average {stats.avg === null ? "—" : `${stats.avg.toFixed(1)}%`}</Badge>
+                <Badge tone="sapphire" className="figures">{stats.entered}/{d.students.length} entered</Badge>
+                <Badge tone="teal" className="figures">Average {stats.avg === null ? "—" : `${stats.avg.toFixed(1)}%`}</Badge>
+                {/* Class grading completion. */}
+                <div className="ml-auto flex w-full items-center gap-2 sm:w-56">
+                  <ProgressBar value={d.students.length ? (stats.entered / d.students.length) * 100 : 0} label="Grading completion" />
+                  <span className="figures w-10 text-right text-[12px] font-semibold text-ink-soft">{d.students.length ? Math.round((stats.entered / d.students.length) * 100) : 0}%</span>
+                </div>
               </div>
               <ul className="divide-y divide-line/50 px-5">
                 {d.students.map((s) => {
@@ -134,13 +139,13 @@ export function MarksEntry({ area }: { area: "admin" | "teacher" }) {
                   const valid = !r.absent && r.marks !== "" && !Number.isNaN(n) && n >= 0 && n <= max;
                   const pct = valid ? percentOf(n, max) : null;
                   return (
-                    <li key={s.id} className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <li key={s.id} className="-mx-2 flex flex-col gap-2 rounded-xl px-2 py-3 transition-colors focus-within:bg-teal-soft/40 hover:bg-teal-soft/25 sm:flex-row sm:items-center sm:justify-between">
                       <div className="flex items-center gap-3">
-                        <span className="w-6 text-right text-[12px] text-ink-muted">{s.rollNo}</span>
+                        <span className="mono-id w-6 text-right text-ink-muted">{s.rollNo}</span>
                         <Avatar name={s.name} size="sm" />
                         <div>
                           <p className="text-sm font-semibold text-ink">{s.name}</p>
-                          <p className="font-mono text-[11.5px] text-ink-muted">{s.admissionNo}</p>
+                          <p className="mono-id text-ink-muted">{s.admissionNo}</p>
                         </div>
                       </div>
                       <div className="flex items-center gap-3 pl-9 sm:pl-0">
@@ -177,12 +182,12 @@ export function MarksEntry({ area }: { area: "admin" | "teacher" }) {
                                 return c;
                               });
                             }}
-                            className="h-9 text-right"
+                            className="figures h-9 text-right font-semibold"
                           />
                         </div>
                         <span
                           className={cn(
-                            "w-16 text-right text-[13px] font-semibold",
+                            "figures w-16 text-right text-[13px] font-semibold",
                             r.absent
                               ? "text-amber-600 font-bold"
                               : pct === null

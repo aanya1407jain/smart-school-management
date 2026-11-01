@@ -41,12 +41,3 @@ export async function classTeacherOf(ctx: QueryCtx, section: Doc<"sections">): P
   const t = await ctx.db.get(section.classTeacherId);
   return t && t.schoolId === section.schoolId ? t : null;
 }
-
-/** True when the subject is in the class curriculum for the year (classSubjects). */
-export async function subjectInCurriculum(ctx: QueryCtx, classId: Id<"classes">, academicYearId: Id<"academicYears">, subjectId: Id<"subjects">): Promise<boolean> {
-  const row = await ctx.db
-    .query("classSubjects")
-    .withIndex("by_class_year_subject", (q) => q.eq("classId", classId).eq("academicYearId", academicYearId).eq("subjectId", subjectId))
-    .first();
-  return !!row;
-}

@@ -118,7 +118,7 @@ describe("student portal: authorization", () => {
     const g = await as(t, A.users.legacyGuardian);
     expect(await errorCode(myProfileOf(g))).toBe("NO_SCHOOL_ACCESS");
     expect(await errorCode(myProfileOf(g, A.studentA))).toBe("NO_SCHOOL_ACCESS");
-    expect(await errorCode(g.query(api.studentPortal.myFees, { studentId: A.studentA }))).toBe("NO_SCHOOL_ACCESS");
+    expect(await errorCode(g.query(api.fees.myFees, { studentId: A.studentA }))).toBe("NO_SCHOOL_ACCESS");
   });
 
   test("the student's parent contact is shown as contact data only", async () => {
@@ -184,7 +184,7 @@ describe("student portal: missing data is explicit", () => {
 
     // Enrollment withdrawn by the office → "ended", no roll number.
     const enr = await t.run(async (ctx) => (await ctx.db.query("enrollments").withIndex("by_student_year", (q) => q.eq("studentId", studentId).eq("academicYearId", A.yearId)).first())!);
-    await admin.mutation(api.academics.endEnrollment, { enrollmentId: enr._id, status: "withdrawn", endDate: "2026-09-30" });
+    await admin.mutation(api.students.endEnrollment, { enrollmentId: enr._id, status: "withdrawn", endDate: "2026-09-30" });
     let p = await myProfileOf(me);
     expect(p.state === "ok" && p.enrollmentState === "ended" && p.enrollment?.status === "withdrawn" && p.enrollment.rollNo === null).toBe(true);
 

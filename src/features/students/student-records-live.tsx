@@ -29,7 +29,7 @@ export function StudentDocuments({ studentId, canManage }: { studentId: string; 
 }
 
 export function EnrollmentHistory({ studentId }: { studentId: string }) {
-  const rows = useSchoolQuery(api.academics.enrollmentHistory, { studentId: studentId as Id<"students"> });
+  const rows = useSchoolQuery(api.students.enrollmentHistory, { studentId: studentId as Id<"students"> });
   return (
     <Card data-testid="enrollment-history">
       <CardHeader title="Enrollment history" description="Every class and section across academic years. Ended enrollments keep their last roll number." />
@@ -63,7 +63,7 @@ export function EnrollmentActions({ studentId, enrollmentId, sectionLabel, stude
 
 function EndEnrollmentModal({ enrollmentId, sectionLabel, studentName, onClose }: { enrollmentId: string; sectionLabel: string; studentName: string; onClose: () => void }) {
   const { toast } = useToast();
-  const end = useSchoolMutation(api.academics.endEnrollment);
+  const end = useSchoolMutation(api.students.endEnrollment);
   const [status, setStatus] = useState<"withdrawn" | "completed">("withdrawn");
   const [endDate, setEndDate] = useState(todayISO());
   const [busy, setBusy] = useState(false);
@@ -96,7 +96,7 @@ function EndEnrollmentModal({ enrollmentId, sectionLabel, studentName, onClose }
 function TransferModal({ studentId, sectionLabel, studentName, onClose }: { studentId: string; sectionLabel: string; studentName: string; onClose: () => void }) {
   const { toast } = useToast();
   const sections = useSchoolQuery(api.academics.listSections, {});
-  const enroll = useSchoolMutation(api.academics.enrollStudent);
+  const enroll = useSchoolMutation(api.students.enrollStudent);
   const [sectionId, setSectionId] = useState("");
   const [startDate, setStartDate] = useState(todayISO());
   const [busy, setBusy] = useState(false);

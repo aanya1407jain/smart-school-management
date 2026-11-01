@@ -58,11 +58,11 @@ async function main() {
   const today = new Date().toISOString().slice(0, 10);
 
   const calls: Record<ModuleKey, [string, () => Promise<unknown>][]> = {
-    students: [["academics.studentCounts (admin)", () => admin.query(api.academics.studentCounts, {})]],
+    students: [["academics.studentCounts (admin)", () => admin.query(api.students.studentCounts, {})]],
     academics: [
       ["exams.list (admin)", () => admin.query(api.exams.list, {})],
       ["homework.listMine (teacher)", () => teacher.query(api.homework.listMine, {})],
-      ["studentPortal.myTimetable (student)", () => student.query(api.studentPortal.myTimetable, {})],
+      ["studentPortal.myTimetable (student)", () => student.query(api.timetable.myStudentTimetable, {})],
     ],
     attendance: [
       ["staff.myLeave (teacher)", () => teacher.query(api.staff.myLeave, {})],
@@ -70,7 +70,7 @@ async function main() {
     ],
     finance: [
       ["fees.listStructures (admin)", () => admin.query(api.fees.listStructures, {})],
-      ["studentPortal.myFees (student)", () => student.query(api.studentPortal.myFees, {})],
+      ["studentPortal.myFees (student)", () => student.query(api.fees.myFees, {})],
     ],
     administration: [
       ["notices.feed (teacher)", () => teacher.query(api.notices.feed, {})],

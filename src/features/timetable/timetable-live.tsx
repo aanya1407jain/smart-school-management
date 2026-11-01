@@ -1,7 +1,11 @@
 "use client";
 /**
- * LIVE timetable builder for school admins with drag-and-drop lesson adjustments,
- * instant conflict warnings (teacher/room double-booking) and alternative slot suggestions.
+ * Timetable builder for admins (every admin session; school's Convex records).
+ * Layout: "By class" / "By teacher" views over the shared TimetableGrid, bell
+ * schedule in a dialog. Workflow: click a slot to add/change a lesson (with a
+ * subject-repeat hint and free-slot suggestions), drag a lesson to a free slot
+ * (timetable.moveEntry, one atomic server step). Teacher / room clashes are
+ * refused by the server (convex/timetable.ts).
  */
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CalendarDays, CheckCircle2, Clock, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
@@ -10,8 +14,8 @@ import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { useSchoolMutation, useSchoolQuery } from "@/lib/convex/membership";
 import { getAppError } from "@/lib/convex/errors";
-import { Badge, Button, Card, CardHeader, Checkbox, ConfirmDialog, EmptyState, FormField, Input, LoadingState, Modal, PageHeader, Select, useToast } from "@/components/ui";
-import { TimetableGrid } from "./timetable-grid";
+import { Badge, Button, Card, Checkbox, ConfirmDialog, EmptyState, FormField, Input, LoadingState, Modal, PageHeader, Segmented, Select, useToast } from "@/components/ui";
+import { TimetableGrid, daysWithLessons } from "./timetable-grid";
 
 const errText = (e: unknown) => getAppError(e)?.message ?? (e instanceof Error ? e.message : String(e));
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -23,22 +27,61 @@ export function LiveTimetableBuilder() {
   const periods = useSchoolQuery(api.timetable.listPeriods, {});
   const school = useSchoolQuery(api.schools.current, {});
   const sections = useSchoolQuery(api.academics.listSections, {});
+  const teachers = useSchoolQuery(api.academics.listTeachers, {});
+  const [mode, setMode] = useState<"section" | "teacher">("section");
   const [sectionId, setSectionId] = useState("");
+  const [teacherId, setTeacherId] = useState("");
   useEffect(() => { if (sections && !sectionId && sections[0]) setSectionId(sections[0]._id); }, [sections, sectionId]);
+  useEffect(() => { if (teachers && !teacherId && teachers[0]) setTeacherId(teachers[0].teacherId); }, [teachers, teacherId]);
+  const [bellOpen, setBellOpen] = useState(false);
   const [periodForm, setPeriodForm] = useState<Period | "new" | null>(null);
 
-  if (periods === undefined || school === undefined || sections === undefined) return <LoadingState variant="table" label="Loading timetable" />;
-  const sorted = [...periods].sort((a, b) => a.index - b.index);
+  if (periods === undefined || school === undefined || sections === undefined || teachers === undefined) return <LoadingState variant="table" label="Loading timetable" />;
+  const sorted = [...periods].sort((a, b) => a.startTime.localeCompare(b.startTime) || a.index - b.index);
+  const editPeriod = (p: Period | "new") => { setBellOpen(false); setPeriodForm(p); };
 
   return (
-    <div className="space-y-5" data-testid="live-timetable-builder">
+    <div data-testid="live-timetable-builder">
       <PageHeader
         title="Timetable"
-        description="Set the school's bell schedule, then place each section's lessons using drag-and-drop with conflict detection."
+        description="Build each section's weekly timetable. Teacher and room clashes are blocked; teachers and students see the same schedule."
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => setBellOpen(true)}><Clock className="h-4 w-4" /> Bell schedule</Button>
+            <Segmented label="View by" value={mode} onChange={setMode} options={[{ value: "section", label: "By class" }, { value: "teacher", label: "By teacher" }]} />
+          </div>
+        }
       />
-      <Card>
-        <CardHeader title="Bell schedule" description="Periods are shared by every section. Breaks cannot hold lessons." action={<Button size="sm" onClick={() => setPeriodForm("new")}><Plus className="h-4 w-4" /> Add period</Button>} />
-        <div className="p-5 pt-2">
+      {sections.length === 0 ? (
+        <Card><EmptyState icon={<CalendarDays className="h-6 w-6" />} title="No sections yet" description="Create classes and sections in Academics, then build their timetables here." /></Card>
+      ) : (
+        <Card className="p-4 sm:p-5">
+          <div className="mb-4 flex flex-wrap items-end gap-3">
+            {mode === "section" ? (
+              <FormField label="Class & section" className="w-48">
+                <Select aria-label="Section" value={sectionId} onChange={(e) => setSectionId(e.target.value)}>
+                  {sections.map((s) => <option key={s._id} value={s._id}>Class {s.displayName}</option>)}
+                </Select>
+              </FormField>
+            ) : (
+              <FormField label="Teacher" className="w-64">
+                <Select aria-label="Teacher" value={teacherId} onChange={(e) => setTeacherId(e.target.value)}>
+                  {teachers.map((t) => <option key={t.teacherId} value={t.teacherId}>{t.name}</option>)}
+                </Select>
+              </FormField>
+            )}
+            <p className="pb-2 text-[13px] text-ink-muted">
+              {mode === "section" ? "Click any slot to add or change a lesson, or drag a lesson to a free slot." : "Read-only view. Edit lessons from the class view."}
+            </p>
+          </div>
+          {mode === "section"
+            ? sectionId && <SectionWeek sectionId={sectionId as Id<"sections">} classId={sections.find((s) => s._id === sectionId)!.classId} workingDays={school.settings.workingDays} onOpenBell={() => setBellOpen(true)} />
+            : teacherId && <TeacherWeek teacherId={teacherId as Id<"teachers">} />}
+        </Card>
+      )}
+      {bellOpen && (
+        <Modal open onOpenChange={(o) => !o && setBellOpen(false)} title="Bell schedule" description="Periods are shared by every section. Breaks cannot hold lessons." size="md"
+          footer={<><Button variant="outline" onClick={() => setBellOpen(false)}>Close</Button><Button onClick={() => editPeriod("new")}><Plus className="h-4 w-4" /> Add period</Button></>}>
           {sorted.length === 0 ? <EmptyState icon={<Clock className="h-6 w-6" />} title="No periods yet" description="Add the school day's periods (and breaks) before placing lessons." /> : (
             <ul className="divide-y divide-line/60">
               {sorted.map((p) => (
@@ -46,46 +89,52 @@ export function LiveTimetableBuilder() {
                   <span className="w-8 text-sm font-bold text-sapphire">{p.index}</span>
                   <span className="flex-1 font-medium text-ink">{p.label} {p.isBreak && <Badge tone="neutral">Break</Badge>}</span>
                   <span className="text-[13px] text-ink-soft">{p.startTime}–{p.endTime}</span>
-                  <Button size="icon-sm" variant="ghost" aria-label={`Edit ${p.label}`} onClick={() => setPeriodForm(p)}><Pencil className="h-4 w-4" /></Button>
+                  <Button size="icon-sm" variant="ghost" aria-label={`Edit ${p.label}`} onClick={() => editPeriod(p)}><Pencil className="h-4 w-4" /></Button>
                 </li>
               ))}
             </ul>
           )}
-        </div>
-      </Card>
-      {sections.length === 0 ? (
-        <Card><EmptyState icon={<CalendarDays className="h-6 w-6" />} title="No sections yet" description="Create classes and sections in Academics, then build their timetables here." /></Card>
-      ) : (
-        <Card>
-          <CardHeader
-            title="Weekly lessons"
-            description="Drag and drop lessons between slots or click to edit. Conflict warnings and smart slot suggestions activate automatically."
-            action={<Select aria-label="Section" value={sectionId} onChange={(e) => setSectionId(e.target.value)} className="w-44">{sections.map((s) => <option key={s._id} value={s._id}>Class {s.displayName}</option>)}</Select>}
-          />
-          {sectionId && <SectionWeek sectionId={sectionId as Id<"sections">} classId={sections.find((s) => s._id === sectionId)!.classId} workingDays={school.settings.workingDays} />}
-        </Card>
+        </Modal>
       )}
-      {periodForm && <PeriodModal period={periodForm === "new" ? undefined : periodForm} nextIndex={(sorted.at(-1)?.index ?? 0) + 1} onClose={() => setPeriodForm(null)} />}
+      {periodForm && <PeriodModal period={periodForm === "new" ? undefined : periodForm} nextIndex={Math.max(0, ...sorted.map((p) => p.index)) + 1} onClose={() => { setPeriodForm(null); setBellOpen(true); }} />}
     </div>
   );
 }
 
-function SectionWeek({ sectionId, classId, workingDays }: { sectionId: Id<"sections">; classId: Id<"classes">; workingDays: number[] }) {
+/** "By teacher": one teacher's week across sections (read-only; edit from the class view). */
+function TeacherWeek({ teacherId }: { teacherId: Id<"teachers"> }) {
+  const week = useSchoolQuery(api.timetable.teacherTimetable, { teacherId });
+  if (week === undefined) return <LoadingState variant="table" />;
+  if (week.lessons.length === 0) return <EmptyState title="No lessons scheduled for this teacher" />;
+  const periods = [...week.periods].sort((a, b) => a.startTime.localeCompare(b.startTime) || a.index - b.index);
+  return (
+    <TimetableGrid
+      caption="Teacher's weekly timetable"
+      days={daysWithLessons(week.lessons.map((l) => l.dayOfWeek))}
+      periods={periods.map((p) => ({ key: p.periodId, label: p.label, startTime: p.startTime, endTime: p.endTime, isBreak: p.isBreak }))}
+      lessonAt={(d, gp) => {
+        const l = week.lessons.find((x) => x.dayOfWeek === d && x.periodId === gp.key);
+        return l ? { subject: l.subject, detail: [`Class ${l.section}`, l.room].filter(Boolean).join(" · ") } : undefined;
+      }}
+    />
+  );
+}
+
+function SectionWeek({ sectionId, classId, workingDays, onOpenBell }: { sectionId: Id<"sections">; classId: Id<"classes">; workingDays: number[]; onOpenBell: () => void }) {
   const { toast } = useToast();
   const week = useSchoolQuery(api.timetable.sectionTimetable, { sectionId });
-  const setEntry = useSchoolMutation(api.timetable.setEntry);
-  const removeEntry = useSchoolMutation(api.timetable.removeEntry);
+  const moveEntry = useSchoolMutation(api.timetable.moveEntry);
   const [slot, setSlot] = useState<{ dayOfWeek: number; period: Week["periods"][number]; lesson?: Lesson } | null>(null);
 
-  if (week === undefined) return <div className="p-5"><LoadingState variant="table" /></div>;
-  const periods = [...week.periods].sort((a, b) => a.index - b.index);
+  if (week === undefined) return <LoadingState variant="table" />;
+  const periods = [...week.periods].sort((a, b) => a.startTime.localeCompare(b.startTime) || a.index - b.index);
   const days = [...workingDays].sort((a, b) => a - b);
-  if (periods.length === 0) return <div className="p-5"><EmptyState title="Add periods first" description="The bell schedule above is empty." /></div>;
+  if (periods.length === 0) return <EmptyState title="Add periods first" description="The bell schedule is empty." action={<Button size="sm" onClick={onOpenBell}><Clock className="h-4 w-4" /> Bell schedule</Button>} />;
 
   const byId = new Map(periods.map((p) => [p.periodId as string, p]));
   const lessonOf = (d: number, periodId: string) => week.lessons.find((x) => x.dayOfWeek === d && x.periodId === periodId);
 
-  // Drag and drop mover with server-side validation & displacement
+  // Drag and drop: one atomic server move (timetable.moveEntry) — the target must be free, clashes are checked there.
   const handleMoveLesson = async (source: { day: number; periodKey: string }, target: { day: number; periodKey: string }) => {
     const srcLesson = lessonOf(source.day, source.periodKey);
     if (!srcLesson) return;
@@ -95,18 +144,13 @@ function SectionWeek({ sectionId, classId, workingDays }: { sectionId: Id<"secti
       toast({ title: "Cannot drop into break period", tone: "error" });
       return;
     }
+    if (lessonOf(target.day, target.periodKey)) {
+      toast({ title: "That slot already has a lesson", description: "Move or remove it first.", tone: "error" });
+      return;
+    }
 
     try {
-      await setEntry({
-        sectionId,
-        dayOfWeek: target.day,
-        periodId: tgtPeriod.periodId,
-        subjectId: srcLesson.subjectId,
-        teacherId: srcLesson.teacherId,
-        ...(srcLesson.room ? { room: srcLesson.room } : {}),
-      });
-
-      await removeEntry({ entryId: srcLesson.entryId });
+      await moveEntry({ entryId: srcLesson.entryId, dayOfWeek: target.day, periodId: tgtPeriod.periodId });
       toast({ title: `Moved ${srcLesson.subject} to ${WEEKDAYS[target.day]} (${tgtPeriod.label})` });
     } catch (e) {
       toast({ title: "Cannot move lesson", description: errText(e), tone: "error" });
@@ -114,7 +158,7 @@ function SectionWeek({ sectionId, classId, workingDays }: { sectionId: Id<"secti
   };
 
   return (
-    <div className="p-5 pt-2">
+    <div>
       <TimetableGrid
         caption={`Weekly lessons for Class ${week.section.displayName}`}
         days={days}
@@ -123,20 +167,11 @@ function SectionWeek({ sectionId, classId, workingDays }: { sectionId: Id<"secti
           const l = lessonOf(d, gp.key);
           if (!l) return undefined;
 
-          // Conflict detection directly inside grid view
-          const sameDayLessons = week.lessons.filter((x) => x.dayOfWeek === d && x.entryId !== l.entryId);
-          const hasSubjectRepeat = sameDayLessons.filter((x) => x.subjectId === l.subjectId).length >= 2;
-          const hasRoomClash = l.room ? sameDayLessons.some((x) => x.periodId === gp.key && x.room?.trim().toLowerCase() === l.room?.trim().toLowerCase()) : false;
-          const hasTeacherClash = sameDayLessons.some((x) => x.periodId === gp.key && x.teacherId === l.teacherId);
-
-          const hasConflict = hasSubjectRepeat || hasRoomClash || hasTeacherClash;
-          const conflictReason = hasTeacherClash
-            ? "Teacher double-booked"
-            : hasRoomClash
-            ? `Room ${l.room} occupied`
-            : hasSubjectRepeat
-            ? "Max daily subject limit reached"
-            : undefined;
+          // Teacher and room clashes with other sections are refused by the server (setEntry / moveEntry),
+          // so a stored lesson never has one. The only flag here is a planning hint: a subject placed 3+ times in a day.
+          const sameDaySubject = week.lessons.filter((x) => x.dayOfWeek === d && x.subjectId === l.subjectId).length;
+          const hasConflict = sameDaySubject >= 3;
+          const conflictReason = hasConflict ? `${sameDaySubject}× this subject today` : undefined;
 
           return {
             id: l.entryId,
@@ -190,8 +225,8 @@ function LessonModal({
   onClose: () => void;
 }) {
   const { toast } = useToast();
-  const subjects = useSchoolQuery(api.academics.listClassSubjects, { classId });
-  const assignments = useSchoolQuery(api.academics.listTeacherAssignments, { sectionId });
+  const subjects = useSchoolQuery(api.subjects.listClassSubjects, { classId });
+  const assignments = useSchoolQuery(api.subjects.listTeacherAssignments, { sectionId });
   const setEntry = useSchoolMutation(api.timetable.setEntry);
   const removeEntry = useSchoolMutation(api.timetable.removeEntry);
 
@@ -210,33 +245,13 @@ function LessonModal({
     }
   }, [teachers, teacherId]);
 
-  // Conflict detection: Same section daily subject repeats, teacher overlap & room clash
+  // Planning hint only: the subject already appears twice or more this day in this section. Teacher and
+  // room clashes involve OTHER sections and are checked by the server on save (its message is shown).
   const conflict = useMemo(() => {
-    const sameDayLessons = existingLessons.filter((l) => l.dayOfWeek === slot.dayOfWeek && l.entryId !== slot.lesson?.entryId);
-
-    if (teacherId) {
-      const teacherClash = sameDayLessons.find((l) => l.teacherId === teacherId && l.periodId === slot.period.periodId);
-      if (teacherClash) {
-        return { type: "teacher_clash", message: "Selected teacher is already scheduled for another lesson during this period." };
-      }
-    }
-
-    if (subjectId) {
-      const subjectRepeats = sameDayLessons.filter((l) => l.subjectId === subjectId);
-      if (subjectRepeats.length >= 2) {
-        return { type: "subject_cap", message: `Subject is already placed ${subjectRepeats.length} times on ${WEEKDAYS[slot.dayOfWeek]}.` };
-      }
-    }
-
-    if (room.trim()) {
-      const roomClash = sameDayLessons.find((l) => l.room?.trim().toLowerCase() === room.trim().toLowerCase() && l.periodId === slot.period.periodId);
-      if (roomClash) {
-        return { type: "room_clash", message: `Room "${room}" is already assigned during this period.` };
-      }
-    }
-
-    return null;
-  }, [existingLessons, subjectId, teacherId, room, slot]);
+    if (!subjectId) return null;
+    const subjectRepeats = existingLessons.filter((l) => l.dayOfWeek === slot.dayOfWeek && l.entryId !== slot.lesson?.entryId && l.subjectId === subjectId);
+    return subjectRepeats.length >= 2 ? { type: "subject_cap", message: `This subject is already placed ${subjectRepeats.length} times on ${WEEKDAYS[slot.dayOfWeek]}.` } : null;
+  }, [existingLessons, subjectId, slot]);
 
   // Smart suggestions: Find free slots in the week for this subject
   const suggestions = useMemo(() => {
@@ -263,9 +278,6 @@ function LessonModal({
 
   const save = async () => {
     if (!subjectId || !teacherId) return setError("Choose a subject and one of its assigned teachers.");
-    if (conflict && (conflict.type === "teacher_clash" || conflict.type === "room_clash")) {
-      return setError(conflict.message);
-    }
     setBusy(true);
     setError(null);
     try {
@@ -332,7 +344,7 @@ function LessonModal({
             <div className="flex items-start gap-2 rounded-xl border border-blush bg-blush/30 p-3 text-xs text-plum">
               <AlertTriangle className="h-4 w-4 shrink-0 text-plum mt-0.5" />
               <div>
-                <p className="font-semibold">Conflict Detected</p>
+                <p className="font-semibold">Check the plan</p>
                 <p>{conflict.message}</p>
               </div>
             </div>

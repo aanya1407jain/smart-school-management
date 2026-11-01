@@ -1,5 +1,5 @@
 import { Bell, BookOpenCheck, CalendarCheck2, ClipboardList, Megaphone, Wallet } from "lucide-react";
-import type { NotificationCategory } from "@/types/domain";
+import type { NotificationCategory } from "@/types/core";
 import { cn } from "@/lib/utils/cn";
 
 const MAP: Record<NotificationCategory, { Icon: typeof Bell; cls: string }> = {

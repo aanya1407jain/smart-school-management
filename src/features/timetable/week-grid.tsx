@@ -1,5 +1,5 @@
 "use client";
-import type { Period, Weekday } from "@/types/domain";
+import type { Period, Weekday } from "@/types/academics";
 import type { TimetableCell } from "@/lib/services/timetable.service";
 import { WEEKDAY_NAMES } from "@/lib/utils/dates";
 import { TimetableGrid, type GridPeriod } from "./timetable-grid";

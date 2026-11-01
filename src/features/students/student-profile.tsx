@@ -1,24 +1,19 @@
 "use client";
 import Link from "next/link";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis, Legend } from "recharts";
-import { Cake, Droplet, FileText, Mail, MapPin, Pencil, Phone, UserRound, Wallet, CalendarDays, Download } from "lucide-react";
+import { Cake, Droplet, Mail, MapPin, Pencil, Phone, UserRound, CalendarDays } from "lucide-react";
 import { Component, type ReactNode } from "react";
 import type { FunctionReturnType } from "convex/server";
 import { api } from "../../../convex/_generated/api";
 import { useSchoolQuery } from "@/lib/convex/membership";
 import { getAppError } from "@/lib/convex/errors";
 import { useSession } from "@/features/auth/session-provider";
-import { services } from "@/lib/services";
-import { useQuery as useDemoQuery } from "@/lib/hooks/use-query";
-import { DemoStudentProfileBody } from "./demo-student-profile";
-import { LiveFeesPanel, LiveHomeworkList, LiveResultsList, homeworkState, type LiveFees } from "@/features/student-portal/live-records";
+import { DemoSlot } from "@/lib/demo/demo-slot";
+import { contributionsTo } from "@/lib/contributions";
 import { EnrollmentActions, EnrollmentHistory, StudentDocuments } from "./student-records-live";
-import {
-  Avatar, Badge, Card, CardHeader, EmptyState, GlassCard, LinkButton, ProgressRing, StatusBadge, Tabs, TabsContent, TabsList,
-} from "@/components/ui";
-import { ChartTooltip, axisProps } from "@/components/charts/chart-card";
-import { CHART, CHART_GRID } from "@/lib/constants/theme";
-import { formatCurrency, formatPercent, titleCase } from "@/lib/utils/format";
+import { Avatar, Badge, Card, CardHeader, EmptyState, GlassCard, LinkButton, ProgressRing, StatusBadge, Tabs, TabsContent, TabsList } from "@/components/ui";
+import { ChartTooltip, axisProps, barCursor, barProps, gridProps } from "@/components/charts/chart-card";
+import { formatPercent, titleCase } from "@/lib/utils/format";
 import { formatDate, formatShortDate, formatWeekday, daysBetween, todayISO } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils/cn";
 
@@ -36,16 +31,13 @@ import { cn } from "@/lib/utils/cn";
  */
 export function StudentProfileView({ studentId, backHref }: { studentId: string; backHref?: string }) {
   const { dataSource } = useSession();
-  const demoMode = dataSource === "demo" && !!studentId;
-  const demo = useDemoQuery(() => services.students.getProfile(studentId), [studentId], { enabled: demoMode });
   if (!studentId) return <NotFound backHref={backHref} />;
-  if (demoMode && demo.isLoading) return <div className="p-8 text-center text-ink-muted" role="status">Loading student profile...</div>;
-  if (demoMode && demo.data) return <DemoStudentProfileBody p={demo.data} backHref={backHref} />;
+  if (dataSource === "demo" && studentId.startsWith("stu_")) return <DemoSlot id="students.profile" props={{ studentId, backHref }} fallback={<NotFound backHref={backHref} />} />;
   return <ProfileBoundary backHref={backHref}><LiveStudentProfileView studentId={studentId} backHref={backHref} /></ProfileBoundary>;
 }
 
 function LiveStudentProfileView({ studentId, backHref }: { studentId: string; backHref?: string }) {
-  const data = useSchoolQuery(api.academics.getStudentProfile, { studentId });
+  const data = useSchoolQuery(api.students.getStudentProfile, { studentId });
   if (data === undefined) return <div className="p-8 text-center text-ink-muted" role="status">Loading student profile...</div>;
   if (!data) return <NotFound backHref={backHref} />;
   return <ProfileBody p={normalizeProfile(data)} backHref={backHref} />;
@@ -95,7 +87,7 @@ type ParentContactVM = {
 
 type ProfileVM = ReturnType<typeof normalizeProfile>;
 
-type ServerProfile = NonNullable<FunctionReturnType<typeof api.academics.getStudentProfile>>;
+type ServerProfile = NonNullable<FunctionReturnType<typeof api.students.getStudentProfile>>;
 
 /** Turn the server's explicit-field response into the view model. */
 function normalizeProfile(raw: ServerProfile) {
@@ -144,7 +136,7 @@ function normalizeProfile(raw: ServerProfile) {
     attendance: summarizeAttendance(records),
     homework: raw.homework,
     results: raw.results,
-    fees: raw.fees as LiveFees | null,
+    fees: raw.fees,
   };
 }
 
@@ -199,16 +191,17 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
   const age = s.dateOfBirth ? Math.floor(daysBetween(s.dateOfBirth, todayISO()) / 365.25) : null;
   const isAdmin = can("students:write");
   const pct = p.attendance.stats.percentage;
-  const latest = p.results[0];
   const primaryContact = p.parentContacts[0];
-  const pendingHw = p.homework.filter((h) => { const st = homeworkState(h); return st === "pending" || st === "overdue"; }).length;
+  // Fees, Examinations and Academics sections are contributed by those modules when shipped and enabled.
+  const slot = { studentId: s.id ?? "", isAdmin, results: p.results, homework: p.homework, fees: p.fees };
+  const contributed = contributionsTo("studentProfile", hasModule);
+  const moduleTabs = contributed.flatMap((c) => c.tabs?.(slot) ?? []);
 
   const tabs = [
     { value: "overview", label: "Overview" },
     { value: "academic", label: "Academic" },
     ...(A ? [{ value: "attendance", label: "Attendance" }] : []),
-    ...(p.fees && F ? [{ value: "fees", label: "Fees" }] : []),
-    ...(AC ? [{ value: "exams", label: "Examinations", count: p.results.length }, { value: "homework", label: "Homework", count: p.homework.length }] : []),
+    ...moduleTabs.map((t) => ({ value: t.value, label: t.label, count: t.count })),
     ...(p.access !== "assigned" && S ? [{ value: "documents", label: "Documents" }] : []),
     { value: "parent", label: "Parent contact" },
   ];
@@ -237,22 +230,13 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
           </div>
           <div className="flex flex-wrap gap-2">
             {backHref && <LinkButton href={backHref} variant="ghost">Back</LinkButton>}
-            {isAdmin && F && s.id && <LinkButton href={`/admin/fees/${s.id}`} variant="outline"><Wallet className="h-4 w-4" /> Fee ledger</LinkButton>}
+            {contributed.map((c, i) => <span key={i} className="contents">{c.actions?.(slot)}</span>)}
             {isAdmin && S && s.id && <LinkButton href={`/admin/students/${s.id}/edit`}><Pencil className="h-4 w-4" /> Edit</LinkButton>}
           </div>
         </div>
         <dl className="relative mt-6 grid grid-cols-2 gap-4 border-t border-white/70 pt-5 sm:grid-cols-4">
           {A && <Metric label="Attendance" value={pct != null ? formatPercent(pct, 1) : dash} tone={pct != null && pct < 85 ? "warn" : undefined} />}
-          {AC && <Metric
-            label="Latest result"
-            value={latest?.percentage != null ? `${formatPercent(latest.percentage, 1)}${latest.grade ? ` · ${latest.grade}` : ""}` : dash}
-          />}
-          {AC && <Metric label="Pending homework" value={String(pendingHw)} />}
-          {F && <Metric
-            label="Fee balance"
-            value={p.fees ? (p.fees.totals.outstandingMinor ? formatCurrency(p.fees.totals.outstandingMinor / 100) : p.fees.obligations.length ? "Paid" : "None assigned") : "Restricted"}
-            tone={p.fees?.obligations.some((o) => o.outstandingMinor > 0 && o.dueDate < todayISO()) ? "warn" : undefined}
-          />}
+          {contributed.flatMap((c) => c.metrics?.(slot) ?? []).map((m) => <Metric key={m.key} label={m.label} value={m.value} tone={m.tone} />)}
         </dl>
       </GlassCard>
 
@@ -348,13 +332,13 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
                 <div className="h-60 px-3 pb-4">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={p.attendance.monthly} margin={{ top: 10, right: 8, left: 0, bottom: 0 }}>
-                      <CartesianGrid vertical={false} stroke={CHART_GRID} />
+                      <CartesianGrid {...gridProps} />
                       <XAxis dataKey="label" {...axisProps} />
                       <YAxis {...axisProps} width={30} allowDecimals={false} />
-                      <Tooltip content={<ChartTooltip />} cursor={{ fill: "rgba(188,197,204,0.18)" }} />
+                      <Tooltip content={<ChartTooltip />} cursor={barCursor} />
                       <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />
-                      <Bar dataKey="attended" name="Present (incl. late)" stackId="a" fill={CHART.primary} maxBarSize={34} stroke="#fff" strokeWidth={1} />
-                      <Bar dataKey="absent" name="Absent" stackId="a" fill={CHART.secondary} radius={[4, 4, 0, 0]} maxBarSize={34} stroke="#fff" strokeWidth={1} />
+                      <Bar dataKey="attended" name="Present (incl. late)" stackId="a" {...barProps("primary", { top: false })} maxBarSize={34} stroke="#fff" strokeWidth={1} />
+                      <Bar dataKey="absent" name="Absent" stackId="a" {...barProps("secondary")} maxBarSize={34} stroke="#fff" strokeWidth={1} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -387,19 +371,7 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
           </div>
         </TabsContent>
 
-        {p.fees && (
-          <TabsContent value="fees">
-            <LiveFeesPanel fees={p.fees} />
-          </TabsContent>
-        )}
-
-        <TabsContent value="exams">
-          <LiveResultsList results={p.results} />
-        </TabsContent>
-
-        <TabsContent value="homework">
-          <LiveHomeworkList homework={p.homework} />
-        </TabsContent>
+        {moduleTabs.map((t) => <TabsContent key={t.value} value={t.value}>{t.content}</TabsContent>)}
 
         {p.access !== "assigned" && s.id && (
           <TabsContent value="documents">

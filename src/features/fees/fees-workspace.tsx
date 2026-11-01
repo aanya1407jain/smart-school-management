@@ -4,9 +4,9 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { AlertCircle, CircleDollarSign, Clock, Download, Layers, Pencil, Plus, Receipt, RotateCcw, Trash2, Users, Wallet } from "lucide-react";
-import type { FeeStanding } from "@/lib/services/derive";
-import type { PaymentMethod } from "@/types/domain";
-import { services } from "@/lib/services";
+import type { FeeStanding } from "@/types/fees";
+import type { PaymentMethod } from "@/types/fees";
+import { demoCall } from "@/lib/demo/runtime";
 import { useQuery, type QueryState } from "@/lib/hooks/use-query";
 import { useMutation } from "@/lib/hooks/use-mutation";
 import { useSchoolMutation, useSchoolQuery } from "@/lib/convex/membership";
@@ -17,16 +17,19 @@ import {
   Badge, Button, Card, CardHeader, Checkbox, ConfirmDialog, DataTable, EmptyState, FilterBar, FilterSelect, FormField, Input, Modal,
   PageHeader, QueryView, SearchInput, StatCard, StatusBadge, Tabs, TabsContent, TabsList, useToast, Avatar,
 } from "@/components/ui";
-import { ChartCard, ChartTooltip, axisProps } from "@/components/charts/chart-card";
-import { CHART, CHART_GRID } from "@/lib/constants/theme";
+import { ChartCard, ChartTooltip, axisProps, barCursor, barProps, gridProps } from "@/components/charts/chart-card";
 import { useAcademicOptions } from "@/features/shared/use-academic-options";
 import { FormError } from "@/features/shared/form-error";
 import { formatCurrency, formatPercent } from "@/lib/utils/format";
 import { formatDate, formatShortDate, todayISO } from "@/lib/utils/dates";
 import { downloadCsv } from "@/lib/utils/csv";
-import { PAYMENT_METHOD_LABELS } from "@/lib/constants/labels";
+import { PAYMENT_METHOD_LABELS } from "@/features/fees/labels";
 import { ReceiptModal } from "./fee-tables";
 import { StudentPickerModal } from "./student-picker";
+
+// Demo-dataset service calls (internal demo personas only; live data comes from Convex).
+const demoAssignStructure = demoCall("fees.assignStructure");
+const demoCreateStructure = demoCall("fees.createStructure");
 
 export function FeesWorkspace() {
   const params = useSearchParams();
@@ -62,7 +65,7 @@ function Overview() {
   const liveOverview = useSchoolQuery(api.fees.overview, live ? {} : "skip");
 
   // Demo data
-  const q = useQuery(() => services.fees.getSummary(), [live], { enabled: !live });
+  const q = useQuery(() => demoCall("fees.getSummary")(), [live], { enabled: !live });
 
   const adaptedLive = useMemo(() => {
     if (!liveOverview) return undefined;
@@ -102,11 +105,11 @@ function Overview() {
             <ChartCard className="lg:col-span-2" title="Monthly collections" description={`Payments received per month, ${s.yearLabel ?? "2026–27"}`}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={s.monthly} margin={{ top: 8, right: 8, left: 4, bottom: 0 }}>
-                  <CartesianGrid vertical={false} stroke={CHART_GRID} />
+                  <CartesianGrid {...gridProps} />
                   <XAxis dataKey="label" {...axisProps} />
                   <YAxis {...axisProps} tickFormatter={(v) => `₹${Math.round(v / 1000)}k`} width={52} />
-                  <Tooltip content={<ChartTooltip format={(v) => formatCurrency(v)} />} cursor={{ fill: "rgba(188,197,204,0.18)" }} />
-                  <Bar dataKey="amount" name="Collected" fill={CHART.single} radius={[4, 4, 0, 0]} maxBarSize={40} />
+                  <Tooltip content={<ChartTooltip format={(v) => formatCurrency(v)} />} cursor={barCursor} />
+                  <Bar dataKey="amount" name="Collected" {...barProps("single")} maxBarSize={40} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
@@ -174,7 +177,7 @@ function Balances() {
 
   // Demo data
   const q = useQuery(
-    () => services.fees.listBalances({ search, classId, sectionId, standing: (standing || "all") as FeeStanding | "all" }),
+    () => demoCall("fees.listBalances")({ search, classId, sectionId, standing: (standing || "all") as FeeStanding | "all" }),
     [live, search, classId, sectionId, standing],
     { enabled: !live },
   );
@@ -197,7 +200,7 @@ function Balances() {
   }, [liveBalances]);
 
   type BalanceRow = { studentId: string; name: string; admissionNo: string; classLabel: string; net: number; paid: number; outstanding: number; standing: FeeStanding; nextDue: { label: string; dueDate: string } | null; lastPayment: string | null };
-  const rows: BalanceRow[] = live ? (liveRows ?? []) : (q.data ?? []).filter((r) => !dueBy || (r.nextDue && r.nextDue.dueDate <= dueBy));
+  const rows: BalanceRow[] = live ? (liveRows ?? []) : (q.data ?? []).filter((r: BalanceRow) => !dueBy || (r.nextDue && r.nextDue.dueDate <= dueBy));
   const total = rows.reduce((a, r) => a + r.outstanding, 0);
 
   const queryState = useMemo<QueryState<any>>(
@@ -336,12 +339,12 @@ function Structures() {
   const assignStructureMutation = useSchoolMutation(api.fees.assignStructure);
   const setStatusMutation = useSchoolMutation(api.fees.setStructureStatus);
 
-  const q = useQuery(() => services.fees.listStructures(), [live], { enabled: !live });
+  const q = useQuery(() => demoCall("fees.listStructures")(), [live], { enabled: !live });
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<StructureEdit | null>(null);
   const [assignId, setAssignId] = useState<string | null>(null);
   const [assigning, setAssigning] = useState(false);
-  const assign = useMutation(services.fees.assignStructure);
+  const assign = useMutation(demoAssignStructure);
 
   const liveRows = useMemo(() => {
     if (!liveStructures) return undefined;
@@ -360,7 +363,7 @@ function Structures() {
     }));
   }, [liveStructures]);
 
-  const rows = live ? (liveRows ?? []) : (q.data ?? []);
+  const rows: NonNullable<typeof liveRows> = live ? (liveRows ?? []) : (q.data ?? []);
   const target = rows.find((s) => s.id === assignId);
 
   const queryState = useMemo<QueryState<any>>(
@@ -461,7 +464,7 @@ function CreateStructureModal({ open, onOpenChange, onCreated, editing }: { open
   const [error, setError] = useState<string | null>(null);
 
   const createStructureMutation = useSchoolMutation(api.fees.createStructure);
-  const m = useMutation(services.fees.createStructure);
+  const m = useMutation(demoCreateStructure);
   useEffect(() => { if (open) setError(null); }, [open]);
 
   const total = components.reduce((a, c) => a + (Number(c.amount) || 0), 0);
@@ -594,7 +597,7 @@ function Payments() {
 
   // Demo data
   const q = useQuery(
-    () => services.fees.listPayments({ search, classId, method, from: from || undefined, to: to || undefined }),
+    () => demoCall("fees.listPayments")({ search, classId, method, from: from || undefined, to: to || undefined }),
     [live, search, classId, method, from, to],
     { enabled: !live },
   );

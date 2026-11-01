@@ -32,7 +32,7 @@ describe("attendance register and section roster order", () => {
     const teacher = await as(t, A.users.classTeacher);
     const reg = await teacher.query(api.attendance.getByDate, { sectionId: A.sectionA, date: "2026-07-01", today: "2026-07-01" });
     expect(reg.students.map((s) => [s.name, s.rollNo])).toEqual([["Aarav Ahuja", 9], ["Aarav Mehta", null], ["Asha S", 1], ["bina Rao", 3], ["Zoya Khan", 2]]);
-    const roster = await teacher.query(api.academics.sectionRoster, { sectionId: A.sectionA });
+    const roster = await teacher.query(api.students.sectionRoster, { sectionId: A.sectionA });
     expect(roster.students.map((s) => s.name)).toEqual(reg.students.map((s) => s.name));
     // Nothing was renumbered by reading.
     expect(await t.run(async (ctx) => (await ctx.db.query("enrollments").collect()).filter((e) => e.rollNo === undefined).length)).toBe(1);
@@ -55,7 +55,7 @@ describe("attendance register and section roster order", () => {
     expect(await errorCode(student.query(api.attendance.getByDate, { sectionId: A.sectionB, date: "2026-07-01", today: "2026-07-01" }))).toBe("FORBIDDEN");
     const admin = await as(t, A.users.admin);
     expect(await errorCode(admin.query(api.attendance.getByDate, { sectionId: B.sectionA, date: "2026-07-01", today: "2026-07-01" }))).toBe("NOT_FOUND");
-    expect(await errorCode(admin.query(api.academics.sectionRoster, { sectionId: B.sectionA }))).toBe("NOT_FOUND");
+    expect(await errorCode(admin.query(api.students.sectionRoster, { sectionId: B.sectionA }))).toBe("NOT_FOUND");
     // Only the class teacher marks.
     const subject = await as(t, A.users.subjectTeacher);
     expect(await errorCode(subject.mutation(api.attendance.mark, { sectionId: A.sectionA, date: "2026-07-01", entries: [{ studentId: A.studentA, status: "present" }] }))).toBe("FORBIDDEN");

@@ -2,7 +2,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { CheckCircle2, Megaphone, Pencil, PenLine, PlayCircle, RotateCcw } from "lucide-react";
-import type { ExamPaper } from "@/types/domain";
+import type { ExamPaper } from "@/types/examinations";
 import { services } from "@/lib/services";
 import { useQuery } from "@/lib/hooks/use-query";
 import { useMutation } from "@/lib/hooks/use-mutation";

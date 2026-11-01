@@ -13,7 +13,7 @@ import { useSession } from "./session-provider";
 import { canAccessRoute, landingRouteFor } from "@/lib/permissions";
 import { loginFormSchema, type LoginFormValues } from "./login-form";
 import { cn } from "@/lib/utils/cn";
-import { DEMO_ACCOUNTS } from "./demo-accounts";
+import { demoRuntime } from "@/lib/demo/runtime";
 import { useSchoolProfile } from "@/lib/hooks/use-school-profile";
 import { PRODUCT } from "@/lib/constants/product";
 
@@ -101,15 +101,15 @@ export function LoginScreen() {
           </form>
         </div>
 
-        {/* Development helper — lists the demo accounts documented in the README. */}
-        <div className="mt-4 rounded-2xl border border-line/70 bg-white/50 backdrop-blur">
+        {/* Development helper — lists the demo accounts documented in the README (internal builds only). */}
+        {demoRuntime() && <div className="mt-4 rounded-2xl border border-line/70 bg-white/50 backdrop-blur">
           <button type="button" onClick={() => setDemoOpen((o) => !o)} aria-expanded={demoOpen} className="flex w-full items-center justify-between px-4 py-3 text-[13px] font-medium text-ink-soft">
             Development demo accounts
             <ChevronDown className={cn("h-4 w-4 transition-transform", demoOpen && "rotate-180")} />
           </button>
           {demoOpen && (
             <ul className="space-y-1 px-2 pb-2">
-              {DEMO_ACCOUNTS.map((a) => (
+              {(demoRuntime()?.personas ?? []).map((a) => (
                 <li key={a.loginId}>
                   <button
                     type="button"
@@ -126,7 +126,7 @@ export function LoginScreen() {
               ))}
             </ul>
           )}
-        </div>
+        </div>}
         <p className="mt-5 text-center text-[12px] text-ink-muted">© {new Date().getFullYear()} {school?.name ?? "Your school"} · {PRODUCT.name}</p>
       </motion.div>
 

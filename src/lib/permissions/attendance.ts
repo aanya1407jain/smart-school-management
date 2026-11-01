@@ -12,7 +12,7 @@
  *
  * Stage 2: the same checks must run server-side inside the Convex mutations.
  */
-import type { Section, UserAccount } from "@/types/domain";
+import type { Section, UserAccount } from "@/types/core";
 import { hasPermission } from "./permissions";
 
 type Actor = Pick<UserAccount, "role" | "permissionSets" | "teacherId"> | null | undefined;

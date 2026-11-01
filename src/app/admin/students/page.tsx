@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { LiveAware } from "@/features/student-portal/live-portal";
+import { LiveAware } from "@/features/live/portal";
 import { LiveStudentsList } from "@/features/students/live-students";
 
 export const metadata: Metadata = { title: "Students" };

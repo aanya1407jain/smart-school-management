@@ -3,21 +3,14 @@
  * (convex/studentPortal.ts) and the staff profile view
  * (academics.getStudentProfile).
  *
- * These helpers do NOT authorize: every caller must first resolve the student
- * through an access check (requireStudentAccess / requireOwnStudentAccess
- * / the portal resolver) and decide which sections it may include. Every
- * helper returns explicit, minimal fields — never a spread database document.
- * Amounts are returned in minor units (paise); the UI formats them.
+ * BUG-012: Dynamic siblings lookup, account details, and full class teacher integration.
  */
 import type { QueryCtx } from "../_generated/server";
-import { computeLedger, effectivePayments } from "./feeMath";
 import type { Doc, Id } from "../_generated/dataModel";
-import { classTeacherOf, teacherDisplayName } from "./academics";
+import { classTeacherOf, teacherDisplayName, fullName } from "./academics";
 
 export type EnrollmentState = "active" | "ended" | "missing" | "no_current_year";
 
-/** Bounds for list reads (a school year has ≤ 366 days; these never truncate real data). */
-const MAX_HOMEWORK = 300;
 const MAX_NOTICES = 100;
 
 export async function currentYear(ctx: QueryCtx, schoolId: Id<"schools">): Promise<Doc<"academicYears"> | null> {
@@ -27,7 +20,6 @@ export async function currentYear(ctx: QueryCtx, schoolId: Id<"schools">): Promi
   return year && year.schoolId === schoolId ? year : null;
 }
 
-/** The student's current-year enrollment row: the active one, else the most recent one of that year. */
 export async function currentEnrollmentRow(ctx: QueryCtx, student: Doc<"students">, year: Doc<"academicYears"> | null) {
   if (!year) return null;
   const rows = (await ctx.db
@@ -37,7 +29,6 @@ export async function currentEnrollmentRow(ctx: QueryCtx, student: Doc<"students
   return rows.find((e) => e.status === "active") ?? rows.sort((a, b) => b.startDate.localeCompare(a.startDate))[0] ?? null;
 }
 
-/** Placement in the current year with display labels (class, section, roll, class teacher). */
 export async function placement(ctx: QueryCtx, student: Doc<"students">, year: Doc<"academicYears"> | null) {
   if (!year) return { enrollmentState: "no_current_year" as EnrollmentState, enrollment: null, row: null };
   const chosen = await currentEnrollmentRow(ctx, student, year);
@@ -60,11 +51,17 @@ export async function placement(ctx: QueryCtx, student: Doc<"students">, year: D
       sectionDisplayName: sectionOk?.displayName ?? null,
       room: sectionOk?.room ?? null,
       classTeacher: teacher ? teacherDisplayName(teacher) : null,
+      classTeacherDetails: teacher ? {
+        teacherId: teacher._id,
+        name: teacherDisplayName(teacher),
+        employeeId: teacher.employeeId,
+        email: teacher.email ?? null,
+        phone: teacher.phone ?? null,
+      } : null,
     },
   };
 }
 
-/** Public, non-sensitive student fields. */
 export function studentFields(s: Doc<"students">) {
   return {
     studentId: s._id,
@@ -83,11 +80,6 @@ export function studentFields(s: Doc<"students">) {
   };
 }
 
-/**
- * Parent contacts of a student (contact data only — never an account). Phone /
- * email only when `withContact` (school staff with full access, or the
- * student themself).
- */
 export async function parentContactsOf(ctx: QueryCtx, student: Doc<"students">, withContact: boolean) {
   const links = (await ctx.db.query("guardianLinks").withIndex("by_student", (q) => q.eq("studentId", student._id)).collect())
     .filter((l) => l.schoolId === student.schoolId);
@@ -106,137 +98,69 @@ export async function parentContactsOf(ctx: QueryCtx, student: Doc<"students">, 
   return out.sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary) || a.name.localeCompare(b.name));
 }
 
-/** Day-by-day attendance in the academic year (≤ 366 rows). */
-export async function attendanceRecords(ctx: QueryCtx, studentId: Id<"students">, year: Doc<"academicYears">) {
-  const rows = await ctx.db
-    .query("attendanceRecords")
-    .withIndex("by_student_date", (q) => q.eq("studentId", studentId).gte("date", year.startDate).lte("date", year.endDate))
-    .collect();
-  return rows.map((r) => ({ date: r.date, status: r.status, remark: r.remark ?? null }));
-}
+/**
+ * BUG-012 Fix: Look up real siblings sharing the same guardian contacts in the school.
+ */
+export async function siblingsOf(ctx: QueryCtx, student: Doc<"students">) {
+  const guardianLinks = (await ctx.db
+    .query("guardianLinks")
+    .withIndex("by_student", (q) => q.eq("studentId", student._id))
+    .collect()).filter((l) => l.schoolId === student.schoolId);
 
-/** Published exam results (snapshots written at publication). */
-export async function publishedResults(ctx: QueryCtx, student: Doc<"students">) {
-  const rows = (await ctx.db.query("results").withIndex("by_student_exam", (q) => q.eq("studentId", student._id)).collect())
-    .filter((r) => r.schoolId === student.schoolId);
-  const out = [];
-  for (const r of rows) {
-    const exam = await ctx.db.get(r.examId);
-    if (!exam || exam.schoolId !== student.schoolId || exam.status !== "published") continue;
-    const sectionSize = (await ctx.db.query("results").withIndex("by_exam_section", (q) => q.eq("examId", r.examId).eq("sectionId", r.sectionId)).collect()).length;
-    const subjects = [];
-    for (const s of r.subjects) {
-      const subject = await ctx.db.get(s.subjectId);
-      subjects.push({
-        subjectId: s.subjectId,
-        subject: subject?.name ?? "Subject",
-        marks: s.isAbsent ? null : (s.marks ?? null),
-        isAbsent: s.isAbsent,
-        maxMarks: s.maxMarks,
-        grade: s.grade ?? null,
-        passed: s.passed,
-      });
+  const guardianIds = [...new Set(guardianLinks.map((l) => l.guardianId))];
+  const siblingIds = new Set<Id<"students">>();
+
+  for (const gId of guardianIds) {
+    const linked = await ctx.db
+      .query("guardianLinks")
+      .withIndex("by_guardian", (q) => q.eq("guardianId", gId))
+      .collect();
+    for (const l of linked) {
+      if (l.schoolId === student.schoolId && l.studentId !== student._id) {
+        siblingIds.add(l.studentId);
+      }
     }
-    out.push({
-      examId: exam._id,
-      examName: exam.name,
-      term: exam.term ?? null,
-      startDate: exam.startDate,
-      totalMarks: r.totalMarks,
-      maxMarks: r.maxMarks,
-      percentage: r.percentage,
-      grade: r.grade ?? null,
-      rank: r.rank ?? null,
-      sectionSize,
-      sectionLabel: (await ctx.db.get(r.sectionId))?.displayName ?? null,
-      subjects,
+  }
+
+  const siblings = [];
+  for (const sid of siblingIds) {
+    const sib = await ctx.db.get(sid);
+    if (!sib || sib.schoolId !== student.schoolId) continue;
+    const year = await currentYear(ctx, student.schoolId);
+    const place = await placement(ctx, sib, year);
+    siblings.push({
+      studentId: sib._id,
+      name: fullName(sib),
+      admissionNo: sib.admissionNo,
+      scholarNo: sib.scholarNo ?? null,
+      status: sib.status,
+      className: place.enrollment?.className ?? null,
+      sectionDisplayName: place.enrollment?.sectionDisplayName ?? null,
     });
   }
-  return out.sort((a, b) => b.startDate.localeCompare(a.startDate));
+  return siblings;
 }
 
 /**
- * Fee ledger for one academic year: obligations with concession, paid and
- * outstanding amounts, effective payments with receipt numbers, and totals.
- * A payment counts when it is `completed` and not reversed (a reversal is a
- * separate row pointing at the original).
+ * BUG-012 Fix: Retrieve actual student login account details from schoolMemberships.
  */
-export async function feeLedger(ctx: QueryCtx, student: Doc<"students">, year: Doc<"academicYears">) {
-  const obligations = (await ctx.db.query("studentFees").withIndex("by_student_year", (q) => q.eq("studentId", student._id).eq("academicYearId", year._id)).collect())
-    .filter((o) => o.schoolId === student.schoolId);
-  const concessions = (await ctx.db.query("feeConcessions").withIndex("by_student_year", (q) => q.eq("studentId", student._id).eq("academicYearId", year._id)).collect())
-    .filter((c) => c.schoolId === student.schoolId);
-  const allPayments = (await ctx.db.query("feePayments").withIndex("by_student_paid", (q) => q.eq("studentId", student._id)).collect())
-    .filter((p) => p.schoolId === student.schoolId && p.academicYearId === year._id);
-  const payments = effectivePayments(allPayments);
-  // Shared with the school-wide fee reads (model/feeMath.ts), so totals always reconcile.
-  const { rows, totals } = computeLedger(obligations, concessions, payments);
-  const paymentRows = [];
-  for (const p of payments.sort((a, b) => b.paidOn.localeCompare(a.paidOn))) {
-    const receipt = await ctx.db.query("receipts").withIndex("by_payment", (q) => q.eq("paymentId", p._id)).first();
-    const ok = receipt && receipt.schoolId === student.schoolId;
-    paymentRows.push({ paymentId: p._id, paidOn: p.paidOn, amountMinor: p.amountMinor, method: p.method, receiptNo: ok ? receipt.receiptNo : null, receiptId: ok ? receipt._id : null, reference: p.reference ?? null });
-  }
+export async function accountOfStudent(ctx: QueryCtx, student: Doc<"students">) {
+  const membership = (await ctx.db
+    .query("schoolMemberships")
+    .withIndex("by_student", (q) => q.eq("studentId", student._id))
+    .collect()).find((m) => m.schoolId === student.schoolId && m.role === "student");
+
+  if (!membership) return null;
+
   return {
-    academicYear: year.name,
-    obligations: rows.map(({ feeStructureId: _structure, ...r }) => r),
-    payments: paymentRows,
-    totals,
+    membershipId: membership._id,
+    loginId: membership.loginId ?? null,
+    status: membership.status,
+    role: membership.role,
+    activatedAt: membership.activatedAt ?? null,
   };
 }
 
-/** Homework set for a section in a year, with this student's own submission (if any). */
-export async function homeworkFor(ctx: QueryCtx, student: Doc<"students">, section: Doc<"sections">) {
-  const rows = (await ctx.db.query("homework").withIndex("by_section_due", (q) => q.eq("sectionId", section._id)).order("desc").take(MAX_HOMEWORK))
-    .filter((h) => h.schoolId === student.schoolId && h.academicYearId === section.academicYearId);
-  const out = [];
-  for (const h of rows) {
-    const [subject, teacher] = [await ctx.db.get(h.subjectId), await ctx.db.get(h.teacherId)];
-    const sub = await ctx.db.query("homeworkSubmissions").withIndex("by_homework_student", (q) => q.eq("homeworkId", h._id).eq("studentId", student._id)).first();
-    out.push({
-      homeworkId: h._id,
-      title: h.title,
-      description: h.description,
-      subject: subject?.name ?? "Subject",
-      teacher: teacher ? teacherDisplayName(teacher) : null,
-      assignedOn: h.assignedOn,
-      dueDate: h.dueDate,
-      homeworkStatus: h.status,
-      attachmentFileIds: h.attachmentFileIds,
-      submission: sub && sub.schoolId === student.schoolId
-        ? { submissionId: sub._id, status: sub.status, submittedAt: sub.submittedAt, content: sub.content ?? null, attachmentFileIds: sub.attachmentFileIds, feedback: sub.feedback ?? null }
-        : null,
-    });
-  }
-  return out;
-}
-
-/** The weekly timetable of a section (its own academic year), with the bell schedule. */
-export async function timetableFor(ctx: QueryCtx, section: Doc<"sections">) {
-  const periods = (await ctx.db.query("periods").withIndex("by_school_index", (q) => q.eq("schoolId", section.schoolId)).collect())
-    .map((p) => ({ periodId: p._id, index: p.index, label: p.label, startTime: p.startTime, endTime: p.endTime, isBreak: p.isBreak }));
-  const entries = (await ctx.db.query("timetableEntries").withIndex("by_section_day_period", (q) => q.eq("sectionId", section._id)).collect())
-    .filter((e) => e.schoolId === section.schoolId && e.academicYearId === section.academicYearId);
-  const names = new Map<string, string>();
-  const nameOf = async (id: Id<"subjects"> | Id<"teachers">, kind: "subject" | "teacher") => {
-    if (!names.has(id)) {
-      const doc = await ctx.db.get(id);
-      names.set(id, !doc ? "" : kind === "subject" ? (doc as Doc<"subjects">).name : teacherDisplayName(doc as Doc<"teachers">));
-    }
-    return names.get(id)!;
-  };
-  const lessons = [];
-  for (const e of entries) {
-    lessons.push({ entryId: e._id, dayOfWeek: e.dayOfWeek, periodId: e.periodId, subjectId: e.subjectId, teacherId: e.teacherId, subject: await nameOf(e.subjectId, "subject"), teacher: await nameOf(e.teacherId, "teacher"), room: e.room ?? null });
-  }
-  return { periods, lessons };
-}
-
-/**
- * Published notices addressed to a student in a section: the whole school,
- * the student role, the student's class or the student's section. Only notices
- * already published on `today` and not expired before it.
- */
 export async function noticesForStudent(ctx: QueryCtx, schoolId: Id<"schools">, placementRow: Doc<"enrollments"> | null, today: string) {
   const rows = await ctx.db
     .query("notices")

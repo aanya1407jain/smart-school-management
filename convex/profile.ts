@@ -18,6 +18,7 @@ import { assertNonEmpty } from "./core/validators";
 import { isAccountantOnly } from "./core/permissions";
 import { isAccountantGrants } from "./core/grants";
 import { teacherDisplayName } from "./model/academics";
+import { maybeProvider } from "./core/registry";
 import { writeAudit } from "./model/audit";
 
 export const mine = schoolQuery({
@@ -39,11 +40,9 @@ export const mine = schoolQuery({
         for (const s of await ctx.db.query("sections").withIndex("by_class_teacher_year", (q) => q.eq("classTeacherId", teacher._id).eq("academicYearId", yearId)).collect()) {
           if (s.schoolId === ctx.actor.schoolId) classTeacherOf.push(s.displayName);
         }
-        for (const a of await ctx.db.query("teacherAssignments").withIndex("by_teacher_year", (q) => q.eq("teacherId", teacher._id).eq("academicYearId", yearId)).collect()) {
-          if (a.schoolId !== ctx.actor.schoolId) continue;
-          const [sec, sub] = [await ctx.db.get(a.sectionId), await ctx.db.get(a.subjectId)];
-          subjects.push(`${sub?.name ?? "Subject"} · ${sec?.displayName ?? ""}`);
-        }
+        // Subject assignments belong to Academics (none listed when it is not shipped).
+        const scope = maybeProvider("academics.teacherScope");
+        if (scope) subjects.push(...(await scope.teachingLabels(ctx, ctx.actor.schoolId, teacher._id, yearId)));
       }
       duties = { classTeacherOf: classTeacherOf.sort(), subjects: subjects.sort() };
     }

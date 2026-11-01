@@ -3,22 +3,27 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { BadgePercent, CheckCircle2, Layers, Plus, Wallet } from "lucide-react";
-import { services } from "@/lib/services";
+import { demoCall } from "@/lib/demo/runtime";
 import { useQuery, type QueryState } from "@/lib/hooks/use-query";
 import { useMutation } from "@/lib/hooks/use-mutation";
 import { useSchoolMutation, useSchoolQuery } from "@/lib/convex/membership";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
-import type { PaymentMethod } from "@/types/domain";
+import type { PaymentMethod } from "@/types/fees";
 import { useSession } from "@/features/auth/session-provider";
 import { Avatar, Button, Card, CardHeader, EmptyState, FormField, GlassCard, Input, Modal, ProgressBar, QueryView, Select, StatusBadge, Textarea, useToast } from "@/components/ui";
 import { FormError } from "@/features/shared/form-error";
 import { formatCurrency, formatPercent } from "@/lib/utils/format";
 import { formatDate, todayISO } from "@/lib/utils/dates";
-import { PAYMENT_METHOD_LABELS } from "@/lib/constants/labels";
+import { PAYMENT_METHOD_LABELS } from "@/features/fees/labels";
 import { FeeObligationsTable, PaymentsTable, ReceiptModal } from "./fee-tables";
 import { useMemo } from "react";
 import { LiveFeeCorrections } from "./fee-corrections-live";
+
+// Demo-dataset service calls (internal demo personas only; live data comes from Convex).
+const demoAssignStructure = demoCall("fees.assignStructure");
+const demoRecordPayment = demoCall("fees.recordPayment");
+const demoAddConcession = demoCall("fees.addConcession");
 
 export function StudentLedger({ studentId }: { studentId: string }) {
   const params = useSearchParams();
@@ -31,13 +36,13 @@ export function StudentLedger({ studentId }: { studentId: string }) {
   const assignStructureMutation = useSchoolMutation(api.fees.assignStructure);
 
   // Demo data
-  const q = useQuery(() => services.fees.getStudentLedger(studentId), [live, studentId], { enabled: !live });
+  const q = useQuery(() => demoCall("fees.getStudentLedger")(studentId), [live, studentId], { enabled: !live });
 
   const [payOpen, setPayOpen] = useState(false);
   const [concOpen, setConcOpen] = useState(false);
   const [receiptId, setReceiptId] = useState<string | null>(null);
   const [assigning, setAssigning] = useState(false);
-  const assign = useMutation(services.fees.assignStructure);
+  const assign = useMutation(demoAssignStructure);
 
   const adaptedLive = useMemo(() => {
     if (!liveLedger) return undefined;
@@ -210,7 +215,7 @@ function PaymentModal({ open, onOpenChange, studentId, outstanding, suggested, o
   const [error, setError] = useState<string | null>(null);
 
   const liveRecordPayment = useSchoolMutation(api.fees.recordPayment);
-  const m = useMutation(services.fees.recordPayment);
+  const m = useMutation(demoRecordPayment);
   // Retry safety: one key per intended payment. Re-submitting the same payment (after a timeout or a
   // network error) re-sends the same key, so the server returns the original payment instead of charging twice.
   // Changing the amount, method or date makes it a different payment, with a new key.
@@ -292,7 +297,7 @@ function ConcessionModal({ open, onOpenChange, studentId, max }: { open: boolean
   const [error, setError] = useState<string | null>(null);
 
   const liveCreateConcession = useSchoolMutation(api.fees.addConcession);
-  const m = useMutation(services.fees.addConcession);
+  const m = useMutation(demoAddConcession);
 
   const handleSubmit = async () => {
     setError(null);

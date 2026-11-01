@@ -102,16 +102,11 @@ export function sessionPercentage(db: Database, entries: Record<ID, string>) {
 
 // ------------------------------------------------------------------ Fees
 
-export type ObligationStatus = "paid" | "partial" | "overdue" | "due" | "upcoming";
-export type FeeStanding = "paid" | "clear" | "due_soon" | "overdue" | "not_assigned";
+export type { ObligationStatus, ObligationView } from "@/types/fees";
+import type { ObligationStatus, ObligationView } from "@/types/fees";
+export type { FeeStanding } from "@/types/fees";
+import type { FeeStanding } from "@/types/fees";
 
-export interface ObligationView extends FeeObligation {
-  concession: number;
-  net: number;
-  paid: number;
-  outstanding: number;
-  status: ObligationStatus;
-}
 
 export function feeLedger(db: Database, studentId: ID, today = todayISO()) {
   const assignments = db.feeAssignments.filter((a) => a.studentId === studentId);

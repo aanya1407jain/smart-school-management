@@ -5,11 +5,11 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Download, MoreHorizontal, Pencil, UserPlus, Eye, Wallet } from "lucide-react";
 import { services } from "@/lib/services";
 import { useQuery } from "@/lib/hooks/use-query";
-import type { StudentStatus } from "@/types/domain";
+import type { StudentStatus } from "@/types/students";
 import type { StudentListItem } from "@/lib/services/students.service";
 import {
   Avatar, Button, Card, DataTable, DropdownContent, DropdownItem, DropdownMenu, DropdownTrigger, EmptyState, ErrorState,
-  FilterBar, FilterSelect, LinkButton, LoadingState, PageHeader, Pagination, SearchInput, StatusBadge, type SortState,
+  FilterBar, FilterPills, FilterSelect, LinkButton, LoadingState, PageHeader, Pagination, SearchInput, StatusBadge, type SortState,
 } from "@/components/ui";
 import { formatCurrency, formatPercent } from "@/lib/utils/format";
 import { cn } from "@/lib/utils/cn";
@@ -82,20 +82,13 @@ export function StudentsList() {
       />
 
       <Card className="p-4 sm:p-5">
-        <div className="mb-4 flex gap-1 overflow-x-auto" role="tablist" aria-label="Filter by status">
-          {STATUS_TABS.map((t) => (
-            <button
-              key={t.value}
-              role="tab"
-              aria-selected={status === t.value}
-              onClick={() => setStatus(t.value)}
-              className={cn("shrink-0 rounded-xl px-3.5 py-1.5 text-sm font-medium transition-colors", status === t.value ? "bg-sapphire text-white" : "text-ink-muted hover:bg-alabaster hover:text-ink")}
-            >
-              {t.label}
-              {q.data && <span className={cn("ml-1.5 text-[12px]", status === t.value ? "text-white/70" : "text-ink-muted")}>{q.data.statusCounts[t.value]}</span>}
-            </button>
-          ))}
-        </div>
+        <FilterPills
+          label="Filter by status"
+          className="mb-4"
+          value={status}
+          onChange={setStatus}
+          items={STATUS_TABS.map((t) => ({ value: t.value, label: t.label, count: q.data ? q.data.statusCounts[t.value] : null }))}
+        />
 
         <FilterBar>
           <SearchInput value={search} onChange={setSearch} placeholder="Search name, admission no. or parent" className="col-span-2 sm:w-72" label="Search students" />

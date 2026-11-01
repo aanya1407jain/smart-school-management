@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { MarksEntry } from "@/features/examinations/marks-entry";
-import { PortalPage } from "@/features/student-portal/live-portal";
-import { LiveMarksEntry } from "@/features/teacher-live/teacher-live";
+import { DemoSlot } from "@/lib/demo/demo-slot";
+import { PortalPage } from "@/features/live/portal";
+import { LiveMarksEntry } from "@/features/examinations/live-teacher-exams";
 
 export const metadata: Metadata = { title: "Marks entry" };
 export default function Page() {
-  return <Suspense><PortalPage demo={<MarksEntry area="admin" />} live={<LiveMarksEntry area="admin" />} /></Suspense>;
+  return <Suspense><PortalPage demo={<DemoSlot id="exams.marks" props={{ area: "admin" }} />} live={<LiveMarksEntry area="admin" />} /></Suspense>;
 }

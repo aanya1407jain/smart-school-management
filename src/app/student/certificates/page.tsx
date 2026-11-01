@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import { PortalPage, LiveCertificates } from "@/features/student-portal/live-portal";
+import { PortalPage } from "@/features/live/portal";
+import { LiveCertificates } from "@/features/student-portal/live-portal";
 
 export const metadata: Metadata = { title: "Certificates & Documents" };
 export default function Page() {

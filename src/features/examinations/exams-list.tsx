@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { BookOpenCheck, Plus } from "lucide-react";
-import type { ExamStatus } from "@/types/domain";
+import type { ExamStatus } from "@/types/examinations";
 import { services } from "@/lib/services";
 import { useQuery } from "@/lib/hooks/use-query";
 import { useMutation } from "@/lib/hooks/use-mutation";
@@ -12,7 +12,7 @@ import {
 import { FormError } from "@/features/shared/form-error";
 import { useAcademicOptions } from "@/features/shared/use-academic-options";
 import { formatDate, addDays, todayISO } from "@/lib/utils/dates";
-import { EXAM_TYPE_LABELS } from "@/lib/constants/labels";
+import { EXAM_TYPE_LABELS } from "@/features/examinations/labels";
 
 export function ExamsList() {
   const router = useRouter();

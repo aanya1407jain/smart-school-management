@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
-import { MyResults } from "@/features/examinations/my-results";
-import { PortalPage, LiveResults } from "@/features/student-portal/live-portal";
+import { DemoSlot } from "@/lib/demo/demo-slot";
+import { PortalPage } from "@/features/live/portal";
+import { LiveResults } from "@/features/examinations/live-my-results";
 
 export const metadata: Metadata = { title: "My Results" };
 export default function Page() {
-  return <PortalPage demo={<MyResults />} live={<LiveResults />} />;
+  return <PortalPage demo={<DemoSlot id="exams.myResults" />} live={<LiveResults />} />;
 }

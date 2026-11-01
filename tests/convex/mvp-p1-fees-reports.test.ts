@@ -171,24 +171,24 @@ describe("low-attendance report", () => {
     // Bala (8-B): all present → not listed.
     for (const d of days) await st.mutation(api.attendance.mark, { sectionId: A.sectionB, date: d, entries: [{ studentId: A.studentB, status: "present" }] });
 
-    const r = await admin.query(api.reports.lowAttendance, { from: "2026-10-01", to: "2026-10-10" });
+    const r = await admin.query(api.attendanceReports.lowAttendance, { from: "2026-10-01", to: "2026-10-10" });
     expect(r.threshold).toBe(85);
     expect(r.students.map((s) => [s.name, s.percentage, s.absent, s.late, s.classLabel])).toEqual([["Asha S", 60, 2, 1, "8-A"]]);
-    expect((await admin.query(api.reports.lowAttendance, { sectionId: A.sectionB, from: "2026-10-01", to: "2026-10-10" })).students).toEqual([]);
+    expect((await admin.query(api.attendanceReports.lowAttendance, { sectionId: A.sectionB, from: "2026-10-01", to: "2026-10-10" })).students).toEqual([]);
 
     // Raising the threshold / changing the late rule is reflected.
     await t.run(async (ctx) => {
       const s = (await ctx.db.query("schoolSettings").withIndex("by_school", (q) => q.eq("schoolId", A.schoolId)).unique())!;
       await ctx.db.patch(s._id, { attendance: { lateCountsAsPresent: false, lowAttendanceThreshold: 85 } });
     });
-    expect((await admin.query(api.reports.lowAttendance, { from: "2026-10-01", to: "2026-10-10" })).students[0].percentage).toBe(40);
+    expect((await admin.query(api.attendanceReports.lowAttendance, { from: "2026-10-01", to: "2026-10-10" })).students[0].percentage).toBe(40);
 
     // Other school: nothing of A; A's section id is not found there.
-    expect((await (await as(t, B.users.admin)).query(api.reports.lowAttendance, {})).students).toEqual([]);
-    expect(await errorCode((await as(t, B.users.admin)).query(api.reports.lowAttendance, { sectionId: A.sectionA }))).toBe("NOT_FOUND");
+    expect((await (await as(t, B.users.admin)).query(api.attendanceReports.lowAttendance, {})).students).toEqual([]);
+    expect(await errorCode((await as(t, B.users.admin)).query(api.attendanceReports.lowAttendance, { sectionId: A.sectionA }))).toBe("NOT_FOUND");
     for (const u of [A.users.student, A.users.classTeacher]) {
-      expect(await errorCode((await as(t, u)).query(api.reports.lowAttendance, {}))).toBe("FORBIDDEN");
+      expect(await errorCode((await as(t, u)).query(api.attendanceReports.lowAttendance, {}))).toBe("FORBIDDEN");
     }
-    expect(await errorCode(admin.query(api.reports.lowAttendance, { from: "2026-10-10", to: "2026-10-01" }))).toBe("INVALID_ARGUMENT");
+    expect(await errorCode(admin.query(api.attendanceReports.lowAttendance, { from: "2026-10-10", to: "2026-10-01" }))).toBe("INVALID_ARGUMENT");
   });
 });

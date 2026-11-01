@@ -67,7 +67,7 @@ describe("timetable", () => {
     expect((await teacher.query(api.timetable.sectionTimetable, { sectionId: A.sectionA })).lessons).toHaveLength(1);
     const student = await as(t, A.users.student);
     expect(await errorCode(student.query(api.timetable.sectionTimetable, { sectionId: A.sectionA }))).toBe("FORBIDDEN");
-    const mine = await student.query(api.studentPortal.myTimetable, {});
+    const mine = await student.query(api.timetable.myStudentTimetable, {});
     expect(mine.state === "ok" && mine.lessons.length === 1).toBe(true);
   });
 });

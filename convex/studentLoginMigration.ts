@@ -22,10 +22,10 @@ import { conflict, notFound } from "./core/errors";
 import { PASSWORD_PROVIDER, STUDENT_DEFAULT_PASSWORD, isLoginIdTaken, renameLoginId, temporaryPasswordFields } from "./model/accounts";
 import { canonicalLoginId } from "./model/loginIds";
 import { accountTarget, writeAudit } from "./model/audit";
-import { asterAcademy } from "./seedData/asterAcademy";
+import { DEMO_STUDENT_LOGIN_IDS } from "./demo.generated";
 
 /** Student logins created by the demo seed (README / login-screen helper, used by the E2E suite): development fixtures. */
-const DEMO_STUDENT_LOGINS = new Set(asterAcademy.students.flatMap((s) => (s.login ? [s.login.loginId.toUpperCase()] : [])));
+const DEMO_STUDENT_LOGINS = new Set(DEMO_STUDENT_LOGIN_IDS);
 
 async function schoolBySlugOrOnly(ctx: QueryCtx, schoolSlug: string | undefined) {
   if (schoolSlug !== undefined) {

@@ -31,8 +31,9 @@ export function SidebarContent({ collapsed = false, onNavigate }: { collapsed?: 
   return (
     <div className="relative flex h-full flex-col overflow-hidden bg-gradient-to-b from-sapphire via-sapphire to-lagoon text-white">
       {/* ambient light */}
-      <div aria-hidden className="pointer-events-none absolute -right-24 top-10 h-64 w-64 rounded-full bg-mauve/25 blur-3xl" />
-      <div aria-hidden className="pointer-events-none absolute -left-20 bottom-0 h-72 w-72 rounded-full bg-teal/30 blur-3xl" />
+      <div aria-hidden className="pointer-events-none absolute -right-24 top-10 h-64 w-64 rounded-full bg-mauve/20 blur-3xl" />
+      <div aria-hidden className="pointer-events-none absolute -left-20 bottom-0 h-72 w-72 rounded-full bg-teal/35 blur-3xl" />
+      <div aria-hidden className="pointer-events-none absolute -right-16 top-1/2 h-48 w-48 rounded-full bg-cyan/15 blur-3xl" />
 
       <div className={cn("relative flex items-center gap-3 px-5 pb-5 pt-6", collapsed && "justify-center px-0")}>
         <LogoMark size={collapsed ? 36 : 40} />
@@ -61,14 +62,14 @@ export function SidebarContent({ collapsed = false, onNavigate }: { collapsed?: 
                       aria-current={active ? "page" : undefined}
                       title={collapsed ? item.label : undefined}
                       className={cn(
-                        "group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-[14px] font-medium transition-all duration-150",
+                        "group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-[14px] font-medium transition-all duration-200 ease-out",
                         collapsed && "justify-center px-0",
                         active
-                          ? "bg-white/[0.14] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_8px_24px_-12px_rgba(47,157,148,0.8)] backdrop-blur-sm"
-                          : "text-white/70 hover:bg-white/[0.07] hover:text-white",
+                          ? "bg-gradient-to-r from-teal/35 via-cyan/[0.12] to-white/[0.06] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.14),0_8px_24px_-12px_rgb(var(--c-cyan)/0.75)] backdrop-blur-sm"
+                          : "text-white/70 hover:translate-x-0.5 hover:bg-white/[0.08] hover:text-white",
                       )}
                     >
-                      {active && <span aria-hidden className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-teal shadow-[0_0_12px_rgba(47,157,148,0.9)]" />}
+                      {active && <span aria-hidden className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-gradient-to-b from-cyan to-aqua shadow-[0_0_12px_rgb(var(--c-cyan)/0.9)]" />}
                       <Icon className={cn("h-[18px] w-[18px] shrink-0", active ? "text-white" : "text-white/60 group-hover:text-white")} aria-hidden />
                       {!collapsed && <span className="flex-1 truncate">{item.label}</span>}
                       {badge !== null && (
@@ -87,7 +88,7 @@ export function SidebarContent({ collapsed = false, onNavigate }: { collapsed?: 
       </nav>
 
       {!collapsed && (
-        <div className="relative m-3 rounded-2xl border border-white/10 bg-white/[0.06] p-3.5 backdrop-blur">
+        <div className="glass-dark relative m-3 rounded-2xl p-3.5">
           <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/45">Signed in as</p>
           <p className="mt-1 truncate text-sm font-semibold">{user.displayName}</p>
           <p className="text-[12px] text-white/60">{user.title ?? ROLE_LABELS[user.role]}{live ? "" : " · 2026–27"}</p>

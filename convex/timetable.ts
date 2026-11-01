@@ -16,13 +16,16 @@
  */
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
+import type { QueryCtx } from "./_generated/server";
+import type { Actor } from "./core/actor";
 import { moduleQuery, moduleMutation } from "./core/functions";
-import { getInSchool, getSchoolSettings, isSubjectTeacherOf, requirePermission, requireSectionRead } from "./core/authorization";
+import { getInSchool, getSchoolSettings, requirePermission, requireSectionRead } from "./core/authorization";
 import { conflict, forbidden, invalid, invalidRelationship } from "./core/errors";
 import { assertNonEmpty, assertTime } from "./core/validators";
-import { subjectInCurriculum, teacherDisplayName } from "./model/academics";
-import { timetableFor } from "./model/studentRecords";
+import { teacherDisplayName } from "./model/academics";
+import { isSubjectTeacherOf, subjectInCurriculum, timetableFor } from "./model/academicsRecords";
 import { writeAudit } from "./model/audit";
+import { activeSection, resolvePortalStudent, vPortalStudent } from "./model/portalStudent";
 
 const academicsQuery = moduleQuery("academics");
 const academicsMutation = moduleMutation("academics");
@@ -85,6 +88,40 @@ export const removePeriod = academicsMutation({
 });
 
 // ================================================================ lessons
+type Ctx = QueryCtx & { actor: Actor };
+
+/**
+ * Validate a target slot for a section's lesson: a working day, not a break,
+ * and no teacher / room clash with OTHER sections in that slot (same academic
+ * year). `exceptEntryId` is a lesson being moved (it may not clash with
+ * itself). Returns the section's own lesson already in the slot, if any.
+ */
+async function checkSlot(
+  ctx: Ctx,
+  t: { section: Doc<"sections">; dayOfWeek: number; period: Doc<"periods">; teacher: Doc<"teachers">; room?: string; exceptEntryId?: Id<"timetableEntries"> },
+): Promise<Doc<"timetableEntries"> | null> {
+  if (!Number.isInteger(t.dayOfWeek) || t.dayOfWeek < 0 || t.dayOfWeek > 6) throw invalid("dayOfWeek must be 0 (Sunday) to 6 (Saturday).", { dayOfWeek: "Invalid" });
+  const settings = await getSchoolSettings(ctx, ctx.actor.schoolId);
+  if (!settings.workingDays.includes(t.dayOfWeek)) throw invalid("That weekday is not a working day of the school.", { dayOfWeek: "Not a working day" });
+  if (t.period.isBreak) throw invalid(`${t.period.label} is a break.`, { periodId: "Break" });
+  const slot = (await ctx.db.query("timetableEntries").withIndex("by_school_day_period", (q) => q.eq("schoolId", ctx.actor.schoolId).eq("dayOfWeek", t.dayOfWeek).eq("periodId", t.period._id)).collect())
+    .filter((e) => e.academicYearId === t.section.academicYearId && e._id !== t.exceptEntryId);
+  const current = slot.find((e) => e.sectionId === t.section._id) ?? null;
+  const busyTeacher = slot.find((e) => e._id !== current?._id && e.teacherId === t.teacher._id);
+  if (busyTeacher) {
+    const other = await ctx.db.get(busyTeacher.sectionId);
+    throw conflict(`${teacherDisplayName(t.teacher)} already teaches ${other?.displayName ?? "another section"} in this slot.`);
+  }
+  if (t.room) {
+    const busyRoom = slot.find((e) => e._id !== current?._id && roomKey(e.room) === roomKey(t.room));
+    if (busyRoom) {
+      const other = await ctx.db.get(busyRoom.sectionId);
+      throw conflict(`Room ${t.room} is already used by ${other?.displayName ?? "another section"} in this slot.`);
+    }
+  }
+  return current;
+}
+
 /** Place (or replace) the lesson in one section slot. */
 export const setEntry = academicsMutation({
   args: {
@@ -97,10 +134,6 @@ export const setEntry = academicsMutation({
     const period = await getInSchool(ctx, "periods", a.periodId, "Period");
     const subject = await getInSchool(ctx, "subjects", a.subjectId, "Subject");
     const teacher = await getInSchool(ctx, "teachers", a.teacherId, "Teacher");
-    if (!Number.isInteger(a.dayOfWeek) || a.dayOfWeek < 0 || a.dayOfWeek > 6) throw invalid("dayOfWeek must be 0 (Sunday) to 6 (Saturday).", { dayOfWeek: "Invalid" });
-    const settings = await getSchoolSettings(ctx, ctx.actor.schoolId);
-    if (!settings.workingDays.includes(a.dayOfWeek)) throw invalid("That weekday is not a working day of the school.", { dayOfWeek: "Not a working day" });
-    if (period.isBreak) throw invalid(`${period.label} is a break.`, { periodId: "Break" });
     if (teacher.status === "inactive") throw invalidRelationship(`${teacherDisplayName(teacher)} is not an active teacher.`);
     if (!(await subjectInCurriculum(ctx, section.classId, section.academicYearId, subject._id))) throw invalidRelationship(`${subject.name} is not part of ${section.displayName}'s curriculum.`);
     if (!(await isSubjectTeacherOf(ctx, teacher._id, section._id, subject._id))) {
@@ -109,21 +142,7 @@ export const setEntry = academicsMutation({
     const room = a.room?.trim() ? assertNonEmpty(a.room, "room", 40) : undefined;
 
     // Clash checks within the same academic year.
-    const slot = (await ctx.db.query("timetableEntries").withIndex("by_school_day_period", (q) => q.eq("schoolId", ctx.actor.schoolId).eq("dayOfWeek", a.dayOfWeek).eq("periodId", period._id)).collect())
-      .filter((e) => e.academicYearId === section.academicYearId);
-    const current = slot.find((e) => e.sectionId === section._id) ?? null;
-    const busyTeacher = slot.find((e) => e._id !== current?._id && e.teacherId === teacher._id);
-    if (busyTeacher) {
-      const other = await ctx.db.get(busyTeacher.sectionId);
-      throw conflict(`${teacherDisplayName(teacher)} already teaches ${other?.displayName ?? "another section"} in this slot.`);
-    }
-    if (room) {
-      const busyRoom = slot.find((e) => e._id !== current?._id && roomKey(e.room) === roomKey(room));
-      if (busyRoom) {
-        const other = await ctx.db.get(busyRoom.sectionId);
-        throw conflict(`Room ${room} is already used by ${other?.displayName ?? "another section"} in this slot.`);
-      }
-    }
+    const current = await checkSlot(ctx, { section, dayOfWeek: a.dayOfWeek, period, teacher, room });
     const doc = { subjectId: subject._id, teacherId: teacher._id, room };
     let entryId: Id<"timetableEntries">;
     if (current) {
@@ -137,6 +156,33 @@ export const setEntry = academicsMutation({
       entity: { table: "timetableEntries", id: entryId }, summary: `${section.displayName}: ${subject.name} with ${teacherDisplayName(teacher)} (day ${a.dayOfWeek}, ${period.label})`,
     });
     return { entryId, replaced: !!current };
+  },
+});
+
+/**
+ * Move a lesson to another slot of the SAME section in one transaction (the
+ * builder's drag-and-drop). The target must be free — a lesson there is never
+ * silently replaced — and is checked for working day, break and teacher / room
+ * clashes like setEntry. Subject, teacher and room stay the same.
+ */
+export const moveEntry = academicsMutation({
+  args: { entryId: v.id("timetableEntries"), dayOfWeek: v.number(), periodId: v.id("periods") },
+  handler: async (ctx, a) => {
+    requirePermission(ctx.actor, "timetable:manage");
+    const entry = await getInSchool(ctx, "timetableEntries", a.entryId, "Lesson");
+    if (entry.dayOfWeek === a.dayOfWeek && entry.periodId === a.periodId) return { entryId: entry._id, moved: false };
+    const section = await getInSchool(ctx, "sections", entry.sectionId, "Section");
+    const period = await getInSchool(ctx, "periods", a.periodId, "Period");
+    const teacher = await getInSchool(ctx, "teachers", entry.teacherId, "Teacher");
+    const occupant = await checkSlot(ctx, { section, dayOfWeek: a.dayOfWeek, period, teacher, room: entry.room, exceptEntryId: entry._id });
+    if (occupant) throw conflict(`${section.displayName} already has a lesson in ${period.label} on that day. Move or remove it first.`);
+    await ctx.db.patch(entry._id, { dayOfWeek: a.dayOfWeek, periodId: period._id });
+    await writeAudit(ctx, {
+      schoolId: ctx.actor.schoolId, actor: ctx.actor, action: "timetable.entry_moved", entity: { table: "timetableEntries", id: entry._id },
+      summary: `${section.displayName}: moved a lesson from day ${entry.dayOfWeek} to day ${a.dayOfWeek} (${period.label})`,
+      metadata: { from: { dayOfWeek: entry.dayOfWeek, periodId: entry.periodId }, to: { dayOfWeek: a.dayOfWeek, periodId: period._id } },
+    });
+    return { entryId: entry._id, moved: true };
   },
 });
 
@@ -160,21 +206,49 @@ export const sectionTimetable = academicsQuery({
   },
 });
 
+/** One teacher's week across sections (current academic year). */
+async function teacherWeek(ctx: Ctx, teacherId: Id<"teachers">) {
+  const periods = await ctx.db.query("periods").withIndex("by_school_index", (q) => q.eq("schoolId", ctx.actor.schoolId)).collect();
+  const settings = await getSchoolSettings(ctx, ctx.actor.schoolId);
+  const rows = (await ctx.db.query("timetableEntries").withIndex("by_teacher_day_period", (q) => q.eq("teacherId", teacherId)).collect())
+    .filter((e) => e.schoolId === ctx.actor.schoolId && (!settings.currentAcademicYearId || e.academicYearId === settings.currentAcademicYearId));
+  const lessons = [];
+  for (const e of rows) {
+    const [section, subject] = [await ctx.db.get(e.sectionId), await ctx.db.get(e.subjectId)];
+    lessons.push({ entryId: e._id, dayOfWeek: e.dayOfWeek, periodId: e.periodId, sectionId: e.sectionId, section: (section as Doc<"sections"> | null)?.displayName ?? "", subject: subject?.name ?? "", room: e.room ?? null });
+  }
+  return { periods: periods.map((p) => ({ periodId: p._id, index: p.index, label: p.label, startTime: p.startTime, endTime: p.endTime, isBreak: p.isBreak })), lessons };
+}
+
 /** The calling teacher's own week across sections. */
 export const myTimetable = academicsQuery({
   args: {},
   handler: async (ctx) => {
     requirePermission(ctx.actor, "timetable:read:own");
     if (!ctx.actor.teacherId) throw forbidden("Only teachers have a teaching timetable.");
-    const periods = await ctx.db.query("periods").withIndex("by_school_index", (q) => q.eq("schoolId", ctx.actor.schoolId)).collect();
-    const settings = await getSchoolSettings(ctx, ctx.actor.schoolId);
-    const rows = (await ctx.db.query("timetableEntries").withIndex("by_teacher_day_period", (q) => q.eq("teacherId", ctx.actor.teacherId!)).collect())
-      .filter((e) => e.schoolId === ctx.actor.schoolId && (!settings.currentAcademicYearId || e.academicYearId === settings.currentAcademicYearId));
-    const lessons = [];
-    for (const e of rows) {
-      const [section, subject] = [await ctx.db.get(e.sectionId), await ctx.db.get(e.subjectId)];
-      lessons.push({ entryId: e._id, dayOfWeek: e.dayOfWeek, periodId: e.periodId, sectionId: e.sectionId, section: (section as Doc<"sections"> | null)?.displayName ?? "", subject: subject?.name ?? "", room: e.room ?? null });
-    }
-    return { periods: periods.map((p) => ({ periodId: p._id, index: p.index, label: p.label, startTime: p.startTime, endTime: p.endTime, isBreak: p.isBreak })), lessons };
+    return await teacherWeek(ctx, ctx.actor.teacherId);
+  },
+});
+
+/** Any teacher's week (timetable builder "By teacher" view; timetable:manage). */
+export const teacherTimetable = academicsQuery({
+  args: { teacherId: v.id("teachers") },
+  handler: async (ctx, { teacherId }) => {
+    requirePermission(ctx.actor, "timetable:manage");
+    const teacher = await getInSchool(ctx, "teachers", teacherId, "Teacher");
+    return await teacherWeek(ctx, teacher._id);
+  },
+});
+
+// ================================================================ student portal
+/** Weekly timetable of the signed-in student's current section (was studentPortal.myTimetable). */
+export const myStudentTimetable = academicsQuery({
+  args: vPortalStudent,
+  handler: async (ctx, { studentId }) => {
+    const student = await resolvePortalStudent(ctx, studentId, "timetable:read:own");
+    if (!student) return { state: "no_student_record" as const };
+    const { section } = await activeSection(ctx, student);
+    if (!section) return { state: "not_enrolled" as const };
+    return { state: "ok" as const, section: section.displayName, ...(await timetableFor(ctx, section)) };
   },
 });

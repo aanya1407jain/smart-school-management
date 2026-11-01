@@ -16,6 +16,7 @@ import { assertIsoDate, assertNonEmpty, vAudience, vEventKind } from "./core/val
 import { daysBetween } from "./model/calendar";
 import { writeAudit } from "./model/audit";
 import { inAudience, validateAudience } from "./notices";
+import { maybeProvider } from "./core/registry";
 
 const administrationQuery = moduleQuery("administration");
 const administrationMutation = moduleMutation("administration");
@@ -34,9 +35,11 @@ function view(e: Doc<"events">) {
   return { eventId: e._id, title: e.title, description: e.description ?? null, kind: e.kind, startDate: e.startDate, endDate: e.endDate, audience: e.audience };
 }
 
+/** A holiday may not cover days whose registers are already marked (Attendance decides; nothing to check without it). */
 async function assertNoRegisters(ctx: Parameters<typeof getInSchool>[0], startDate: string, endDate: string) {
-  const marked = await ctx.db.query("attendanceSessions").withIndex("by_school_date", (q) => q.eq("schoolId", ctx.actor.schoolId).gte("date", startDate).lte("date", endDate)).first();
-  if (marked) throw conflict(`Attendance is already marked on ${marked.date}; a holiday cannot cover that date.`);
+  const calendar = maybeProvider("attendance.calendarConflicts");
+  const problem = calendar ? await calendar.holidayConflict(ctx, ctx.actor.schoolId, startDate, endDate) : null;
+  if (problem) throw conflict(problem);
 }
 
 export const create = administrationMutation({

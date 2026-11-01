@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Check, Mail, MoreHorizontal, Pencil, Phone, UserPlus, X, Eye } from "lucide-react";
-import type { StaffAttendanceStatus } from "@/types/domain";
+import type { StaffAttendanceStatus } from "@/types/attendance";
 import { services } from "@/lib/services";
 import { useQuery } from "@/lib/hooks/use-query";
 import {
@@ -11,7 +11,7 @@ import {
 } from "@/components/ui";
 import { useAcademicOptions } from "@/features/shared/use-academic-options";
 import { formatDate, previousSchoolDay, todayISO, formatLongDate, isSchoolDay } from "@/lib/utils/dates";
-import { LEAVE_TYPE_LABELS } from "@/lib/constants/labels";
+import { LEAVE_TYPE_LABELS } from "@/features/attendance/labels";
 
 export function TeachersWorkspace() {
   const params = useSearchParams();

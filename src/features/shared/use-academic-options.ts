@@ -1,8 +1,7 @@
 "use client";
 import { useMemo } from "react";
 import { api } from "@convex/_generated/api";
-import { services } from "@/lib/services";
-import type { AcademicOptions } from "@/lib/services/lookup.service";
+import { requireDemo, type AcademicOptions } from "@/lib/demo/runtime";
 import { useQuery, type QueryState } from "@/lib/hooks/use-query";
 import { useSchoolQuery } from "@/lib/convex/membership";
 import { useSession } from "@/features/auth/session-provider";
@@ -21,12 +20,12 @@ import { useSession } from "@/features/auth/session-provider";
 export function useAcademicOptions(): QueryState<AcademicOptions> {
   const { dataSource } = useSession();
   const live = dataSource === "live";
-  const demo = useQuery(() => services.lookup.getAcademicOptions(), [live], { enabled: !live });
+  const demo = useQuery(() => requireDemo().school.getAcademicOptions(), [live], { enabled: !live });
   const years = useSchoolQuery(api.academics.listAcademicYears, live ? {} : "skip");
   const hasCurrent = !!years?.some((y) => y.isCurrent);
   const classes = useSchoolQuery(api.academics.listClasses, live ? {} : "skip");
   const sections = useSchoolQuery(api.academics.listSections, live && hasCurrent ? {} : "skip");
-  const subjects = useSchoolQuery(api.academics.listSubjects, live ? {} : "skip");
+  const subjects = useSchoolQuery(api.academics.listSubjectOptions, live ? {} : "skip");
 
   const liveData = useMemo<AcademicOptions | undefined>(() => {
     if (!live || !years || !classes || !subjects || (hasCurrent && !sections)) return undefined;

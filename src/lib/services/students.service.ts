@@ -1,3 +1,4 @@
+import type { StudentEditInput } from "@/types/students";
 import type { Gender, GuardianLink, ID, Student, StudentStatus } from "@/types/domain";
 import { readDb, writeDb } from "@/lib/store/db";
 import { newId } from "@/lib/utils/ids";
@@ -47,21 +48,7 @@ export interface StudentListItem {
   outstanding: number | null;
 }
 
-export interface StudentInput {
-  firstName: string;
-  lastName: string;
-  gender: Gender;
-  dateOfBirth: string;
-  bloodGroup: string;
-  email: string;
-  phone: string;
-  address: string;
-  admissionDate: string;
-  sectionId: ID;
-  status: StudentStatus;
-  guardian: { name: string; relation: GuardianLink["relation"]; phone: string; email: string; occupation: string };
-  assignFees?: boolean;
-}
+export type StudentInput = StudentEditInput;
 
 function validate(input: StudentInput) {
   const errors: Record<string, string> = {};

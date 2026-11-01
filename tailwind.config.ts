@@ -14,6 +14,9 @@ const config: Config = {
       colors: {
         // Raw palette
         teal: { DEFAULT: channel("c-teal"), soft: channel("c-teal-soft") },
+        // Brand accents for gradients, glows and focus rings (#06B6D4, #14B8A6).
+        cyan: channel("c-cyan"),
+        aqua: channel("c-aqua"),
         lagoon: channel("c-lagoon"),
         sapphire: channel("c-sapphire"),
         blush: channel("c-blush"),
@@ -44,15 +47,28 @@ const config: Config = {
         glass: "0 1px 0 0 rgb(255 255 255 / 0.6) inset, 0 8px 32px -12px rgb(var(--c-sapphire) / 0.18)",
         soft: "0 2px 12px -4px rgb(var(--c-sapphire) / 0.12)",
         lift: "0 14px 40px -16px rgb(var(--c-sapphire) / 0.28)",
-        focus: "0 0 0 3px rgb(var(--c-teal) / 0.35)",
+        // Glow ring + soft halo used on focus (inputs, selects, search).
+        focus: "0 0 0 3px rgb(var(--c-teal) / 0.22), 0 0 18px -2px rgb(var(--c-cyan) / 0.35)",
+        // Multi-layer ambient shadow for glass surfaces (no harsh borders).
+        ambient: "0 8px 30px rgb(0 0 0 / 0.04), 0 1px 2px rgb(var(--c-sapphire) / 0.05)",
+        "ambient-lg": "0 18px 44px -12px rgb(var(--c-sapphire) / 0.16), 0 2px 6px rgb(0 0 0 / 0.04)",
+        // Accent glow around icon containers on hover.
+        glow: "0 0 0 4px rgb(var(--c-teal) / 0.10), 0 8px 22px -6px rgb(var(--c-cyan) / 0.45)",
       },
       keyframes: {
         "fade-up": { from: { opacity: "0", transform: "translateY(6px)" }, to: { opacity: "1", transform: "none" } },
+        // Staggered list entrance (items set --stagger-i).
+        "rise-in": { from: { opacity: "0", transform: "translateY(8px)" }, to: { opacity: "1", transform: "none" } },
         shimmer: { "100%": { transform: "translateX(100%)" } },
+        // Floating menus: soft scale-in from just below the trigger.
+        "scale-in": { from: { opacity: "0", transform: "scale(.96) translateY(-4px)" }, to: { opacity: "1", transform: "none" } },
       },
       animation: {
         "fade-up": "fade-up .35s cubic-bezier(.2,.7,.2,1) both",
+        // 40 ms stagger per item (the `.stagger` utility sets the delay from --stagger-i).
+        "rise-in": "rise-in .38s cubic-bezier(.2,.8,.2,1) both",
         shimmer: "shimmer 1.4s infinite",
+        "scale-in": "scale-in .16s cubic-bezier(.2,.8,.2,1) both",
       },
     },
   },

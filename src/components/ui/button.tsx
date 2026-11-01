@@ -7,11 +7,12 @@ type Variant = "primary" | "secondary" | "outline" | "ghost" | "danger" | "accen
 type Size = "sm" | "md" | "lg" | "icon" | "icon-sm";
 
 const variants: Record<Variant, string> = {
-  primary: "bg-primary text-primary-fg shadow-soft hover:bg-primary-hover",
+  // Brand gradient (lagoon → teal) with a soft cyan glow on hover.
+  primary: "bg-gradient-to-br from-lagoon to-teal text-primary-fg shadow-soft hover:shadow-[0_8px_22px_-8px_rgb(var(--c-cyan)/0.6)] hover:brightness-110",
   secondary: "bg-sapphire text-white shadow-soft hover:bg-sapphire/90",
-  accent: "bg-teal text-white shadow-soft hover:bg-lagoon",
-  outline: "border border-line bg-white/70 text-ink hover:bg-white hover:border-heather",
-  ghost: "text-ink-soft hover:bg-sapphire/5 hover:text-ink",
+  accent: "bg-gradient-to-br from-teal to-aqua text-white shadow-soft hover:shadow-[0_8px_22px_-8px_rgb(var(--c-cyan)/0.6)] hover:brightness-105",
+  outline: "border border-line bg-white/70 text-ink backdrop-blur-md hover:border-teal/40 hover:bg-white hover:shadow-ambient",
+  ghost: "text-ink-soft hover:bg-teal-soft/60 hover:text-lagoon",
   soft: "bg-teal-soft text-lagoon hover:bg-teal/15",
   danger: "bg-plum text-white shadow-soft hover:bg-plum/90",
 };
@@ -25,8 +26,9 @@ const sizes: Record<Size, string> = {
 
 export function buttonClass(variant: Variant = "primary", size: Size = "md", className?: string) {
   return cn(
-    "inline-flex select-none items-center justify-center font-medium whitespace-nowrap transition-all duration-150",
-    "active:scale-[0.98] disabled:pointer-events-none disabled:opacity-55 focus-visible:outline-none focus-visible:shadow-focus",
+    // Tactile press (scale-95) with a springy ease back; glowing focus ring.
+    "inline-flex select-none items-center justify-center font-medium whitespace-nowrap transition-all duration-200 ease-[cubic-bezier(.34,1.56,.64,1)]",
+    "hover:-translate-y-px active:translate-y-0 active:scale-95 active:duration-75 disabled:pointer-events-none disabled:opacity-55 focus-visible:outline-none focus-visible:shadow-focus",
     variants[variant],
     sizes[size],
     className,

@@ -1,4 +1,4 @@
-import type { ISODate } from "@/types/domain";
+import type { ISODate } from "@/types/core";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 

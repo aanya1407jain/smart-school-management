@@ -19,8 +19,8 @@ import { services } from "@/lib/services";
 import { useQuery } from "@/lib/hooks/use-query";
 import { useActiveStudentId } from "@/features/auth/session-provider";
 import { Button, Card, CardHeader, EmptyState, GlassCard, PageHeader, ProgressRing, QueryView } from "@/components/ui";
-import { ChartTooltip, axisProps } from "@/components/charts/chart-card";
-import { CHART, CHART_GRID } from "@/lib/constants/theme";
+import { ChartTooltip, axisProps, barCursor, barProps, gridProps } from "@/components/charts/chart-card";
+import { CHART } from "@/lib/constants/theme";
 import { formatPercent } from "@/lib/utils/format";
 import { toISODate, todayISO } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils/cn";
@@ -89,12 +89,12 @@ function AttendanceOverview({ records, threshold, lateCountsAsPresent }: { recor
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={monthly} margin={{ top: 10, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid vertical={false} stroke={CHART_GRID} />
+                  <CartesianGrid {...gridProps} />
                   <XAxis dataKey="label" {...axisProps} />
                   <YAxis domain={[0, 100]} {...axisProps} tickFormatter={(v) => `${v}%`} width={46} />
-                  <Tooltip content={<ChartTooltip format={(v) => `${Number(v).toFixed(1)}%`} />} cursor={{ fill: "rgba(188,197,204,0.18)" }} />
+                  <Tooltip content={<ChartTooltip format={(v) => `${Number(v).toFixed(1)}%`} />} cursor={barCursor} />
                   <ReferenceLine y={threshold} stroke={CHART.highlight} strokeDasharray="4 4" />
-                  <Bar dataKey="percentage" name="Attendance" fill={CHART.single} radius={[4, 4, 0, 0]} maxBarSize={44} />
+                  <Bar dataKey="percentage" name="Attendance" {...barProps("single")} maxBarSize={44} />
                 </BarChart>
               </ResponsiveContainer>
             )}

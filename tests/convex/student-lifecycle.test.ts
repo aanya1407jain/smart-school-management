@@ -45,34 +45,34 @@ describe("scholar numbers", () => {
     const A = await createSchool(t, "alpha");
     const B = await createSchool(t, "beta");
     const admin = await as(t, A.users.admin);
-    const first = await admin.mutation(api.academics.createStudentWithEnrollment, admission(A, { scholarNo: "SR 104" }));
-    expect(await errorCode(admin.mutation(api.academics.createStudentWithEnrollment, admission(A, { firstName: "Nila", scholarNo: "sr104" })))).toBe("CONFLICT");
+    const first = await admin.mutation(api.students.createStudentWithEnrollment, admission(A, { scholarNo: "SR 104" }));
+    expect(await errorCode(admin.mutation(api.students.createStudentWithEnrollment, admission(A, { firstName: "Nila", scholarNo: "sr104" })))).toBe("CONFLICT");
     // Nothing was written by the refused admission.
     expect((await t.run((ctx) => ctx.db.query("students").withIndex("by_school_status_name", (q) => q.eq("schoolId", A.schoolId).eq("status", "active").eq("lastName", "Rao")).collect())).length).toBe(1);
-    expect(await errorCode(admin.mutation(api.academics.updateStudentProfile, { studentId: A.studentB, scholarNo: "Sr 104" }))).toBe("CONFLICT");
-    expect(await errorCode(admin.mutation(api.academics.updateStudentProfile, { studentId: first.studentId, scholarNo: "SR104" }))).toBe("NO_ERROR"); // its own number
-    expect(await errorCode(admin.mutation(api.academics.updateStudentProfile, { studentId: A.studentB, scholarNo: "SR-105" }))).toBe("NO_ERROR");
+    expect(await errorCode(admin.mutation(api.students.updateStudentProfile, { studentId: A.studentB, scholarNo: "Sr 104" }))).toBe("CONFLICT");
+    expect(await errorCode(admin.mutation(api.students.updateStudentProfile, { studentId: first.studentId, scholarNo: "SR104" }))).toBe("NO_ERROR"); // its own number
+    expect(await errorCode(admin.mutation(api.students.updateStudentProfile, { studentId: A.studentB, scholarNo: "SR-105" }))).toBe("NO_ERROR");
     // Another school may use the same number.
     const bAdmin = await as(t, B.users.admin);
-    expect(await errorCode(bAdmin.mutation(api.academics.createStudentWithEnrollment, admission(B, { scholarNo: "SR104" })))).toBe("NO_ERROR");
+    expect(await errorCode(bAdmin.mutation(api.students.createStudentWithEnrollment, admission(B, { scholarNo: "SR104" })))).toBe("NO_ERROR");
     // Lookup is school-scoped.
     expect((await admin.query(api.studentLifecycle.findByScholarNo, { scholarNo: "sr 104" }))?.studentId).toBe(first.studentId);
     expect(await admin.query(api.studentLifecycle.findByScholarNo, { scholarNo: "SR 999" })).toBeNull();
     // Clearing frees the number.
-    await admin.mutation(api.academics.updateStudentProfile, { studentId: first.studentId, scholarNo: "" });
-    expect(await errorCode(admin.mutation(api.academics.updateStudentProfile, { studentId: A.studentB, scholarNo: "SR 104" }))).toBe("NO_ERROR");
+    await admin.mutation(api.students.updateStudentProfile, { studentId: first.studentId, scholarNo: "" });
+    expect(await errorCode(admin.mutation(api.students.updateStudentProfile, { studentId: A.studentB, scholarNo: "SR 104" }))).toBe("NO_ERROR");
     // Teachers cannot set scholar numbers.
-    expect(await errorCode((await as(t, A.users.classTeacher)).mutation(api.academics.updateStudentProfile, { studentId: A.studentA, scholarNo: "SR 1" }))).toBe("FORBIDDEN");
+    expect(await errorCode((await as(t, A.users.classTeacher)).mutation(api.students.updateStudentProfile, { studentId: A.studentA, scholarNo: "SR 1" }))).toBe("FORBIDDEN");
   });
 
   test("the same child cannot be admitted twice without an explicit confirmation", async () => {
     const t = makeTest();
     const A = await createSchool(t, "alpha");
     const admin = await as(t, A.users.admin);
-    await admin.mutation(api.academics.createStudentWithEnrollment, admission(A));
-    expect(await errorCode(admin.mutation(api.academics.createStudentWithEnrollment, admission(A, { firstName: " meera ", parentContact: { name: "X", relation: "Father", phone: "+91 90000 00001" } })))).toBe("CONFLICT");
-    expect(await errorCode(admin.mutation(api.academics.createStudentWithEnrollment, admission(A, { dateOfBirth: "2014-05-03" })))).toBe("NO_ERROR"); // different DOB
-    expect(await errorCode(admin.mutation(api.academics.createStudentWithEnrollment, admission(A, { confirmNotDuplicate: true })))).toBe("NO_ERROR");
+    await admin.mutation(api.students.createStudentWithEnrollment, admission(A));
+    expect(await errorCode(admin.mutation(api.students.createStudentWithEnrollment, admission(A, { firstName: " meera ", parentContact: { name: "X", relation: "Father", phone: "+91 90000 00001" } })))).toBe("CONFLICT");
+    expect(await errorCode(admin.mutation(api.students.createStudentWithEnrollment, admission(A, { dateOfBirth: "2014-05-03" })))).toBe("NO_ERROR"); // different DOB
+    expect(await errorCode(admin.mutation(api.students.createStudentWithEnrollment, admission(A, { confirmNotDuplicate: true })))).toBe("NO_ERROR");
     const audit = await t.run((ctx) => ctx.db.query("auditLogs").withIndex("by_school_action", (q) => q.eq("schoolId", A.schoolId).eq("action", "student.admitted")).collect());
     expect(audit.some((r) => Array.isArray((r.metadata as { confirmedNotDuplicateOf?: unknown }).confirmedNotDuplicateOf))).toBe(true);
   });
@@ -102,7 +102,7 @@ describe("promotion", () => {
 
     // Twice → refused; already in the target year.
     expect(await errorCode(admin.mutation(api.studentLifecycle.promote, { fromSectionId: A.sectionA, toSectionId: Y.nineA, studentIds: [A.studentA] }))).toBe("CONFLICT");
-    const history = await admin.query(api.academics.enrollmentHistory, { studentId: A.studentA });
+    const history = await admin.query(api.students.enrollmentHistory, { studentId: A.studentA });
     expect(history).toHaveLength(2);
   });
 
@@ -171,7 +171,7 @@ describe("pass-out and transfer certificates", () => {
     const t = makeTest();
     const A = await createSchool(t, "alpha");
     const admin = await as(t, A.users.admin);
-    await admin.mutation(api.academics.updateStudentProfile, { studentId: A.studentA, scholarNo: "SR 7" });
+    await admin.mutation(api.students.updateStudentProfile, { studentId: A.studentA, scholarNo: "SR 7" });
     const first = await admin.mutation(api.studentLifecycle.issueTransferCertificate, { studentId: A.studentA, leavingDate: "2026-11-30", reason: "Family relocating", conduct: "Good" });
     expect(first.tcNo).toBe("TC/AL/26-27/0001");
     const [e] = await enrollmentsOf(t, A.studentA);

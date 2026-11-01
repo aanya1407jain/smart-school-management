@@ -32,12 +32,15 @@ import type { QueryCtx } from "./_generated/server";
 import { moduleQuery, moduleMutation } from "./core/functions";
 import type { Actor } from "./core/actor";
 import {
-  getCurrentAcademicYearId, getInSchool, getSchoolSettings, hasPermission, isSubjectTeacherOf, requireAnyPermission, requirePermission, teacherSectionIds,
+  getCurrentAcademicYearId, getInSchool, getSchoolSettings, hasPermission, requireAnyPermission, requirePermission, teacherSectionIds,
 } from "./core/authorization";
 import { conflict, forbidden, invalid, invalidRelationship, notFound } from "./core/errors";
 import { assertIsoDate, assertNonEmpty, assertTime, EXAM_STATUSES, type ExamStatusValue } from "./core/validators";
-import { activeRoster, fullName, subjectInCurriculum } from "./model/academics";
+import { activeRoster, fullName } from "./model/academics";
+import { isSubjectTeacherOf, subjectInCurriculum } from "./model/academicsRecords";
 import { gradeFor } from "./model/grading";
+import { publishedResults } from "./model/examRecords";
+import { resolvePortalStudent, vPortalStudent } from "./model/portalStudent";
 import { writeAudit } from "./model/audit";
 import { notifyUsers, userIdsForStudent } from "./model/notifications";
 
@@ -459,5 +462,17 @@ export const progress = academicsQuery({
     }
     rows.sort((a, b) => a.section.localeCompare(b.section, undefined, { numeric: true }) || a.subject.localeCompare(b.subject));
     return { rows, ready: rows.length > 0 && rows.every((r) => r.entered >= r.total) };
+  },
+});
+
+// ================================================================ student portal
+/** Published exam results of the signed-in student (moved from studentPortal.ts). */
+export const myResults = academicsQuery({
+  args: vPortalStudent,
+  handler: async (ctx, { studentId }) => {
+    const student = await resolvePortalStudent(ctx, studentId, "results:read:own");
+    if (!student) return { state: "no_student_record" as const };
+    const school = (await ctx.db.get(ctx.actor.schoolId))!;
+    return { state: "ok" as const, school: school.name, student: { name: fullName(student), admissionNo: student.admissionNo }, results: await publishedResults(ctx, student) };
   },
 });

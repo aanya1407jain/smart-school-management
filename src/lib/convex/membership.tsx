@@ -74,7 +74,7 @@ type SchoolArgs<F extends FunctionReference<"query" | "mutation">> = Omit<Functi
 
 /**
  * `useQuery` for school-scoped functions. Pass "skip" to defer.
- *   const register = useSchoolQuery(api.attendance.getByDate, { sectionId, date });
+ *   const sections = useSchoolQuery(api.academics.listSections, { academicYearId });
  */
 export function useSchoolQuery<F extends FunctionReference<"query", "public", WithMembership & Record<string, unknown>>>(
   fn: F,
@@ -87,8 +87,8 @@ export function useSchoolQuery<F extends FunctionReference<"query", "public", Wi
 
 /**
  * `useMutation` for school-scoped functions.
- *   const mark = useSchoolMutation(api.attendance.mark);
- *   await mark({ sectionId, date, entries });
+ *   const setClassTeacher = useSchoolMutation(api.academics.setClassTeacher);
+ *   await setClassTeacher({ sectionId, teacherId });
  */
 export function useSchoolMutation<F extends FunctionReference<"mutation", "public", WithMembership & Record<string, unknown>>>(fn: F) {
   const { activeMembershipId } = useMembership();

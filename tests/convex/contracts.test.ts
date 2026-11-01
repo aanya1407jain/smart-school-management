@@ -94,11 +94,11 @@ describe("curriculum (class subjects)", () => {
     const A = await createSchool(t, "alpha");
     const B = await createSchool(t, "beta");
     const teacher = await as(t, A.users.classTeacher);
-    expect(await errorCode(teacher.mutation(api.academics.setClassSubjects, { classId: A.classId, academicYearId: A.yearId, subjectIds: [A.subjectId] }))).toBe("FORBIDDEN");
+    expect(await errorCode(teacher.mutation(api.subjects.setClassSubjects, { classId: A.classId, academicYearId: A.yearId, subjectIds: [A.subjectId] }))).toBe("FORBIDDEN");
     const admin = await as(t, A.users.admin);
-    expect(await errorCode(admin.mutation(api.academics.setClassSubjects, { classId: A.classId, academicYearId: A.yearId, subjectIds: [B.subjectId] }))).toBe("NOT_FOUND");
-    expect(await errorCode(admin.mutation(api.academics.setClassSubjects, { classId: B.classId, academicYearId: A.yearId, subjectIds: [] }))).toBe("NOT_FOUND");
-    expect((await teacher.query(api.academics.listClassSubjects, { classId: A.classId })).map((s) => s.code)).toEqual(["MATH"]);
+    expect(await errorCode(admin.mutation(api.subjects.setClassSubjects, { classId: A.classId, academicYearId: A.yearId, subjectIds: [B.subjectId] }))).toBe("NOT_FOUND");
+    expect(await errorCode(admin.mutation(api.subjects.setClassSubjects, { classId: B.classId, academicYearId: A.yearId, subjectIds: [] }))).toBe("NOT_FOUND");
+    expect((await teacher.query(api.subjects.listClassSubjects, { classId: A.classId })).map((s) => s.code)).toEqual(["MATH"]);
   });
 
   test("subject assignment requires the subject to be in the curriculum; assigned subjects cannot be removed", async () => {
@@ -106,10 +106,10 @@ describe("curriculum (class subjects)", () => {
     const A = await createSchool(t, "alpha");
     const admin = await as(t, A.users.admin);
     const sci = await t.run((ctx) => ctx.db.insert("subjects", { schoolId: A.schoolId, name: "Science", code: "SCI", active: true }));
-    expect(await errorCode(admin.mutation(api.academics.assignSubjectTeacher, { sectionId: A.sectionA, subjectId: sci, teacherId: A.classTeacher }))).toBe("INVALID_RELATIONSHIP");
-    expect(await admin.mutation(api.academics.setClassSubjects, { classId: A.classId, academicYearId: A.yearId, subjectIds: [A.subjectId, sci] })).toEqual({ added: 1, removed: 0 });
-    await admin.mutation(api.academics.assignSubjectTeacher, { sectionId: A.sectionA, subjectId: sci, teacherId: A.classTeacher });
-    expect(await errorCode(admin.mutation(api.academics.setClassSubjects, { classId: A.classId, academicYearId: A.yearId, subjectIds: [A.subjectId] }))).toBe("INVALID_RELATIONSHIP");
+    expect(await errorCode(admin.mutation(api.subjects.assignSubjectTeacher, { sectionId: A.sectionA, subjectId: sci, teacherId: A.classTeacher }))).toBe("INVALID_RELATIONSHIP");
+    expect(await admin.mutation(api.subjects.setClassSubjects, { classId: A.classId, academicYearId: A.yearId, subjectIds: [A.subjectId, sci] })).toEqual({ added: 1, removed: 0 });
+    await admin.mutation(api.subjects.assignSubjectTeacher, { sectionId: A.sectionA, subjectId: sci, teacherId: A.classTeacher });
+    expect(await errorCode(admin.mutation(api.subjects.setClassSubjects, { classId: A.classId, academicYearId: A.yearId, subjectIds: [A.subjectId] }))).toBe("INVALID_RELATIONSHIP");
     expect((await admin.query(api.audit.list, { action: "curriculum.updated" })).length).toBe(1);
   });
 
