@@ -2,7 +2,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { motion } from "framer-motion";
 import { useSession } from "@/features/auth/session-provider";
 import { canAccessRoute, landingRouteFor, routeRuleFor } from "@/lib/permissions";
 import { MODULES } from "@convex/core/modules";
@@ -102,7 +101,9 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar onOpenMobileNav={() => setMobileOpen(true)} />
         <main id="main" className="flex-1 px-4 pb-16 pt-6 sm:px-6 lg:px-8 lg:pt-8">
-          <motion.div key={pathname} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.28, ease: [0.2, 0.7, 0.2, 1] }} className="mx-auto w-full max-w-[1400px]">
+          {/* No keyed remount or fade-in per route: the page swaps in place and is visible at once
+              (a 280 ms fade from transparent on every navigation read as lag). */}
+          <div className="mx-auto w-full max-w-[1400px]">
             {access === "forbidden" ? (
               <div className="solid-card mx-auto mt-6 max-w-xl">
                 <UnauthorizedState
@@ -117,7 +118,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             ) : dataSource === "live" && !isLiveRoute(pathname) ? (
               <LiveNotConnected user={user} schoolName={viewer?.school.name ?? ""} />
             ) : children}
-          </motion.div>
+          </div>
         </main>
       </div>
     </div>

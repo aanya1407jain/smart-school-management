@@ -6,6 +6,7 @@
 import type { ReactNode } from "react";
 import { ConvexAuthNextjsProvider } from "@convex-dev/auth/nextjs";
 import { ConvexReactClient } from "convex/react";
+import { ConvexQueryCacheProvider } from "convex-helpers/react/cache/provider";
 import { CONVEX_URL, isConvexConfigured } from "./config";
 import { MembershipProvider } from "./membership";
 
@@ -15,7 +16,10 @@ export function ConvexClientProvider({ children }: { children: ReactNode }) {
   if (!client) return <>{children}</>;
   return (
     <ConvexAuthNextjsProvider client={client}>
-      <MembershipProvider>{children}</MembershipProvider>
+      {/* Keeps school-query subscriptions alive for 5 minutes after their last user unmounts (tab switches are instant). */}
+      <ConvexQueryCacheProvider expiration={5 * 60_000} maxIdleEntries={200}>
+        <MembershipProvider>{children}</MembershipProvider>
+      </ConvexQueryCacheProvider>
     </ConvexAuthNextjsProvider>
   );
 }
