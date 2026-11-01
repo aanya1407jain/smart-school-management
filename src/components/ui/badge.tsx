@@ -34,7 +34,7 @@ export function BadgeChip({ children, tone = "teal", className, title }: { child
 
 export function Badge({ tone = "neutral", children, className, dot, pulse }: { tone?: Tone; children: ReactNode; className?: string; dot?: boolean; pulse?: boolean }) {
   return (
-    <span className={cn("inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-[12px] font-semibold ring-1 ring-inset shadow-[inset_0_1px_0_rgb(255_255_255/0.6)] backdrop-blur-sm", tones[tone], className)}>
+    <span className={cn("inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-[12px] font-semibold ring-1 ring-inset", tones[tone], className)}>
       {dot && (
         <span className="relative grid h-1.5 w-1.5 place-items-center" aria-hidden>
           {pulse && <span className="absolute h-1.5 w-1.5 animate-ping rounded-full bg-current opacity-50 motion-reduce:hidden" />}
@@ -54,13 +54,13 @@ const ALERT_TINT = { teal: "var(--c-teal)", plum: "var(--c-plum)", lavender: "va
  */
 export function AlertPill({ href, icon, children, tone = "teal", className }: { href?: string; icon?: ReactNode; children: ReactNode; tone?: keyof typeof ALERT_TINT; className?: string }) {
   const cls = cn(
-    "tint-glass group flex items-center gap-3 rounded-full px-4 py-2.5 text-sm text-ink-soft transition-all duration-200 ease-out",
-    href && "hover:-translate-y-0.5 hover:shadow-ambient-lg focus-visible:outline-none focus-visible:shadow-focus",
+    "tint-glass group flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm text-ink-soft transition-colors duration-150",
+    href && "hover:bg-[rgb(var(--tint)/0.11)] focus-visible:outline-none focus-visible:shadow-focus",
     className,
   );
   const body = (
     <>
-      {icon && <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-white/80 shadow-sm ring-1 ring-inset ring-[rgb(var(--tint)/0.25)] [color:rgb(var(--tint))]">{icon}</span>}
+      {icon && <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-white ring-1 ring-inset ring-[rgb(var(--tint)/0.25)] [color:rgb(var(--tint))]">{icon}</span>}
       <span className="min-w-0 flex-1">{children}</span>
       {href && <ArrowRight className="h-4 w-4 shrink-0 text-ink-muted transition-transform duration-200 group-hover:translate-x-1 group-hover:text-ink" aria-hidden />}
     </>

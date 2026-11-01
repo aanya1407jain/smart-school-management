@@ -143,7 +143,7 @@ export function PromoteTab() {
     <div className="space-y-4 pb-24">
       <GlassCard className="spatial">
         <CardHeader title="Promote a section" description="Pick the section students are in now and where they go next year. Each student can be promoted, repeat the class or stay on hold." icon={<ArrowRight className="h-4 w-4" />} />
-        <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-2 lg:grid-cols-4">
           <YearSectionPicker label="From" value={from} onChange={setFrom} placeholder="Current section" />
           <YearSectionPicker label="To" value={to} onChange={setTo} onYear={setToYear} placeholder="Destination section" />
         </div>
@@ -170,7 +170,7 @@ export function PromoteTab() {
         <Card className="overflow-hidden">
           <CardHeader title="Roster & promotion" description="Suggested actions follow the latest published result: eligible → promote, compartment → hold, three or more subjects not passed → repeat. Change any row." />
           {rows.length === 0 ? <EmptyState title="No students currently enrolled in this section" className="py-8" /> : (
-            <div className="scrollbar-thin overflow-x-auto">
+            <div className="scrollbar-thin relative overflow-x-auto">
               <table className="w-full min-w-[980px] text-sm">
                 <caption className="sr-only">Students of {plan.from.label} and their promotion</caption>
                 <thead>
@@ -298,9 +298,9 @@ export function PromoteTab() {
       >
         {step === 1 ? (
           <div className="space-y-4">
-            <ul className="grid gap-2 sm:grid-cols-2">
+            <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {groups.map((g) => (
-                <li key={g.section.sectionId} className="rounded-xl border border-white/70 bg-white/60 p-3 shadow-sm">
+                <li key={g.section.sectionId} className="rounded-xl border border-line bg-white p-3 shadow-sm">
                   <p className="flex items-center gap-2 text-sm font-semibold text-ink"><BadgeChip>{g.section.label}</BadgeChip>{g.section.kind === "repeat" ? "Repeating" : "Promoted"}</p>
                   <p className="figures mt-1 text-[12.5px] text-ink-muted">{g.count} incoming · {g.section.roster.length + g.count}{g.section.capacity ? `/${g.section.capacity}` : ""} after this run</p>
                 </li>

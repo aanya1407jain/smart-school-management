@@ -13,7 +13,6 @@ import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { useSchoolQuery } from "@/lib/convex/membership";
 import { useActiveStudentId, useSession } from "@/features/auth/session-provider";
-import { PasswordCard } from "@/features/profile/password-card";
 import { Badge, Card, CardBody, CardHeader, EmptyState, LoadingState, PageHeader, StatCard, StatusBadge } from "@/components/ui";
 import { ROLE_LABELS, getNavigationForUser } from "@/lib/permissions";
 import { formatDate, todayISO } from "@/lib/utils/dates";
@@ -78,17 +77,17 @@ export function LiveStudentDashboard() {
         description="Your school record, straight from the school office."
       />
       <EnrollmentNotice p={p} />
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Class & section" value={<span data-testid="dash-class">{classLabel(p)}</span>} icon={<GraduationCap className="h-5 w-5" />} hint={p.enrollment?.classTeacher ? `Class teacher: ${p.enrollment.classTeacher}` : undefined} />
         <StatCard label="Roll number" value={<span data-testid="dash-roll">{p.enrollment?.rollNo ?? "—"}</span>} icon={<Hash className="h-5 w-5" />} tone="sapphire" hint="Assigned alphabetically by the school" />
         {p.state === "ok" && cards.map((c, i) => <c.Card key={i} studentId={p.student.studentId} active={!!(p.academicYear && p.enrollment)} />)}
         <StatCard label="Unread notifications" value={unread ?? "—"} icon={<Bell className="h-5 w-5" />} tone="lavender" href="/student/notifications" />
       </div>
-      <div className="mt-5 grid gap-4 lg:grid-cols-3">
+      <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader title={self ? "My school record" : "Student record"} icon={<IdCard className="h-4 w-4" />} action={<Link href="/student/profile" className="text-[13px] font-medium text-lagoon hover:underline">View profile</Link>} />
           <CardBody>
-            <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+            <dl className="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
               <Field label="Name" value={p.student.name} testId="dash-name" />
               <Field label="Scholar number" value={p.student.scholarNo ?? "—"} testId="dash-scholar" />
               <Field label="Academic year" value={p.academicYear?.name ?? "Not set"} testId="dash-year" />
@@ -125,8 +124,8 @@ export function LiveStudentProfile() {
   if (p === undefined) return <LoadingState variant="page" label="Loading your profile" />;
   return (
     <div className="mx-auto max-w-5xl space-y-5" data-testid="live-student-profile">
-      <PageHeader title="Profile" description="Your account and the school record the office keeps for you." />
-      <div className="grid gap-5 lg:grid-cols-2">
+      <PageHeader title="Profile" description="Your account and the school record the office keeps for you. Change your password in Settings → Security." />
+      <div className="grid grid-cols-1 gap-5">
         <Card>
           <CardHeader title="Account" icon={<UserRound className="h-4 w-4" />} />
           <CardBody>
@@ -138,7 +137,6 @@ export function LiveStudentProfile() {
             </dl>
           </CardBody>
         </Card>
-        <PasswordCard />
       </div>
       {p.state === "no_student_record" ? <MissingRecord /> : <StudentRecord p={p} />}
     </div>
@@ -154,11 +152,11 @@ function StudentRecord({ p }: { p: OkProfile }) {
     <>
       <h2 className="pt-2 text-lg font-semibold text-sapphire">My school record</h2>
       <EnrollmentNotice p={p} />
-      <div className="grid gap-5 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <Card>
           <CardHeader title={s.name} description={s.scholarNo ? `Scholar No: ${s.scholarNo}` : undefined} icon={<IdCard className="h-4 w-4" />} action={<StatusBadge status={s.status} />} />
           <CardBody>
-            <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+            <dl className="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
               <Field label="First name" value={s.firstName} />
               <Field label="Last name" value={s.lastName} />
               <Field label="Scholar number" value={s.scholarNo ?? "—"} testId="profile-scholar" />
@@ -175,7 +173,7 @@ function StudentRecord({ p }: { p: OkProfile }) {
         <Card>
           <CardHeader title="Class & enrollment" icon={<School className="h-4 w-4" />} />
           <CardBody>
-            <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+            <dl className="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
               <Field label="Academic year" value={p.academicYear?.name ?? "Not set"} testId="profile-year" />
               <Field label="Class" value={p.enrollment?.className ?? "—"} testId="profile-class" />
               <Field label="Section" value={p.enrollment?.sectionName ?? "—"} testId="profile-section" />

@@ -54,10 +54,10 @@ function LiveNotificationBell() {
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownTrigger asChild>
-        <Button variant="ghost" size="icon" className="relative" aria-label={`Notifications${unread ? `, ${unread} unread` : ""}`}>
+        <Button variant="ghost" size="icon" className="relative hover:bg-emerald-50 hover:text-emerald-700" aria-label={`Notifications${unread ? `, ${unread} unread` : ""}`}>
           <Bell className="h-[19px] w-[19px]" />
           {unread > 0 && (
-            <span className="absolute right-1.5 top-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-purple px-1 text-[10px] font-bold text-white ring-2 ring-alabaster">
+            <span className="absolute right-1.5 top-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-emerald-700 px-1 text-[10px] font-bold text-white ring-2 ring-white">
               {unread > 9 ? "9+" : unread}
             </span>
           )}
@@ -117,10 +117,10 @@ function NotificationBell() {
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownTrigger asChild>
-        <Button variant="ghost" size="icon" className="relative" aria-label={`Notifications${unread ? `, ${unread} unread` : ""}`}>
+        <Button variant="ghost" size="icon" className="relative hover:bg-emerald-50 hover:text-emerald-700" aria-label={`Notifications${unread ? `, ${unread} unread` : ""}`}>
           <Bell className="h-[19px] w-[19px]" />
           {unread > 0 && (
-            <span className="absolute right-1.5 top-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-purple px-1 text-[10px] font-bold text-white ring-2 ring-alabaster">
+            <span className="absolute right-1.5 top-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-emerald-700 px-1 text-[10px] font-bold text-white ring-2 ring-white">
               {unread > 9 ? "9+" : unread}
             </span>
           )}
@@ -168,12 +168,13 @@ function ProfileMenu() {
   const base = `/${user.role}`;
   const secondary = dataSource === "live" ? `Login ID ${viewer?.loginId ?? "—"}` : user.email;
   const roleLabel = user.title ?? ROLE_LABELS[user.role];
-  const settingsHref = hasPermission(user, "settings:manage") ? `${base}/settings` : `${base}/profile`;
+  // Teachers and students have personal Settings; an administrator needs settings:manage for the school Settings page.
+  const settingsHref = user.role !== "admin" || hasPermission(user, "settings:manage") ? `${base}/settings` : `${base}/profile`;
   return (
     <DropdownMenu>
       <DropdownTrigger asChild>
-        <button className="flex items-center gap-2.5 rounded-xl py-1 pl-1 pr-2 hover:bg-white/70" aria-label="Open profile menu">
-          <Avatar name={user.displayName} size="sm" />
+        <button className="flex items-center gap-2.5 rounded-xl py-1 pl-1 pr-2 transition-colors hover:bg-emerald-50/70" aria-label="Open profile menu">
+          <Avatar name={user.displayName} size="sm" className="bg-emerald-100 text-emerald-800" />
           <span className="hidden text-left leading-tight lg:block">
             <span className="block text-[13px] font-semibold text-ink">{user.displayName}</span>
             <span className="block text-[11.5px] text-ink-muted">{roleLabel}</span>
@@ -185,7 +186,7 @@ function ProfileMenu() {
         <div className="px-3 pb-2 pt-2">
           <p className="text-sm font-semibold text-ink">{user.displayName}</p>
           <p className="text-[12px] text-ink-muted">{secondary}</p>
-          <span className="mt-1.5 inline-block rounded-full bg-teal-soft px-2 py-0.5 text-[11px] font-semibold text-lagoon">{roleLabel}</span>
+          <span className="mt-1.5 inline-block rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 ring-1 ring-inset ring-emerald-200">{roleLabel}</span>
         </div>
         <DropdownSeparator />
         <DropdownItem onSelect={() => router.push(`${base}/profile`)}><UserRound className="h-4 w-4" /> Profile</DropdownItem>
@@ -215,7 +216,7 @@ function GlobalSearch() {
         onChange={(e) => setQ(e.target.value)}
         aria-label="Search students"
         placeholder="Search students by name or ID…"
-        className="h-10 w-full rounded-xl border border-line/80 bg-white/70 pl-9 pr-3 text-sm placeholder:text-ink-muted/70 focus:border-teal focus:bg-white focus:shadow-focus focus:outline-none"
+        className="h-10 w-full rounded-xl border border-line bg-white pl-9 pr-3 text-sm placeholder:text-ink-muted/70 focus:border-emerald-600 focus:shadow-focus focus:outline-none"
       />
     </form>
   );
@@ -226,20 +227,21 @@ export function Topbar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
   // Live-portal accounts never touch the demo-data services.
   const live = useSession().dataSource === "live";
   return (
-    <header className="sticky top-0 z-30 border-b border-line/60 bg-alabaster/75 backdrop-blur-xl">
+    <header className="sticky top-0 z-30 border-b border-line bg-surface">
       <div className="flex h-16 items-center gap-3 px-4 sm:px-6 lg:px-8">
-        <Button variant="ghost" size="icon" className="md:hidden" onClick={onOpenMobileNav} aria-label="Open navigation menu">
+        <Button variant="ghost" size="icon" className="hover:bg-emerald-50 hover:text-emerald-700 md:hidden" onClick={onOpenMobileNav} aria-label="Open navigation menu">
           <Menu className="h-5 w-5" />
         </Button>
         <nav aria-label="Breadcrumb" className="min-w-0 flex-1">
           <ol className="flex items-center gap-1.5 text-[13px] text-ink-muted">
             {crumbs.map((c, i) => (
-              <li key={i} className={cn("flex min-w-0 items-center gap-1.5", i < crumbs.length - 2 && "hidden sm:flex")}>
-                {i > 0 && <ChevronRight className="h-3.5 w-3.5 shrink-0 opacity-60" aria-hidden />}
+              // Phones: the page name, plus its parent on sub-pages ("Students › New"); the workspace crumb only from `sm`.
+              <li key={i} className={cn("flex min-w-0 items-center gap-1.5", i < Math.min(crumbs.length - 1, Math.max(1, crumbs.length - 2)) && "hidden sm:flex")}>
+                {i > 0 && <ChevronRight className={cn("h-3.5 w-3.5 shrink-0 opacity-60", i === Math.max(1, crumbs.length - 2) && "hidden sm:block")} aria-hidden />}
                 {c.href && i < crumbs.length - 1 ? (
-                  <Link href={c.href} className="truncate hover:text-ink">{c.label}</Link>
+                  <Link href={c.href} className="truncate transition-colors hover:text-emerald-700">{c.label}</Link>
                 ) : (
-                  <span className={cn("truncate", i === crumbs.length - 1 && "font-semibold text-ink")} aria-current={i === crumbs.length - 1 ? "page" : undefined}>{c.label}</span>
+                  <span className={cn("truncate", i === crumbs.length - 1 && "font-medium text-emerald-800")} aria-current={i === crumbs.length - 1 ? "page" : undefined}>{c.label}</span>
                 )}
               </li>
             ))}

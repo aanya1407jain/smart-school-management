@@ -37,9 +37,9 @@ export function ExamsList() {
       </Card>
       <QueryView query={q} loading="cards">
         {(rows) => rows.length === 0 ? <Card><EmptyState title="No upcoming examinations" description="Create an examination to publish its date sheet." action={<Button onClick={() => setOpen(true)}>Create examination</Button>} /></Card> : (
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {rows.map((e) => (
-              <button key={e.id} onClick={() => router.push(`/admin/examinations/${e.id}`)} className="glass group rounded-2xl p-5 text-left transition-all hover:-translate-y-0.5 hover:shadow-lift">
+              <button key={e.id} onClick={() => router.push(`/admin/examinations/${e.id}`)} className="glass group rounded-2xl p-5 text-left transition-all hover:shadow-lift">
                 <div className="flex items-start justify-between gap-2">
                   <span className="grid h-10 w-10 place-items-center rounded-xl bg-teal-soft text-lagoon"><BookOpenCheck className="h-5 w-5" /></span>
                   <StatusBadge status={e.status} />
@@ -73,7 +73,7 @@ function CreateExamModal({ open, onOpenChange, onCreated }: { open: boolean; onO
   return (
     <Modal open={open} onOpenChange={onOpenChange} title="Create examination" description="A date sheet is generated automatically — one paper per subject, one per day (Sundays skipped). You can adjust it afterwards." size="lg"
       footer={<><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button loading={m.isPending} onClick={async () => { const r = await m.mutate(form); if (r) { toast({ title: "Examination created", description: "Date sheet published to teachers and students." }); onOpenChange(false); onCreated(r.id); } }}>Create & publish schedule</Button></>}>
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <FormField label="Exam name" required error={m.fieldErrors.name} className="sm:col-span-2"><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></FormField>
         <FormField label="Term"><Select value={form.term} onChange={(e) => setForm({ ...form, term: e.target.value as typeof form.term })}><option>Term 1</option><option>Term 2</option></Select></FormField>
         <FormField label="Type"><Select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as typeof form.type })}>{Object.entries(EXAM_TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select></FormField>

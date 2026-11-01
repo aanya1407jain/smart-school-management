@@ -43,7 +43,7 @@ export function LiveStudentsList() {
   return (
     <div>
       <PageHeader title="Students" description="Active students in roll-number order (first name, then last name)." actions={canWrite ? <LinkButton href="/admin/students/new"><UserPlus className="h-4 w-4" /> Admit student</LinkButton> : undefined} />
-      <div className="mb-4 grid gap-4 sm:grid-cols-3" data-testid="student-totals">
+      <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3" data-testid="student-totals">
         <StatCard label={counts ? `Enrolled in ${counts.academicYear.name}` : "Enrolled this year"} value={<span data-testid="students-enrolled">{counts?.enrolled ?? "—"}</span>} icon={<GraduationCap className="h-5 w-5" />} hint="Distinct students with an active class enrollment" />
         <StatCard label="Active student records" value={<span data-testid="students-active-records">{counts?.activeRecords ?? "—"}</span>} icon={<Users className="h-5 w-5" />} tone="sapphire" hint={counts ? `${counts.notEnrolled} not yet enrolled in a class` : undefined} />
         {counts?.section && <StatCard label={`Enrolled in ${counts.section.label}`} value={<span data-testid="students-section">{counts.section.enrolled}</span>} icon={<GraduationCap className="h-5 w-5" />} tone="lavender" />}
@@ -65,7 +65,7 @@ export function LiveStudentsList() {
               <motion.li
                 key={p.personId}
                 variants={{ hidden: reduceMotion ? { opacity: 0 } : { opacity: 0, y: 8 }, show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 420, damping: 32 } } }}
-                className="group flex items-center gap-3 rounded-xl border border-transparent bg-white/50 px-3.5 py-2.5 transition-all duration-200 ease-out hover:scale-[1.003] hover:border-teal/20 hover:bg-teal-soft/40 hover:shadow-ambient-lg"
+                className="group flex items-center gap-3 rounded-xl border border-transparent bg-white px-3.5 py-2.5 transition-all duration-200 ease-out hover:scale-[1.003] hover:border-teal/20 hover:bg-teal-soft/40 hover:shadow-ambient-lg"
               >
                 {sectionId && <BadgeChip tone="sapphire" className="min-w-[2.5rem] justify-center" title="Roll number"><span className="sr-only">Roll </span>{p.rollNo ?? "—"}</BadgeChip>}
                 <Avatar name={p.name} size="md" className="transition-transform duration-200 group-hover:scale-105" />
@@ -146,7 +146,7 @@ export function LiveStudentEdit({ studentId }: { studentId: string }) {
     <div className="mx-auto max-w-3xl">
       <PageHeader title={`Edit ${s.firstName} ${s.lastName}`} description={`${s.scholarNo ? `Scholar No: ${s.scholarNo}. ` : ""}Class and status are changed through enrollment and accounts, not here.`} />
       <Card className="space-y-4 p-6">
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <FormField label="First name" required><Input value={form.firstName} onChange={set("firstName")} /></FormField>
           <FormField label="Last name" required><Input value={form.lastName} onChange={set("lastName")} /></FormField>
           <FormField label="Gender"><Select value={form.gender} onChange={set("gender")}><option value="">—</option><option value="female">Female</option><option value="male">Male</option><option value="other">Other</option></Select></FormField>

@@ -24,22 +24,42 @@
   --c-mauve: 186 136 174;      /* #BA88AE */
   --c-purple: 158 104 153;     /* #9E6899 */
   --c-plum: 91 55 101;         /* #5B3765 */
-  --c-alabaster: 247 246 242;  /* #F7F6F2 */
+  --c-alabaster: 246 247 249;  /* #F6F7F9 neutral grey (was warm #F7F6F2) */
   --c-heather: 188 197 204;    /* #BCC5CC */
+  --c-forest: 10 56 44;        /* #0A382C deep forest green (sidebar) */
 
-  --bg: var(--c-alabaster);
+  /* Semantic tokens: a restrained, flat light theme (the Principal dashboard's palette).
+     Contrast on white: ink 16.0, ink-soft 10.4, ink-muted 6.4, primary 5.5 (emerald-700) — WCAG AA. */
+  --bg: 246 247 249;           /* #F6F7F9 flat page background */
   --surface: 255 255 255;
-  --ink: var(--c-sapphire);
-  --ink-soft: 45 72 96;
-  --ink-muted: 98 114 130;
-  --line: 226 224 218;
-  --primary: var(--c-lagoon);
-  --primary-hover: var(--c-sapphire);
+  --ink: 24 34 48;             /* #182230 */
+  --ink-soft: 52 64 84;        /* #344054 */
+  --ink-muted: 82 97 112;      /* #526170 */
+  --line: 227 232 239;         /* #E3E8EF */
+  --primary: 4 120 87;         /* #047857 emerald-700: solid accent for actions */
+  --primary-hover: 6 95 70;    /* #065F46 emerald-800 */
   --primary-fg: 255 255 255;
   --accent: var(--c-teal);
   --success: var(--c-teal);
   --warning: var(--c-purple);
   --danger: var(--c-plum);
+
+  /* `pd-*` (introduced with the Principal dashboard) alias the semantic tokens
+     above, plus status colours. Contrast on white: danger 6.6, warning 5.4,
+     ok 5.7 — all WCAG AA for body text. */
+  --pd-bg: var(--bg);
+  --pd-ink: var(--ink);
+  --pd-muted: var(--ink-muted);
+  --pd-line: var(--line);
+  --pd-accent: var(--primary);
+  --pd-accent-hover: var(--primary-hover);
+  --pd-accent-soft: 236 253 245; /* #ECFDF5 emerald-50 */
+  --pd-danger: 180 35 24;      /* #B42318 */
+  --pd-danger-soft: 254 243 242; /* #FEF3F2 */
+  --pd-warning: 181 71 8;      /* #B54708 */
+  --pd-warning-soft: 255 250 235; /* #FFFAEB */
+  --pd-ok: 6 118 71;           /* #067647 */
+  --pd-ok-soft: 236 253 243;   /* #ECFDF3 */
 }
 
 @layer base {
@@ -47,90 +67,66 @@
   body {
     @apply bg-bg text-ink font-sans antialiased;
     font-feature-settings: "cv11", "ss01";
-    /* Base canvas: a quiet multi-tone mesh (teal, cyan, lavender) under every portal. */
-    background-image:
-      radial-gradient(at 0% 0%, rgb(var(--c-teal) / 0.07) 0, transparent 45%),
-      radial-gradient(at 100% 0%, rgb(var(--c-cyan) / 0.06) 0, transparent 40%),
-      radial-gradient(at 100% 100%, rgb(var(--c-lavender) / 0.12) 0, transparent 45%),
-      radial-gradient(at 0% 100%, rgb(var(--c-aqua) / 0.05) 0, transparent 40%);
-    background-attachment: fixed;
   }
-  ::selection { background: rgb(var(--c-lavender) / 0.45); }
+  ::selection { background: rgb(var(--c-teal) / 0.2); }
   :focus-visible { outline: 2px solid rgb(var(--c-teal)); outline-offset: 2px; border-radius: 6px; }
   h1, h2, h3 { letter-spacing: -0.015em; }
   input[type="date"]::-webkit-calendar-picker-indicator { opacity: .55; cursor: pointer; }
 }
 
 @layer components {
-  /* Glass is used selectively: cards, modals, dropdowns, login panel. */
-  /* Frosted glass on the light canvas: blur-md, white/70, white/40 border, ambient shadow. */
+  /* Surfaces are flat: white, a hairline neutral border and at most a 1px shadow.
+     (The class names are kept from the earlier glass theme so every page picks this up.) */
+  /* Card / panel surface: cards, dropdown-free panels, login panel. */
   .glass {
-    background: linear-gradient(160deg, rgb(255 255 255 / 0.78), rgb(255 255 255 / 0.64));
-    backdrop-filter: blur(12px) saturate(150%);
-    -webkit-backdrop-filter: blur(12px) saturate(150%);
-    border: 1px solid rgb(255 255 255 / 0.4);
-    box-shadow: 0 0 0 1px rgb(var(--c-heather) / 0.22), 0 1px 0 0 rgb(255 255 255 / 0.75) inset, 0 8px 30px rgb(0 0 0 / 0.04), 0 12px 32px -18px rgb(var(--c-sapphire) / 0.22);
+    background: rgb(var(--surface));
+    border: 1px solid rgb(var(--line));
+    box-shadow: 0 1px 2px rgb(16 24 40 / 0.04);
   }
-  /* Glass on dark / elevated surfaces (sidebar shell, dark panels): slate-900/60, slate-700/50 border. */
+  /* Quiet panel on the dark sidebar ("Signed in as"). */
   .glass-dark {
-    background: rgb(15 23 42 / 0.6);
-    backdrop-filter: blur(12px) saturate(140%);
-    -webkit-backdrop-filter: blur(12px) saturate(140%);
-    border: 1px solid rgb(51 65 85 / 0.5);
-    box-shadow: 0 8px 30px rgb(0 0 0 / 0.18);
+    background: rgb(255 255 255 / 0.06);
+    border: 1px solid rgb(255 255 255 / 0.1);
   }
-  /* Hairline gradient border (teal → cyan → transparent) on top of a glass fill. */
+  /* Formerly a teal → cyan hairline gradient; now the same flat card border. */
   .gradient-border {
-    border: 1px solid transparent;
-    background:
-      linear-gradient(160deg, rgb(255 255 255 / 0.82), rgb(255 255 255 / 0.66)) padding-box,
-      linear-gradient(135deg, rgb(var(--c-teal) / 0.45), rgb(var(--c-cyan) / 0.22) 45%, rgb(255 255 255 / 0.5)) border-box;
+    background: rgb(var(--surface));
+    border: 1px solid rgb(var(--line));
   }
   /* Staggered entrance: set style={{ "--stagger-i": index }} on each item (40 ms apart, capped at 20). */
   .stagger { animation: rise-in .38s cubic-bezier(.2,.8,.2,1) both; animation-delay: calc(min(var(--stagger-i, 0), 20) * 40ms); }
   /* Tabular figures for numbers that should line up and not jitter. */
   .figures { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1, "cv11", "ss01"; }
+  /* Overlays (dialogs, menus, popovers, tooltips): opaque white with a clear but soft shadow
+     so they stay distinguishable from the page beneath. */
   .glass-strong {
-    background: rgb(255 255 255 / 0.86);
-    backdrop-filter: blur(20px) saturate(150%);
-    -webkit-backdrop-filter: blur(20px) saturate(150%);
-    border: 1px solid rgb(255 255 255 / 0.8);
-    box-shadow: 0 0 0 1px rgb(var(--c-heather) / 0.3), 0 24px 60px -20px rgb(var(--c-sapphire) / 0.35);
+    background: rgb(var(--surface));
+    border: 1px solid rgb(var(--line));
+    box-shadow: 0 12px 32px -12px rgb(16 24 40 / 0.18), 0 2px 6px -2px rgb(16 24 40 / 0.06);
   }
-  /* Readable surface (tables, forms): near-opaque glass, soft border, ambient shadow. */
+  /* Readable surface (tables, forms). */
   .solid-card {
-    @apply rounded-2xl border border-line/60 bg-surface/90 shadow-ambient backdrop-blur-md;
+    @apply rounded-2xl border border-line bg-surface;
+    box-shadow: 0 1px 2px rgb(16 24 40 / 0.04);
   }
-  /* Spatial depth: layered elevation shadows with an inner highlight ring. */
+  /* Elevation for raised items: one subtle shadow. */
   .spatial {
-    box-shadow:
-      inset 0 0 0 1px rgb(255 255 255 / 0.15),
-      inset 0 1px 0 0 rgb(255 255 255 / 0.7),
-      0 1px 2px rgb(var(--c-sapphire) / 0.05),
-      0 4px 12px -2px rgb(var(--c-sapphire) / 0.06),
-      0 16px 40px -12px rgb(var(--c-sapphire) / 0.14);
+    box-shadow: 0 1px 2px rgb(16 24 40 / 0.05);
   }
   /* Crisp monospace accent for IDs, codes and dates. */
   .mono-id { @apply font-mono text-xs tracking-tight; font-variant-numeric: tabular-nums; }
-  /* Tinted-glass status pill (alerts, banners): pass the tint through --tint (RGB channels). */
+  /* Tinted status pill (alerts, banners): a flat tint of --tint (RGB channels) with a matching border. */
   .tint-glass {
     --tint: var(--c-teal);
-    background: linear-gradient(120deg, rgb(var(--tint) / 0.10), rgb(255 255 255 / 0.65));
-    border: 1px solid rgb(var(--tint) / 0.28);
-    backdrop-filter: blur(10px) saturate(140%);
-    -webkit-backdrop-filter: blur(10px) saturate(140%);
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.7), 0 6px 20px -10px rgb(var(--tint) / 0.45);
+    background: rgb(var(--tint) / 0.07);
+    border: 1px solid rgb(var(--tint) / 0.25);
   }
+  /* Workspace shell: a flat page background (no decorative glows). */
   .ambient {
     position: relative;
     isolation: isolate;
-    overflow-x: clip;
+    background: rgb(var(--bg));
   }
-  .ambient::before, .ambient::after {
-    content: ""; position: absolute; z-index: -1; pointer-events: none; border-radius: 9999px; filter: blur(70px);
-  }
-  .ambient::before { width: 46vw; height: 46vw; max-width: 620px; max-height: 620px; top: -12%; right: -8%; background: radial-gradient(circle, rgb(var(--c-lavender) / 0.45), transparent 65%); }
-  .ambient::after { width: 40vw; height: 40vw; max-width: 540px; max-height: 540px; bottom: -14%; left: -10%; background: radial-gradient(circle, rgb(var(--c-teal) / 0.22), transparent 65%); }
   .scrollbar-thin { scrollbar-width: thin; scrollbar-color: rgb(var(--c-heather)) transparent; }
 }
 

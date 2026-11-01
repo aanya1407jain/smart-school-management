@@ -150,10 +150,10 @@ function IssueTc({ studentId, onStudent }: { studentId: Id<"students"> | null; o
       {studentId && profile === undefined && <Card><LoadingState variant="inline" label="Loading the student's record" /></Card>}
 
       {profile && s && (
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
           <div className="space-y-4">
             <Card className="spatial overflow-hidden">
-              <div className="flex items-center gap-4 border-b border-line/60 bg-gradient-to-br from-teal-soft/60 via-white/70 to-blush/25 px-5 py-4">
+              <div className="flex items-center gap-4 border-b border-line/60 bg-bg px-5 py-4">
                 <Avatar name={s.studentName} size="lg" />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-lg font-semibold text-sapphire">{s.studentName}</p>
@@ -163,7 +163,7 @@ function IssueTc({ studentId, onStudent }: { studentId: Id<"students"> | null; o
                 </div>
                 {draftId && <Badge tone="lavender">Draft loaded</Badge>}
               </div>
-              <dl className="grid gap-x-6 gap-y-3 p-5 text-sm sm:grid-cols-2 lg:grid-cols-3">
+              <dl className="grid grid-cols-1 gap-x-6 gap-y-3 p-5 text-sm sm:grid-cols-2 lg:grid-cols-3">
                 <Particular label="Father's name" value={s.fatherName} />
                 <Particular label="Mother's name" value={s.motherName ?? (s.fatherName ? undefined : s.parentName)} />
                 <Particular label="Date of birth" value={s.dateOfBirth && formatDate(s.dateOfBirth)} />
@@ -180,7 +180,7 @@ function IssueTc({ studentId, onStudent }: { studentId: Id<"students"> | null; o
 
             <Card>
               <CardHeader title="Certificate details" icon={<FileText className="h-4 w-4" />} />
-              <div className="grid gap-4 p-5 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-2">
                 <FormField label="TC serial number" hint={tcNoEdited ? "Manual number — must not be used by another certificate." : "Next number in the school's series; edit to match a printed TC book."}>
                   <Input value={form.tcNo} onChange={(e) => { setTcNoEdited(e.target.value.trim() !== profile.nextTcNo); setForm((f) => ({ ...f, tcNo: e.target.value })); }} className="font-mono" maxLength={40} />
                 </FormField>
@@ -202,7 +202,7 @@ function IssueTc({ studentId, onStudent }: { studentId: Id<"students"> | null; o
                   <div className="flex flex-wrap gap-1.5" role="group" aria-label="Quick insert conduct remark">
                     {CONDUCT_CHIPS.map((c) => (
                       <button key={c} type="button" onClick={() => setForm((f) => ({ ...f, conduct: f.conduct.trim() ? `${f.conduct.trim()} ${c}.` : c }))}
-                        className="rounded-full bg-white/70 px-3 py-1 text-[12.5px] font-medium text-ink-soft ring-1 ring-inset ring-line/80 transition-all hover:bg-teal-soft hover:text-lagoon hover:ring-teal/30 active:scale-95 focus-visible:outline-none focus-visible:shadow-focus">
+                        className="rounded-full bg-white px-3 py-1 text-[12.5px] font-medium text-ink-soft ring-1 ring-inset ring-line/80 transition-all hover:bg-teal-soft hover:text-lagoon hover:ring-teal/30 active:scale-95 focus-visible:outline-none focus-visible:shadow-focus">
                         + {c}
                       </button>
                     ))}
@@ -311,7 +311,7 @@ function StudentSearch({ onPick }: { onPick: (id: Id<"students">) => void }) {
         <ul id={listId} role="listbox" className="glass-strong spatial absolute left-0 right-0 top-full z-40 mt-1.5 max-h-80 overflow-auto rounded-xl bg-white/[0.97] p-1.5 animate-scale-in">
           {results === undefined ? <li className="px-3 py-2 text-sm text-ink-muted">Searching…</li> : results.length === 0 ? <li className="px-3 py-2 text-sm text-ink-muted">No active student matches “{q}”.</li> : results.map((r, i) => (
             <li key={r.studentId} id={`${listId}-${i}`} role="option" aria-selected={i === active} onMouseEnter={() => setActive(i)} onMouseDown={(e) => { e.preventDefault(); pick(r.studentId, r.name); }}
-              className={cn("flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors", i === active ? "bg-gradient-to-r from-teal-soft to-teal-soft/30 text-lagoon" : "text-ink")}>
+              className={cn("flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors", i === active ? "bg-teal-soft text-lagoon" : "text-ink")}>
               <Avatar name={r.name} size="sm" />
               <span className="min-w-0 flex-1"><span className="block truncate font-semibold">{r.name}</span><span className="mono-id text-ink-muted">{r.admissionNo}{r.scholarNo ? ` · ${r.scholarNo}` : ""}</span></span>
               <BadgeChip tone="sapphire">{r.section}{r.rollNo ? ` · ${r.rollNo}` : ""}</BadgeChip>
@@ -372,7 +372,7 @@ function TcRegister({ onContinueDraft }: { onContinueDraft: (studentId: Id<"stud
         <SearchInput value={search} onChange={setSearch} placeholder="TC number, name or admission no." label="Search the register" className="xl:w-80" />
       </div>
       {list === undefined ? <LoadingState variant="inline" /> : shown.length === 0 ? <EmptyState title={list.length ? "No certificates match" : "No transfer certificates yet"} className="py-8" /> : (
-        <div className="scrollbar-thin overflow-x-auto">
+        <div className="scrollbar-thin relative overflow-x-auto">
           <table className="w-full min-w-[860px] text-sm">
             <caption className="sr-only">Transfer certificate register</caption>
             <thead>
@@ -413,7 +413,7 @@ function TcRegister({ onContinueDraft }: { onContinueDraft: (studentId: Id<"stud
       {printId && <TcPrintModal tcId={printId} onClose={() => setPrintId(null)} />}
       <Modal open={!!summary} onOpenChange={(o) => { if (!o) setSummaryId(null); }} title={summary?.tcNo || "Draft certificate"} description={summary?.snapshot.studentName} size="md" footer={<Button variant="outline" onClick={() => setSummaryId(null)}>Close</Button>}>
         {summary && (
-          <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+          <dl className="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
             <Particular label="Status" value={summary.status[0].toUpperCase() + summary.status.slice(1)} />
             <Particular label="Prepared by" value={summary.issuedBy} />
             <Particular label="Date of leaving" value={formatDate(summary.leavingDate)} />

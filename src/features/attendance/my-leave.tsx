@@ -66,7 +66,7 @@ function ApplyLeaveModal({ onClose }: { onClose: () => void }) {
   };
   return (
     <Modal open onOpenChange={(o) => !o && onClose()} title="Apply for leave" size="sm" footer={<><Button variant="outline" onClick={onClose}>Cancel</Button><Button loading={busy} onClick={submit}>Submit request</Button></>}>
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <FormField label="Type" className="sm:col-span-2"><Select value={type} onChange={(e) => setType(e.target.value as LeaveType)}>{(Object.keys(LEAVE_LABEL) as LeaveType[]).map((k) => <option key={k} value={k}>{LEAVE_LABEL[k]}</option>)}</Select></FormField>
         <FormField label="From" required><Input type="date" value={fromDate} onChange={(e) => { setFrom(e.target.value); if (toDate < e.target.value) setTo(e.target.value); }} /></FormField>
         <FormField label="To" required><Input type="date" value={toDate} min={fromDate} onChange={(e) => setTo(e.target.value)} /></FormField>

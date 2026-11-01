@@ -149,7 +149,7 @@ export const DateInput = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLIn
             ...(portalled && anchor ? { left: Math.min(anchor.left, window.innerWidth - 296), ...(below ? { top: anchor.bottom + 6 } : { bottom: window.innerHeight - anchor.top + 6 }) } : {}),
           }}
           className={cn(
-            "glass-strong spatial w-[280px] rounded-2xl bg-white/[0.97] p-3 backdrop-blur-xl",
+            "glass-strong w-[280px] rounded-2xl p-3",
             portalled ? "fixed z-[60]" : cn("absolute left-0 z-50", below ? "top-full mt-1.5" : "bottom-full mb-1.5"),
           )}
         >
@@ -184,7 +184,7 @@ export const DateInput = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLIn
                   className={cn(
                     "figures relative grid h-9 place-items-center rounded-lg text-[13px] transition-all duration-150 focus-visible:outline-none focus-visible:shadow-focus active:scale-90",
                     isSel
-                      ? "bg-gradient-to-br from-teal to-cyan font-semibold text-white shadow-[0_4px_12px_-4px_rgb(var(--c-cyan)/0.7)]"
+                      ? "bg-primary font-semibold text-white"
                       : inMonth ? "text-ink hover:bg-teal-soft hover:text-lagoon" : "text-ink-muted/50 hover:bg-alabaster",
                     disabled && "cursor-not-allowed opacity-35 hover:bg-transparent",
                     key === today && !isSel && "font-semibold text-lagoon ring-1 ring-inset ring-teal/40",
@@ -206,7 +206,7 @@ export const DateInput = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLIn
 
   return (
     <div className={cn("relative w-full", wrapperClass)}>
-      <input ref={inputRef} type="date" className={cn(inputClass, "pr-10 [&::-webkit-calendar-picker-indicator]:hidden")} {...props} />
+      <input ref={inputRef} type="date" className={cn(inputClass, "pr-10 max-sm:pl-3 max-sm:pr-9 [&::-webkit-calendar-picker-indicator]:hidden")} {...props} />
       <button
         ref={buttonRef}
         type="button"

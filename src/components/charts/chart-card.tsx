@@ -22,15 +22,15 @@ export const axisProps = {
 export const gridProps = { vertical: false, stroke: CHART_GRID, strokeDasharray: CHART_GRID_DASH } as const;
 
 /** Soft column highlight behind the hovered bar group. */
-export const barCursor = { fill: "rgb(13 148 136 / 0.06)", radius: 8 } as const;
+export const barCursor = { fill: "rgb(15 118 110 / 0.06)", radius: 6 } as const;
 
-/** Rounded gradient bars that glow on hover. `role` picks the gradient from CHART_FILL. */
+/** Flat, slightly rounded bars in the role's own colour (series stay distinguishable); a hovered bar dims a little. */
 export function barProps(role: keyof typeof CHART_FILL, { horizontal = false, top = true }: { horizontal?: boolean; top?: boolean } = {}) {
-  const r = 6;
+  const r = 4;
   return {
-    fill: CHART_FILL[role].fill,
+    fill: CHART_FILL[role].solid,
     radius: (top ? (horizontal ? [0, r, r, 0] : [r, r, 0, 0]) : [0, 0, 0, 0]) as [number, number, number, number],
-    activeBar: { style: { filter: `drop-shadow(0 4px 10px ${CHART_FILL[role].solid}66)` } },
+    activeBar: { fillOpacity: 0.85 },
     animationDuration: 600,
   };
 }
@@ -54,10 +54,10 @@ export function ChartGradients() {
   );
 }
 
-/** A gradient fill can't paint an HTML swatch; draw the role's gradient as CSS instead. */
+/** Legend / tooltip swatch: a role's solid colour (also when a chart still passes the gradient url). */
 function swatch(color: string) {
   const role = Object.values(CHART_FILL).find((g) => g.fill === color);
-  return role ? `linear-gradient(160deg, ${role.from}, ${role.to})` : color;
+  return role ? role.solid : color;
 }
 
 /** Floating glass tooltip used by every chart. `extra` adds lines under the series (e.g. counts). */

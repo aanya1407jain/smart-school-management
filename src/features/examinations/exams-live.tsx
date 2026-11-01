@@ -100,7 +100,7 @@ function ExamFormModal({ classes, exam, onClose }: { classes: { _id: Id<"classes
             ))}
           </div>
         </fieldset>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <FormField label="Starts" required><Input type="date" value={startDate} onChange={(e) => setStart(e.target.value)} /></FormField>
           <FormField label="Ends" required><Input type="date" value={endDate} min={startDate || undefined} onChange={(e) => setEnd(e.target.value)} /></FormField>
         </div>
@@ -240,7 +240,7 @@ function PaperFormModal({ exam, paper, classes, onClose }: { exam: Exam; paper?:
   };
   return (
     <Modal open onOpenChange={(o) => !o && onClose()} title={paper ? `Edit ${paper.subject} paper` : "Add paper"} size="md" footer={<><Button variant="outline" onClick={onClose}>Cancel</Button><Button loading={busy} onClick={save}>{paper ? "Save paper" : "Add paper"}</Button></>}>
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <FormField label="Class" required><Select value={classId} onChange={(e) => { setClassId(e.target.value); setSubjectId(""); }} disabled={!!paper}>{classes.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}</Select></FormField>
         <FormField label="Subject" required hint={subjects?.length === 0 ? "This class has no curriculum yet (Academics)." : undefined}>
           <Select value={subjectId} onChange={(e) => setSubjectId(e.target.value)} disabled={!!paper || !subjects?.length}>{(subjects ?? []).map((s) => <option key={s.subjectId} value={s.subjectId}>{s.name}</option>)}</Select>

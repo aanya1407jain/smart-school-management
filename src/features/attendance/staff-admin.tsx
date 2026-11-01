@@ -44,7 +44,7 @@ export function StaffAttendance() {
   };
   return (
     <div className="space-y-4" data-testid="live-staff-attendance">
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard label="Present" value={counts.present} icon={<UserCheck className="h-5 w-5" />} />
         <StatCard label="Absent" value={counts.absent} icon={<UserX className="h-5 w-5" />} tone="purple" />
         <StatCard label="On leave" value={counts.on_leave} icon={<CalendarOff className="h-5 w-5" />} tone="lavender" />

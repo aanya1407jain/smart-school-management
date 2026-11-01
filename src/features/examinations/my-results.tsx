@@ -60,7 +60,7 @@ export function MyResults() {
                       </div>
                     </Card>
                   )}
-                  <div className="grid gap-4 lg:grid-cols-2">{d.results.map((r) => <ResultCard key={r.examId} result={r} rank={r.rank} classSize={r.classSize} />)}</div>
+                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">{d.results.map((r) => <ResultCard key={r.examId} result={r} rank={r.rank} classSize={r.classSize} />)}</div>
                 </>
               )}
             </div>

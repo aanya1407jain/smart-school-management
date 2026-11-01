@@ -18,7 +18,7 @@ type ReportHeader = { school: string; student: { name: string; admissionNo: stri
 export function LiveResultCard({ r, header }: { r: LiveResult; header?: ReportHeader }) {
   const [card, setCard] = useState(false);
   return (
-    <Card className="spatial overflow-hidden transition-all duration-300 hover:-translate-y-0.5 hover:shadow-ambient-lg" data-testid="live-result">
+    <Card className="spatial overflow-hidden transition-all duration-300 hover:shadow-ambient-lg" data-testid="live-result">
       <ResultSummary
         term={r.term}
         examName={r.examName}
@@ -75,5 +75,5 @@ export function LiveResultCard({ r, header }: { r: LiveResult; header?: ReportHe
 
 export function LiveResultsList({ results, header }: { results: LiveResult[]; header?: ReportHeader }) {
   if (results.length === 0) return <Card><EmptyState title="No published results yet" description="Results appear here once the school publishes an examination." /></Card>;
-  return <div className="grid gap-4 lg:grid-cols-2">{results.map((r) => <LiveResultCard key={r.examId} r={r} header={header} />)}</div>;
+  return <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">{results.map((r) => <LiveResultCard key={r.examId} r={r} header={header} />)}</div>;
 }

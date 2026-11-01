@@ -68,7 +68,7 @@ function CurriculumModal({ year, klass, subjects, onClose }: { year: Year; klass
     <Modal open onOpenChange={(o) => !o && onClose()} title={`${klass.name} subjects`} description={`Curriculum for ${year.name}. A subject that still has a teacher assigned cannot be removed.`} size="md"
       footer={<><Button variant="outline" onClick={onClose}>Cancel</Button><Button loading={loading} disabled={!chosen} onClick={save}>Save</Button></>}>
       {!chosen ? <Spinner /> : subjects.length === 0 ? <EmptyState title="No subjects yet" description="Add subjects in the Subjects tab first." /> : (
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {subjects.filter((s) => s.active || chosen.has(s._id)).map((s) => (
             <Checkbox key={s._id} label={`${s.name} (${s.code})`} checked={chosen.has(s._id)} onChange={(e) => {
               const next = new Set(chosen);

@@ -93,7 +93,7 @@ export function SyllabusProgressTracker({
               onClick={() => setBehindOnly((b) => !b)}
               className={cn(
                 "inline-flex h-9 items-center gap-1.5 rounded-xl px-3 text-[12.5px] font-semibold ring-1 ring-inset transition-all duration-200 active:scale-95 focus-visible:outline-none focus-visible:shadow-focus",
-                behindOnly ? "bg-gradient-to-br from-amber-400 to-rose-500 text-white shadow-[0_4px_14px_-4px_rgb(244_63_94/0.6)] ring-transparent" : "bg-white/70 text-ink-soft ring-line/80 hover:bg-white hover:text-plum",
+                behindOnly ? "bg-pd-warning text-white ring-transparent" : "bg-white text-ink-soft ring-line/80 hover:bg-white hover:text-plum",
               )}
             >
               <AlertTriangle className="h-3.5 w-3.5" aria-hidden /> Behind pacing only
@@ -103,13 +103,13 @@ export function SyllabusProgressTracker({
       />
 
       {/* Executive summary strip */}
-      <div className="mx-5 mb-4 rounded-2xl border border-white/70 bg-white/55 p-4 backdrop-blur-md">
+      <div className="mx-5 mb-4 rounded-2xl border border-line bg-white p-4">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <p className="text-sm font-semibold text-ink">{selectedClass === "all" ? "Whole school progress" : `${selectedClass} progress`}</p>
           <p className="figures font-mono text-xl font-bold text-sapphire">{stats.pct}%</p>
         </div>
-        <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-white/70 shadow-[inset_0_1px_2px_rgb(6_49_84/0.10)] ring-1 ring-inset ring-line/70" role="progressbar" aria-valuenow={stats.pct} aria-valuemin={0} aria-valuemax={100} aria-label="Curriculum completed">
-          <div className="h-full rounded-full bg-gradient-to-r from-sapphire via-lagoon to-cyan transition-[width] duration-700 ease-out" style={{ width: `${stats.pct}%` }} />
+        <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-white shadow-[inset_0_1px_2px_rgb(6_49_84/0.10)] ring-1 ring-inset ring-line/70" role="progressbar" aria-valuenow={stats.pct} aria-valuemin={0} aria-valuemax={100} aria-label="Curriculum completed">
+          <div className="h-full rounded-full bg-lagoon transition-[width] duration-700 ease-out" style={{ width: `${stats.pct}%` }} />
         </div>
         <p className="figures mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] text-ink-muted">
           <span><b className="font-mono text-ink">{stats.total}</b> total chapters</span><span aria-hidden>•</span>
@@ -123,7 +123,7 @@ export function SyllabusProgressTracker({
       {shown.length === 0 ? (
         <p className="px-5 pb-6 text-center text-sm text-ink-muted">{behindOnly ? "Nothing is behind pacing — every subject is on track." : "No subjects to show."}</p>
       ) : (
-        <motion.ul layout={!reduceMotion} className="grid gap-3 px-5 pb-5 sm:grid-cols-2 xl:grid-cols-3">
+        <motion.ul layout={!reduceMotion} className="grid grid-cols-1 gap-3 px-5 pb-5 sm:grid-cols-2 xl:grid-cols-3">
           <AnimatePresence initial={false}>
             {shown.map((sub, i) => {
               const p = pacingOf(sub, today);
@@ -138,21 +138,21 @@ export function SyllabusProgressTracker({
                   exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.97 }}
                   transition={{ type: "spring", stiffness: 420, damping: 34, delay: reduceMotion ? 0 : i * 0.04 }}
                   style={{ "--stagger-i": i } as CSSProperties}
-                  className="group flex flex-col rounded-2xl border border-white/70 bg-white/65 p-4 shadow-ambient backdrop-blur-md transition-[transform,box-shadow] duration-200 hover:-translate-y-0.5 hover:shadow-ambient-lg"
+                  className="group flex flex-col rounded-2xl border border-line bg-white p-4 shadow-ambient transition-[transform,box-shadow] duration-200 hover:shadow-ambient-lg"
                 >
                   <div className="flex items-start justify-between gap-2">
                     <BadgeChip tone="sapphire">{sub.className}</BadgeChip>
                     <PacingPill status={p.status} />
                   </div>
                   <p className="mt-2.5 text-[15px] font-semibold text-ink">{sub.subject}</p>
-                  <span className="mt-1 inline-flex w-fit items-center gap-1.5 rounded-full bg-white/80 py-0.5 pl-0.5 pr-2.5 text-[12px] font-medium text-ink-soft ring-1 ring-inset ring-line/70">
+                  <span className="mt-1 inline-flex w-fit items-center gap-1.5 rounded-full bg-white py-0.5 pl-0.5 pr-2.5 text-[12px] font-medium text-ink-soft ring-1 ring-inset ring-line/70">
                     <Avatar name={sub.teacher} size="xs" /> {sub.teacher}
                   </span>
 
                   <div className="mt-3.5">
-                    <div className="relative h-2.5 w-full overflow-hidden rounded-full bg-white/70 shadow-[inset_0_1px_2px_rgb(6_49_84/0.10)] ring-1 ring-inset ring-line/70" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label={`${sub.subject} chapters completed`}>
+                    <div className="relative h-2.5 w-full overflow-hidden rounded-full bg-white shadow-[inset_0_1px_2px_rgb(6_49_84/0.10)] ring-1 ring-inset ring-line/70" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label={`${sub.subject} chapters completed`}>
                       <div
-                        className={cn("h-full rounded-full bg-gradient-to-r transition-[width] duration-700 ease-out", p.status === "behind" ? "from-amber-400 to-rose-500" : p.status === "completed" ? "from-aqua to-teal" : "from-indigo-500 to-cyan")}
+                        className={cn("h-full rounded-full transition-[width] duration-700 ease-out", p.status === "behind" ? "bg-amber-500" : p.status === "completed" ? "bg-teal" : "bg-sapphire/70")}
                         style={{ width: `${pct}%` }}
                       />
                       {/* Where the subject should be today. */}
@@ -165,7 +165,7 @@ export function SyllabusProgressTracker({
                     <div className="flex items-center gap-1">
                       {!readOnly && (
                         <button type="button" disabled={p.status === "completed"} onClick={() => handleIncrement(sub.id)}
-                          className="inline-flex items-center gap-1 rounded-lg bg-white/80 px-2 py-1 text-[12px] font-semibold text-lagoon ring-1 ring-inset ring-teal/25 transition-all hover:bg-teal-soft active:scale-95 disabled:opacity-40">
+                          className="inline-flex items-center gap-1 rounded-lg bg-white px-2 py-1 text-[12px] font-semibold text-lagoon ring-1 ring-inset ring-teal/25 transition-all hover:bg-teal-soft active:scale-95 disabled:opacity-40">
                           <Plus className="h-3 w-3" aria-hidden /> Chapter
                         </button>
                       )}
@@ -201,11 +201,11 @@ export function SyllabusProgressTracker({
 
 function PacingPill({ status }: { status: PacingStatus }) {
   if (status === "completed") {
-    return <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-teal-soft to-cyan/10 px-2.5 py-0.5 text-[11.5px] font-bold text-lagoon ring-1 ring-inset ring-teal/25"><CheckCircle2 className="h-3 w-3" aria-hidden /> Completed</span>;
+    return <span className="inline-flex items-center gap-1 rounded-full bg-teal-soft px-2.5 py-0.5 text-[11.5px] font-bold text-lagoon ring-1 ring-inset ring-teal/25"><CheckCircle2 className="h-3 w-3" aria-hidden /> Completed</span>;
   }
   if (status === "behind") {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-50/90 px-2.5 py-0.5 text-[11.5px] font-bold text-rose-700 ring-1 ring-inset ring-rose-500/25 backdrop-blur-sm">
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-50/90 px-2.5 py-0.5 text-[11.5px] font-bold text-rose-700 ring-1 ring-inset ring-rose-500/25">
         <span className="relative grid h-1.5 w-1.5 place-items-center" aria-hidden>
           <span className="absolute h-1.5 w-1.5 animate-ping rounded-full bg-rose-500 opacity-60 motion-reduce:hidden" />
           <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
@@ -215,7 +215,7 @@ function PacingPill({ status }: { status: PacingStatus }) {
     );
   }
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50/90 px-2.5 py-0.5 text-[11.5px] font-bold text-emerald-700 ring-1 ring-inset ring-emerald-600/20 backdrop-blur-sm">
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50/90 px-2.5 py-0.5 text-[11.5px] font-bold text-emerald-700 ring-1 ring-inset ring-emerald-600/20">
       <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden /> On schedule
     </span>
   );

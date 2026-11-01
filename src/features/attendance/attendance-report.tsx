@@ -49,7 +49,7 @@ export function AttendanceReport() {
     <QueryView query={queryState}>
       {(d) => (
         <div className="space-y-5">
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <ChartCard title="Monthly attendance" description={`School-wide · dashed line = ${d.threshold}% requirement`}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={d.monthly} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>

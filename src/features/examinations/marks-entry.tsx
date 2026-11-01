@@ -204,7 +204,7 @@ export function MarksEntry({ area }: { area: "admin" | "teacher" }) {
                   );
                 })}
               </ul>
-              <div className="sticky bottom-0 flex justify-end rounded-b-2xl border-t border-line/60 bg-white/95 p-4 backdrop-blur">
+              <div className="sticky bottom-0 flex justify-end rounded-b-2xl border-t border-line/60 bg-white/95 p-4">
                 <Button onClick={save} loading={saving} disabled={d.locked}>
                   <Save className="h-4 w-4" /> Save marks
                 </Button>

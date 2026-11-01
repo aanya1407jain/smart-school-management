@@ -95,13 +95,13 @@ function Overview() {
     <QueryView query={queryState}>
       {(s) => (
         <div className="space-y-5">
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <StatCard label="Collected this year" value={formatCurrency(s.totals.paid)} icon={<CircleDollarSign className="h-5 w-5" />} hint={`${formatPercent(s.totals.collectionRate, 1)} of net fees`} />
             <StatCard label="Outstanding" value={formatCurrency(s.totals.outstanding)} icon={<Wallet className="h-5 w-5" />} tone="sapphire" hint={`Net fees ${formatCurrency(s.totals.net)}`} />
             <StatCard label="Overdue" value={formatCurrency(s.totals.overdue)} icon={<AlertCircle className="h-5 w-5" />} tone="lavender" hint={`${s.standing.overdue} students`} />
             <StatCard label="Due in 30 days" value={formatCurrency(s.totals.dueSoon)} icon={<Clock className="h-5 w-5" />} tone="purple" hint={`${s.standing.due_soon} students · concessions ${formatCurrency(s.totals.concession)}`} />
           </div>
-          <div className="grid gap-4 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <ChartCard className="lg:col-span-2" title="Monthly collections" description={`Payments received per month, ${s.yearLabel ?? "2026–27"}`}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={s.monthly} margin={{ top: 8, right: 8, left: 4, bottom: 0 }}>
@@ -376,11 +376,11 @@ function Structures() {
       <div className="flex justify-end"><Button onClick={() => setCreateOpen(true)}><Plus className="h-4 w-4" /> New fee structure</Button></div>
       <QueryView query={queryState} loading="cards">
         {(structList) => structList.length === 0 ? <Card><EmptyState title="No fee structures" action={<Button onClick={() => setCreateOpen(true)}>Create one</Button>} /></Card> : (
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             {structList.map((fs: any) => (
               <Card key={fs.id}>
                 <CardHeader title={fs.name} description={fs.classNames.join(", ")} icon={<Layers className="h-4 w-4" />} action={<span className="text-lg font-semibold text-sapphire">{formatCurrency(fs.total)}</span>} />
-                <div className="grid gap-4 p-5 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-2">
                   <div>
                     <p className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-ink-muted">Components</p>
                     <ul className="space-y-1 text-sm">{fs.components.map((c: any) => <li key={c.id} className="flex justify-between"><span className="text-ink-soft">{c.label}</span><span className="font-medium text-ink">{formatCurrency(c.amount)}</span></li>)}</ul>
@@ -541,7 +541,7 @@ function CreateStructureModal({ open, onOpenChange, onCreated, editing }: { open
           <div className="mb-2 flex items-center justify-between"><p className="text-[13px] font-medium text-ink-soft">Components</p><span className="text-sm font-semibold text-sapphire">Total {formatCurrency(total)}</span></div>
           <div className="space-y-2">
             {components.map((c, i) => (
-              <div key={i} className="grid grid-cols-[1fr_140px_36px] gap-2">
+              <div key={i} className="grid grid-cols-[minmax(0,1fr)_140px_36px] gap-2">
                 <Input aria-label="Component label" disabled={locked} value={c.label} onChange={(e) => setComponents(components.map((x, j) => j === i ? { ...x, label: e.target.value } : x))} />
                 <Input aria-label="Amount" disabled={locked} type="number" min={0} value={c.amount} onChange={(e) => setComponents(components.map((x, j) => j === i ? { ...x, amount: Number(e.target.value) } : x))} />
                 <Button variant="ghost" size="icon" aria-label="Remove component" onClick={() => setComponents(components.filter((_, j) => j !== i))} disabled={locked || components.length === 1}><Trash2 className="h-4 w-4" /></Button>
@@ -554,7 +554,7 @@ function CreateStructureModal({ open, onOpenChange, onCreated, editing }: { open
           <div className="mb-2 flex items-center justify-between"><p className="text-[13px] font-medium text-ink-soft">Installments</p><span className={shares === 100 ? "text-sm font-semibold text-lagoon" : "text-sm font-semibold text-plum"}>{shares}% allocated</span></div>
           <div className="space-y-2">
             {installments.map((ins, i) => (
-              <div key={i} className="grid grid-cols-[1fr_160px_90px_36px] gap-2">
+              <div key={i} className="grid grid-cols-[minmax(0,1fr)_160px_90px_36px] gap-2">
                 <Input aria-label="Installment label" disabled={locked} value={ins.label} onChange={(e) => setInstallments(installments.map((x, j) => j === i ? { ...x, label: e.target.value } : x))} />
                 <Input aria-label="Due date" disabled={locked} type="date" value={ins.dueDate} onChange={(e) => setInstallments(installments.map((x, j) => j === i ? { ...x, dueDate: e.target.value } : x))} />
                 <Input aria-label="Share percent" disabled={locked} type="number" min={0} max={100} value={ins.share} onChange={(e) => setInstallments(installments.map((x, j) => j === i ? { ...x, share: Number(e.target.value) } : x))} />

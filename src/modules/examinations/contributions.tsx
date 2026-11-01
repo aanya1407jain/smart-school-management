@@ -4,8 +4,7 @@ import type { ModuleUiContributions } from "@/lib/contributions/types";
 import { LiveResultsList } from "@/features/examinations/live-results";
 import { formatPercent } from "@/lib/utils/format";
 import { MarksPanel, MarksStat } from "@/features/examinations/teacher-dashboard-parts";
-import { PerformancePanel, UpcomingExamsPanel } from "@/features/examinations/admin-dashboard-parts";
-import { BookOpenCheck } from "lucide-react";
+import { examAgenda } from "@/features/examinations/admin-dashboard-parts";
 import { AcademicReport, ExamReport } from "@/features/examinations/exam-reports";
 
 export const examinationsUi: ModuleUiContributions = {
@@ -13,7 +12,7 @@ export const examinationsUi: ModuleUiContributions = {
     { value: "exams", label: "Examination performance", visible: (can) => can("reports:read"), Content: ExamReport },
     { value: "academic", label: "Academic performance", visible: (can) => can("reports:read"), Content: AcademicReport },
   ] },
-  adminDashboard: { module: "academics", order: 30, panels: [{ Panel: UpcomingExamsPanel }, { Panel: PerformancePanel }], quickActions: [{ label: "Create examination", href: "/admin/examinations?action=new", Icon: BookOpenCheck }] },
+  adminDashboard: { module: "academics", order: 30, agenda: (d) => examAgenda(d) },
   teacherDashboard: { module: "academics", order: 30, Stats: MarksStat, Panels: MarksPanel },
   studentProfile: {
     module: "academics", // Examinations shares the stored "academics" entitlement until the D2 migration
