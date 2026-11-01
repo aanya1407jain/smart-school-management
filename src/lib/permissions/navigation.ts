@@ -85,6 +85,8 @@ const TEACHER_NAV: NavGroup[] = [
       { label: "Homework", href: "/teacher/homework", icon: "homework", anyOf: ["homework:manage:assigned"], module: "academics", live: true },
       { label: "Examinations", href: "/teacher/examinations", icon: "exams", anyOf: ["marks:enter:assigned"], module: "academics", live: true },
       { label: "Timetable", href: "/teacher/timetable", icon: "timetable", anyOf: ["timetable:read:own"], module: "academics", live: true },
+      // Remarks & Incidents (Trisha, Oct 31) still runs on sample data, so it is not offered to live (school) accounts.
+      { label: "Remarks & Incidents", href: "/teacher/remarks", icon: "remarks", anyOf: ["area:teacher"] },
     ],
   },
   {
@@ -107,6 +109,7 @@ const STUDENT_NAV: NavGroup[] = [
       { label: "My Timetable", href: "/student/timetable", icon: "timetable", anyOf: ["timetable:read:own"], module: "academics", live: true },
       { label: "My Homework", href: "/student/homework", icon: "homework", anyOf: ["homework:read:own"], module: "academics", live: true },
       { label: "My Results", href: "/student/results", icon: "results", anyOf: ["results:read:own"], module: "academics", live: true },
+      { label: "Certificates", href: "/student/certificates", icon: "results", anyOf: ["profile:read:own"], module: "students", live: true },
       { label: "My Fees", href: "/student/fees", icon: "fees", anyOf: ["fees:read:own"], module: "finance", live: true },
     ],
   },

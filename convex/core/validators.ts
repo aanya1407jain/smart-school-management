@@ -30,6 +30,18 @@ export const vMembershipStatus = v.union(v.literal("invited"), v.literal("active
 export const vSchoolStatus = v.union(v.literal("active"), v.literal("suspended"), v.literal("archived"));
 export const vAcademicYearStatus = v.union(v.literal("planned"), v.literal("active"), v.literal("closed"));
 export const vGender = v.union(v.literal("male"), v.literal("female"), v.literal("other"));
+/**
+ * A student admitted from another school: the previous school and its incoming
+ * transfer certificate (TC). Only `name` is required; dates are YYYY-MM-DD.
+ */
+export const vPreviousSchool = v.object({
+  name: v.string(),
+  board: v.optional(v.string()),
+  lastClassPassed: v.optional(v.string()),
+  tcNumber: v.optional(v.string()),
+  tcIssueDate: v.optional(v.string()),
+  leavingReason: v.optional(v.string()),
+});
 export const vPersonStatus = v.union(v.literal("active"), v.literal("inactive"), v.literal("alumni"), v.literal("transferred"));
 export const vStaffStatus = v.union(v.literal("active"), v.literal("on_leave"), v.literal("inactive"));
 /** Daily staff (teacher) attendance — matches the Teachers & Staff UI. */

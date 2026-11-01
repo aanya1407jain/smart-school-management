@@ -108,6 +108,8 @@ export interface Notice {
   audience: NoticeAudience;
   publishDate: ISODate;
   eventDate: ISODate | null;
+  /** Last day of a multi-day event or holiday (`eventDate` is the first). */
+  endDate?: ISODate | null;
   priority: NoticePriority;
   status: "draft" | "published" | "archived";
   createdBy: ID;

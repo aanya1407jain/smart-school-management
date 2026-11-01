@@ -24,7 +24,7 @@ import {
   vAcademicYearStatus, vAttendanceStatus, vAudience, vConcessionKind, vEnrollmentStatus, vEntityRef, vEventKind,
   vExamStatus, vFileKind, vFileOwnerType, vGender, vHomeworkStatus, vLeaveStatus, vLeaveType, vMembershipStatus, vNoticeStatus,
   vNoticeType, vNotificationType, vPaymentMethod, vPaymentStatus, vPermissionSet, vPersonStatus, vPriority, vRole, vSchoolStatus,
-  vStaffAttendanceStatus, vStaffStatus, vSubmissionStatus, vAction,
+  vStaffAttendanceStatus, vStaffStatus, vSubmissionStatus, vAction, vPreviousSchool,
 } from "./core/validators";
 
 export default defineSchema({
@@ -344,6 +344,8 @@ export default defineSchema({
      */
     scholarNo: v.optional(v.string()),
     scholarNoKey: v.optional(v.string()),
+    /** Admitted from another school: previous school and its incoming transfer certificate. */
+    previousSchool: v.optional(vPreviousSchool),
   })
     .index("by_school_admission", ["schoolId", "admissionNo"])
     .index("by_school_status_name", ["schoolId", "status", "lastName"])
@@ -801,6 +803,8 @@ export default defineSchema({
     publishDate: v.string(),
     expiresOn: v.optional(v.string()),
     eventDate: v.optional(v.string()),
+    /** Last day of a multi-day event or holiday (`eventDate` is the first day). */
+    endDate: v.optional(v.string()),
     createdByUserId: v.id("users"),
     /** Set when the notice is first published (ms). Lets an archived notice be restored to the state it had. */
     publishedAt: v.optional(v.number()),

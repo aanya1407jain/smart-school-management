@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { ChevronLeft } from "lucide-react";
 import { useSession } from "@/features/auth/session-provider";
 import { getNavigationForUser, ROLE_LABELS } from "@/lib/permissions";
 import { LogoMark } from "@/components/brand/logo";
@@ -45,7 +45,7 @@ export function SidebarContent({ collapsed = false, onNavigate }: { collapsed?: 
         )}
       </div>
 
-      <nav aria-label="Main navigation" className="scrollbar-thin flex-1 overflow-y-auto px-3 py-4">
+      <nav aria-label="Main navigation" className="scrollbar-forest flex-1 overflow-y-auto px-3 py-4">
         {groups.map((g, gi) => (
           <div key={g.label} className={cn(gi > 0 && "mt-5")}>
             {!collapsed && <p className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-200/70">{g.label}</p>}
@@ -114,15 +114,17 @@ export function SidebarContent({ collapsed = false, onNavigate }: { collapsed?: 
 
 export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
   return (
-    <aside className={cn("sticky top-0 hidden h-screen shrink-0 transition-[width] duration-300 md:block", collapsed ? "w-[76px]" : "w-[76px] lg:w-[272px]")}>
+    <aside className={cn("sticky top-0 z-40 hidden h-screen shrink-0 transition-[width] duration-300 md:block", collapsed ? "w-[76px]" : "w-[76px] lg:w-[272px]")}>
       <div className="h-full lg:hidden"><SidebarContent collapsed /></div>
       <div className="hidden h-full lg:block"><SidebarContent collapsed={collapsed} /></div>
       <button
         onClick={onToggle}
-        className="absolute -right-3 top-7 z-10 hidden h-6 w-6 place-items-center rounded-full border border-line bg-white text-ink-muted shadow-soft hover:text-emerald-700 lg:grid"
+        className="absolute -right-3 top-7 z-10 hidden h-6 w-6 place-items-center rounded-full border border-line bg-white text-ink-muted shadow-soft transition-colors hover:border-emerald-300 hover:text-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 lg:grid"
         aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        aria-expanded={!collapsed}
       >
-        {collapsed ? <PanelLeftOpen className="h-3.5 w-3.5" /> : <PanelLeftClose className="h-3.5 w-3.5" />}
+        {/* Points the way the sidebar will move: left to collapse, flips right to expand. */}
+        <ChevronLeft className={cn("h-3.5 w-3.5 transition-transform duration-300", collapsed && "rotate-180")} aria-hidden />
       </button>
     </aside>
   );

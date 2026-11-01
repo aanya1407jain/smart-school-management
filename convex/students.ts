@@ -17,7 +17,7 @@ import {
   requireSectionRead, requireStudentAccess,
 } from "./core/authorization";
 import { AppError, conflict, invalid, invalidRelationship } from "./core/errors";
-import { assertIsoDate, assertNonEmpty, vGender } from "./core/validators";
+import { assertIsoDate, assertNonEmpty, vGender, vPreviousSchool } from "./core/validators";
 import { maybeProvider } from "./core/registry";
 import { activeRoster, fullName, teacherDisplayName } from "./model/academics";
 import { writeAudit } from "./model/audit";
@@ -207,6 +207,31 @@ export const endEnrollment = studentsMutation({
 });
 
 /**
+ * Trim and check a transfer student's previous-school details: the school name
+ * is required, other fields are optional and length-limited, and the TC cannot
+ * be dated after the admission. Empty optional fields are dropped.
+ */
+function parsePreviousSchool(p: { name: string; board?: string; lastClassPassed?: string; tcNumber?: string; tcIssueDate?: string; leavingReason?: string }, admissionDate: string) {
+  const opt = (value: string | undefined, field: string, max: number) => {
+    const t = value?.trim();
+    if (!t) return undefined;
+    if (t.length > max) throw invalid(`${field} is too long (max ${max} characters)`, { [field]: "Too long" });
+    return t;
+  };
+  const tcIssueDate = p.tcIssueDate?.trim() ? assertIsoDate(p.tcIssueDate.trim(), "previousSchool.tcIssueDate") : undefined;
+  if (tcIssueDate && tcIssueDate > admissionDate) throw invalid("The transfer certificate cannot be dated after the admission date.", { "previousSchool.tcIssueDate": "After the admission date" });
+  const out = {
+    name: assertNonEmpty(p.name, "previousSchool.name", 120),
+    board: opt(p.board, "previousSchool.board", 60),
+    lastClassPassed: opt(p.lastClassPassed, "previousSchool.lastClassPassed", 40),
+    tcNumber: opt(p.tcNumber, "previousSchool.tcNumber", 60),
+    tcIssueDate,
+    leavingReason: opt(p.leavingReason, "previousSchool.leavingReason", 200),
+  };
+  return Object.fromEntries(Object.entries(out).filter(([, val]) => val !== undefined)) as typeof out;
+}
+
+/**
  * Admit ONE student from the admin form: student record + current-year
  * enrollment + parent contact, in one transaction.
  *
@@ -227,6 +252,8 @@ export const createStudentWithEnrollment = studentsMutation({
     sectionId: v.id("sections"),
     scholarNo: v.optional(v.string()),
     confirmNotDuplicate: v.optional(v.boolean()),
+    /** Transfer student: the previous school and its incoming TC. */
+    previousSchool: v.optional(vPreviousSchool),
     parentContact: v.object({
       name: v.string(),
       relation: v.string(),
@@ -249,6 +276,7 @@ export const createStudentWithEnrollment = studentsMutation({
     const contactPhone = normalizePhone(a.parentContact.phone, "parentContact.phone");
     const phone = a.phone?.trim() ? normalizePhone(a.phone, "phone") : undefined;
     const email = a.email?.trim() ? a.email.trim() : undefined;
+    const previousSchool = a.previousSchool ? parsePreviousSchool(a.previousSchool, a.admissionDate) : undefined;
 
     const cls = await getInSchool(ctx, "classes", a.classId, "Class");
     const section = await getInSchool(ctx, "sections", a.sectionId, "Section");
@@ -274,6 +302,7 @@ export const createStudentWithEnrollment = studentsMutation({
       ...(scholarNo ?? {}),
       ...(a.gender ? { gender: a.gender } : {}), ...(email ? { email } : {}), ...(phone ? { phone } : {}),
       ...(a.bloodGroup?.trim() ? { bloodGroup: a.bloodGroup.trim() } : {}),
+      ...(previousSchool ? { previousSchool } : {}),
     } as any);
 
     const existingContact = await ctx.db.query("guardians").withIndex("by_school_phone", (q) => q.eq("schoolId", school._id).eq("phone", contactPhone)).first();

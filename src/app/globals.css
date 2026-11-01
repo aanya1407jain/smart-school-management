@@ -128,6 +128,12 @@
     background: rgb(var(--bg));
   }
   .scrollbar-thin { scrollbar-width: thin; scrollbar-color: rgb(var(--c-heather)) transparent; }
+  /* Sidebar scrollbar: a slim translucent emerald thumb on a transparent track, blending into the forest panel. */
+  .scrollbar-forest { scrollbar-width: thin; scrollbar-color: rgb(52 211 153 / 0.32) transparent; }
+  .scrollbar-forest::-webkit-scrollbar { width: 6px; }
+  .scrollbar-forest::-webkit-scrollbar-track { background: transparent; }
+  .scrollbar-forest::-webkit-scrollbar-thumb { background: rgb(52 211 153 / 0.3); border-radius: 9999px; }
+  .scrollbar-forest::-webkit-scrollbar-thumb:hover { background: rgb(52 211 153 / 0.5); }
 }
 
 @media (prefers-reduced-motion: reduce) {
