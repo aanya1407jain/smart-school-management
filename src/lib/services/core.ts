@@ -28,11 +28,15 @@ export const forbidden = (msg = "You do not have permission to access this resou
 export const notFound = (what = "Record") => new ServiceError("NOT_FOUND", `${what} not found.`);
 export const invalid = (msg: string, fieldErrors?: Record<string, string>) => new ServiceError("VALIDATION", msg, fieldErrors);
 
-/** Simulated network latency so loading states are exercised. */
-const LATENCY = { min: 120, max: 320 };
+/**
+ * Optional simulated network latency for the in-browser demo data. Off by default
+ * (it added 120–320 ms to every demo query and made every page switch lag); set
+ * NEXT_PUBLIC_DEMO_LATENCY_MS (e.g. "250") to exercise loading states.
+ */
+const LATENCY_MS = Number(process.env.NEXT_PUBLIC_DEMO_LATENCY_MS ?? 0) || 0;
 export function latency(): Promise<void> {
-  if (typeof window === "undefined") return Promise.resolve();
-  const ms = LATENCY.min + Math.random() * (LATENCY.max - LATENCY.min);
+  if (typeof window === "undefined" || LATENCY_MS <= 0) return Promise.resolve();
+  const ms = LATENCY_MS * (0.5 + Math.random());
   return new Promise((r) => setTimeout(r, ms));
 }
 

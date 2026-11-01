@@ -9,7 +9,10 @@
  * automatically. The backend verifies it belongs to the caller.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { useAction, useConvex, useMutation, usePaginatedQuery, useQuery } from "convex/react";
+import { useAction, useConvex, useMutation, useQuery } from "convex/react";
+// Cached variants: a subscription outlives the component for a few minutes (ConvexQueryCacheProvider), so
+// returning to a page shows its last live result at once instead of a loading state; updates keep streaming.
+import { usePaginatedQuery as useCachedPaginatedQuery, useQuery as useCachedQuery } from "convex-helpers/react/cache/hooks";
 import type { FunctionArgs, FunctionReference, FunctionReturnType, PaginationOptions, PaginationResult } from "convex/server";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
@@ -82,7 +85,7 @@ export function useSchoolQuery<F extends FunctionReference<"query", "public", Wi
 ): FunctionReturnType<F> | undefined {
   const { activeMembershipId } = useMembership();
   const full = args === "skip" ? "skip" : { ...args, ...(activeMembershipId ? { membershipId: activeMembershipId } : {}) };
-  return useQuery(fn, full as never) as FunctionReturnType<F> | undefined;
+  return useCachedQuery(fn, full as never) as FunctionReturnType<F> | undefined;
 }
 
 /**
@@ -138,5 +141,5 @@ export function useSchoolPaginatedQuery<F extends PaginatedSchoolQuery>(
 ) {
   const { activeMembershipId } = useMembership();
   const full = args === "skip" ? "skip" : { ...args, ...(activeMembershipId ? { membershipId: activeMembershipId } : {}) };
-  return usePaginatedQuery(fn, full as never, options);
+  return useCachedPaginatedQuery(fn, full as never, options);
 }
