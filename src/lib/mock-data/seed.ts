@@ -416,8 +416,11 @@ export function createSeedDatabase(today: string = todayISO()): Database {
       concession = 2000;
       concessions.push({ id: `con_${st.id}`, studentId: st.id, assignmentId: asg.id, amount: 2000, reason: "Sibling concession (brother in Class 10A)", approvedBy: "u_admin", createdAt: "2026-04-02T11:00:00.000+05:30" });
     } else if (rng.chance(0.06)) {
-      concession = Math.round(total * 0.1);
-      concessions.push({ id: `con_${st.id}`, studentId: st.id, assignmentId: asg.id, amount: concession, reason: rng.pick(["Merit scholarship (10%)", "Staff ward concession", "Sports quota scholarship"]), approvedBy: "u_admin", createdAt: "2026-04-05T11:00:00.000+05:30" });
+      const reason = rng.pick(["Merit scholarship (10%)", "Staff ward concession", "Sports quota scholarship"]);
+      if (st.id !== "stu_aarav") {
+        concession = Math.round(total * 0.1);
+        concessions.push({ id: `con_${st.id}`, studentId: st.id, assignmentId: asg.id, amount: concession, reason, approvedBy: "u_admin", createdAt: "2026-04-05T11:00:00.000+05:30" });
+      }
     }
     const net = Math.round((total - concession) * 0.25);
     const methods = ["upi", "bank_transfer", "card", "cash", "cheque"] as const;

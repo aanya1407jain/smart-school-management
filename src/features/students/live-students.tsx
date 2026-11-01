@@ -16,9 +16,10 @@ import { motion, useReducedMotion } from "framer-motion";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { useSchoolMutation, useSchoolPaginatedQuery, useSchoolQuery } from "@/lib/convex/membership";
-import { Avatar, BadgeChip, Button, Card, EmptyState, FormField, Input, LinkButton, LoadingState, PageHeader, SearchInput, Select, StatCard, Textarea, useToast } from "@/components/ui";
+import { Avatar, BadgeChip, Button, Card, EmptyState, FormField, Input, LinkButton, LoadingState, PageHeader, SearchInput, Select, StatCard, Tabs, TabsContent, TabsList, Textarea, useToast } from "@/components/ui";
 import { useSession } from "@/features/auth/session-provider";
 import { errorMessage } from "@/lib/convex/errors";
+import { AdmissionRegisterPanel } from "./admission-register";
 
 export function LiveStudentsList() {
   const reduceMotion = useReducedMotion();
@@ -38,64 +39,77 @@ export function LiveStudentsList() {
 
   return (
     <div>
-      <PageHeader title="Students" description="Active students in roll-number order (first name, then last name)." actions={canWrite ? <LinkButton href="/admin/students/new"><UserPlus className="h-4 w-4" /> Admit student</LinkButton> : undefined} />
-      <div className="mb-4 grid gap-4 sm:grid-cols-3" data-testid="student-totals">
-        <StatCard label={counts ? `Enrolled in ${counts.academicYear.name}` : "Enrolled this year"} value={<span data-testid="students-enrolled">{counts?.enrolled ?? "—"}</span>} icon={<GraduationCap className="h-5 w-5" />} hint="Distinct students with an active class enrollment" />
-        <StatCard label="Active student records" value={<span data-testid="students-active-records">{counts?.activeRecords ?? "—"}</span>} icon={<Users className="h-5 w-5" />} tone="sapphire" hint={counts ? `${counts.notEnrolled} not yet enrolled in a class` : undefined} />
-        {counts?.section && <StatCard label={`Enrolled in ${counts.section.label}`} value={<span data-testid="students-section">{counts.section.enrolled}</span>} icon={<GraduationCap className="h-5 w-5" />} tone="lavender" />}
-      </div>
-      <Card className="mb-4 flex flex-col gap-3 p-4 sm:flex-row">
-        <Select aria-label="Section" value={sectionId} onChange={(e) => setSectionId(e.target.value)} className="w-56">
-          <option value="">All sections</option>
-          {(sections ?? []).map((s) => <option key={s._id} value={s._id}>{s.displayName}</option>)}
-        </Select>
-        <SearchInput value={search} onChange={setSearch} placeholder="Search name or scholar no." label="Filter students by name or scholar no." className="sm:w-72" />
-      </Card>
-      <Card className="p-2.5 sm:p-3">
-        {list.status === "LoadingFirstPage" ? (
-          <LoadingState variant="table" />
-        ) : list.results.length === 0 ? (
-          <EmptyState
-            icon={<GraduationCap className="h-6 w-6" />}
-            title="No students"
-            description={debounced ? "No students match this search on current page." : sectionId ? "No active students in this section." : "Admit students or import them in Accounts & Import."}
-          />
-        ) : (
-          <motion.ul className="space-y-1.5" data-testid="live-students" initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: reduceMotion ? 0 : 0.04 } } }}>
-            {list.results.map((p) => (
-              <motion.li
-                key={p.personId}
-                variants={{ hidden: reduceMotion ? { opacity: 0 } : { opacity: 0, y: 8 }, show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 420, damping: 32 } } }}
-                className="group flex items-center gap-3 rounded-xl border border-transparent bg-white/50 px-3.5 py-2.5 transition-all duration-200 ease-out hover:scale-[1.003] hover:border-teal/20 hover:bg-teal-soft/40 hover:shadow-ambient-lg"
-              >
-                {sectionId && <BadgeChip tone="sapphire" className="min-w-[2.5rem] justify-center" title="Roll number"><span className="sr-only">Roll </span>{p.rollNo ?? "—"}</BadgeChip>}
-                <Avatar name={p.name} size="md" className="transition-transform duration-200 group-hover:scale-105" />
-                <Link href={`/admin/students/${p.personId}`} className="min-w-0 flex-1 rounded-lg focus-visible:outline-none focus-visible:shadow-focus">
-                  <span className="block truncate font-semibold text-ink transition-colors group-hover:text-lagoon">{p.name}</span>
-                  <span className="mt-1 flex flex-wrap items-center gap-1.5 text-[12px] text-ink-muted">
-                    <BadgeChip title="Scholar number"><span className="sr-only">Scholar No: </span>{p.number}</BadgeChip>
-                    <span className="rounded-full bg-alabaster px-2 py-0.5 font-medium text-ink-soft ring-1 ring-inset ring-line/80">{p.detail}</span>
-                  </span>
-                </Link>
-                {canWrite && (
-                  <LinkButton href={`/admin/students/${p.personId}/edit`} variant="ghost" size="sm" className="opacity-80 group-hover:opacity-100">
-                    <Pencil className="h-3.5 w-3.5" aria-hidden /> Edit
-                  </LinkButton>
-                )}
-              </motion.li>
-            ))}
-          </motion.ul>
-        )}
-
-        {/* BUG-002 Fix: Load more button sits outside the results empty-check */}
-        {list.status === "CanLoadMore" && (
-          <div className="mt-2 border-t border-line/60 pt-3 text-center">
-            <Button variant="outline" size="sm" onClick={() => list.loadMore(50)}>
-              Load more
-            </Button>
+      <PageHeader title="Students" description="Active students in roll-number order (first name, then last name) and full admission register." actions={canWrite ? <LinkButton href="/admin/students/new"><UserPlus className="h-4 w-4" /> Admit student</LinkButton> : undefined} />
+      <Tabs defaultValue="roster">
+        <TabsList
+          items={[
+            { value: "roster", label: "Active roster" },
+            { value: "register", label: "Admission register (CSR)" },
+          ]}
+        />
+        <TabsContent value="roster">
+          <div className="mb-4 grid gap-4 sm:grid-cols-3" data-testid="student-totals">
+            <StatCard label={counts ? `Enrolled in ${counts.academicYear.name}` : "Enrolled this year"} value={<span data-testid="students-enrolled">{counts?.enrolled ?? "—"}</span>} icon={<GraduationCap className="h-5 w-5" />} hint="Distinct students with an active class enrollment" />
+            <StatCard label="Active student records" value={<span data-testid="students-active-records">{counts?.activeRecords ?? "—"}</span>} icon={<Users className="h-5 w-5" />} tone="sapphire" hint={counts ? `${counts.notEnrolled} not yet enrolled in a class` : undefined} />
+            {counts?.section && <StatCard label={`Enrolled in ${counts.section.label}`} value={<span data-testid="students-section">{counts.section.enrolled}</span>} icon={<GraduationCap className="h-5 w-5" />} tone="lavender" />}
           </div>
-        )}
-      </Card>
+          <Card className="mb-4 flex flex-col gap-3 p-4 sm:flex-row">
+            <Select aria-label="Section" value={sectionId} onChange={(e) => setSectionId(e.target.value)} className="w-56">
+              <option value="">All sections</option>
+              {(sections ?? []).map((s) => <option key={s._id} value={s._id}>{s.displayName}</option>)}
+            </Select>
+            <SearchInput value={search} onChange={setSearch} placeholder="Search name or scholar no." label="Filter students by name or scholar no." className="sm:w-72" />
+          </Card>
+          <Card className="p-2.5 sm:p-3">
+            {list.status === "LoadingFirstPage" ? (
+              <LoadingState variant="table" />
+            ) : list.results.length === 0 ? (
+              <EmptyState
+                icon={<GraduationCap className="h-6 w-6" />}
+                title="No students"
+                description={debounced ? "No students match this search on current page." : sectionId ? "No active students in this section." : "Admit students or import them in Accounts & Import."}
+              />
+            ) : (
+              <motion.ul className="space-y-1.5" data-testid="live-students" initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: reduceMotion ? 0 : 0.04 } } }}>
+                {list.results.map((p) => (
+                  <motion.li
+                    key={p.personId}
+                    variants={{ hidden: reduceMotion ? { opacity: 0 } : { opacity: 0, y: 8 }, show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 420, damping: 32 } } }}
+                    className="group flex items-center gap-3 rounded-xl border border-transparent bg-white/50 px-3.5 py-2.5 transition-all duration-200 ease-out hover:scale-[1.003] hover:border-teal/20 hover:bg-teal-soft/40 hover:shadow-ambient-lg"
+                  >
+                    {sectionId && <BadgeChip tone="sapphire" className="min-w-[2.5rem] justify-center" title="Roll number"><span className="sr-only">Roll </span>{p.rollNo ?? "—"}</BadgeChip>}
+                    <Avatar name={p.name} size="md" className="transition-transform duration-200 group-hover:scale-105" />
+                    <Link href={`/admin/students/${p.personId}`} className="min-w-0 flex-1 rounded-lg focus-visible:outline-none focus-visible:shadow-focus">
+                      <span className="block truncate font-semibold text-ink transition-colors group-hover:text-lagoon">{p.name}</span>
+                      <span className="mt-1 flex flex-wrap items-center gap-1.5 text-[12px] text-ink-muted">
+                        <BadgeChip title="Scholar number"><span className="sr-only">Scholar No: </span>{p.number}</BadgeChip>
+                        <span className="rounded-full bg-alabaster px-2 py-0.5 font-medium text-ink-soft ring-1 ring-inset ring-line/80">{p.detail}</span>
+                      </span>
+                    </Link>
+                    {canWrite && (
+                      <LinkButton href={`/admin/students/${p.personId}/edit`} variant="ghost" size="sm" className="opacity-80 group-hover:opacity-100">
+                        <Pencil className="h-3.5 w-3.5" aria-hidden /> Edit
+                      </LinkButton>
+                    )}
+                  </motion.li>
+                ))}
+              </motion.ul>
+            )}
+
+            {/* BUG-002 Fix: Load more button sits outside the results empty-check */}
+            {list.status === "CanLoadMore" && (
+              <div className="mt-2 border-t border-line/60 pt-3 text-center">
+                <Button variant="outline" size="sm" onClick={() => list.loadMore(50)}>
+                  Load more
+                </Button>
+              </div>
+            )}
+          </Card>
+        </TabsContent>
+        <TabsContent value="register">
+          <AdmissionRegisterPanel />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
