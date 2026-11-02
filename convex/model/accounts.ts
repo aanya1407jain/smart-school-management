@@ -3,7 +3,7 @@
  *
  * Identity model
  *   users              — one sign-in identity per person: canonical `loginId`
- *                        (+ optional contact email), `disabled`, `mustChangePassword`.
+ *                        (+ optional contact email), `disabled`, `defaultPassword`.
  *   authAccounts       — Convex Auth "password" account: providerAccountId =
  *                        the canonical Login ID, secret = Scrypt hash. Never
  *                        read by app code, never sent to the browser.
@@ -19,11 +19,17 @@
  *      the users row and activates the reserved membership(s).
  * If step 2 fails, the membership simply stays "pending" (invited, no user)
  * and the admin can issue credentials again; nothing half-created can sign in.
+ *
+ * Credentials are managed ONLY by administrators: there is no self-service
+ * password change or recovery. A password an administrator issues stays the
+ * account's password until an administrator overwrites it
+ * (convex/credentials.ts, authorized by a one-time code emailed to that
+ * administrator).
  */
 import { createAccount } from "@convex-dev/auth/server";
 import type { ActionCtx, MutationCtx, QueryCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
-import { AppError, conflict, temporaryPasswordExpired } from "../core/errors";
+import { AppError, conflict } from "../core/errors";
 import { normalizeLoginId } from "../core/validators";
 import type { PermissionSetName, Role } from "../core/permissions";
 import type { Grant } from "../core/grants";
@@ -35,60 +41,35 @@ import { accountTarget, roleInSchool, writeAudit } from "./audit";
 export const PASSWORD_PROVIDER = "password";
 
 /**
- * Temporary-password policy. An administrator-issued (or setup-issued)
- * password is only good for signing in and choosing a new password:
- *  - while `users.mustChangePassword` is set, `requireActor` refuses every
- *    school function (PASSWORD_CHANGE_REQUIRED);
- *  - it expires TEMPORARY_PASSWORD_TTL_MS after `temporaryPasswordIssuedAt`
- *    (server clock): no new session, no password change with it
- *    (TEMPORARY_PASSWORD_EXPIRED) — an administrator issues a new one.
- */
-export const TEMPORARY_PASSWORD_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-
-/**
  * STUDENT accounts: the Login ID is the student's scholar number and the first
- * password is this school default (hashed by Convex Auth like any password).
- * It must be changed at first sign-in (mustChangePassword) and, by the
- * school's decision, does NOT expire (`users.defaultPassword`). Teachers and
- * office logins keep random one-time passwords that expire.
+ * password is this school default (hashed by Convex Auth like any password),
+ * marked `users.defaultPassword` so administrators can see who still uses it.
+ * Teachers and office logins get a random password.
  */
 export const STUDENT_DEFAULT_PASSWORD = "Aster@123";
 
-type UserPasswordState = Pick<Doc<"users">, "mustChangePassword" | "temporaryPasswordIssuedAt" | "_creationTime" | "defaultPassword">;
-
-/** When the user's temporary password stops working, or null if they have none (or it is the non-expiring student default). */
-export function temporaryPasswordExpiresAt(user: UserPasswordState): number | null {
-  if (!user.mustChangePassword || user.defaultPassword) return null;
-  // Accounts flagged before the timestamp existed count from their creation.
-  return (user.temporaryPasswordIssuedAt ?? user._creationTime) + TEMPORARY_PASSWORD_TTL_MS;
-}
-
-export function isTemporaryPasswordExpired(user: UserPasswordState, now: number): boolean {
-  const expiresAt = temporaryPasswordExpiresAt(user);
-  return expiresAt !== null && now >= expiresAt;
-}
-
 /**
  * The session gate (Convex Auth `beforeSessionCreation`, after the password
- * was verified): enabled user, an active membership in an active school, and
- * no expired temporary password.
+ * was verified): enabled user with an active membership in an active school.
  */
-export async function assertSessionAllowed(ctx: QueryCtx, userId: Id<"users">, now: number) {
+export async function assertSessionAllowed(ctx: QueryCtx, userId: Id<"users">) {
   if (!(await hasActiveAccess(ctx, userId))) {
     throw new AppError("NO_SCHOOL_ACCESS", "Your account does not have active access to any school.");
   }
-  const user = await ctx.db.get(userId);
-  if (user && isTemporaryPasswordExpired(user, now)) throw temporaryPasswordExpired();
 }
 
-/** Fields that mark a password as temporary (set on every issue/reset). `defaultPassword`: the non-expiring student default. */
-export function temporaryPasswordFields(now: number, defaultPassword = false) {
-  return { mustChangePassword: true as const, temporaryPasswordIssuedAt: now, defaultPassword: defaultPassword ? (true as const) : undefined };
+/**
+ * User fields after an administrator (or operator) sets a password: the
+ * student-default marker when that is what was set, and the legacy
+ * temporary-password flags cleared.
+ */
+export function passwordIssuedFields(defaultPassword = false) {
+  return { mustChangePassword: undefined, temporaryPasswordIssuedAt: undefined, defaultPassword: defaultPassword ? (true as const) : undefined };
 }
 
-/** The first password for a new account of this role: the student default, or a random one-time password. Actions only. */
+/** The first password for a new account of this role: the student default, or a random one. Actions only. */
 export function initialPasswordFor(role: Role): { password: string; defaultPassword: boolean } {
-  return role === "student" ? { password: STUDENT_DEFAULT_PASSWORD, defaultPassword: true } : { password: generateTemporaryPassword(), defaultPassword: false };
+  return role === "student" ? { password: STUDENT_DEFAULT_PASSWORD, defaultPassword: true } : { password: generateSecurePassword(), defaultPassword: false };
 }
 
 /** A student's Login ID: their scholar number (canonical). Throws when they have none or it cannot be a Login ID. */
@@ -234,7 +215,7 @@ export async function reserveAccount(ctx: MutationCtx, input: ReserveAccountInpu
  * password account is created server-side (step 2). Creates the identity and
  * activates every reserved membership for that Login ID.
  */
-export async function activatePendingAccount(ctx: MutationCtx, args: { loginId: string; mustChangePassword: boolean; defaultPassword?: boolean }): Promise<Id<"users">> {
+export async function activatePendingAccount(ctx: MutationCtx, args: { loginId: string; defaultPassword?: boolean }): Promise<Id<"users">> {
   const pending = (await ctx.db.query("schoolMemberships").withIndex("by_login_id", (q) => q.eq("loginId", args.loginId)).collect())
     .filter((m) => m.status === "invited" && !m.userId && !m.guardianId); // legacy guardian sign-ins are never activated
   if (pending.length === 0) throw new AppError("FORBIDDEN", "Accounts are created by your school.");
@@ -247,7 +228,7 @@ export async function activatePendingAccount(ctx: MutationCtx, args: { loginId: 
     loginId: args.loginId,
     name: first.displayName,
     ...(first.email ? { email: first.email } : {}),
-    ...(args.mustChangePassword ? { mustChangePassword: true, temporaryPasswordIssuedAt: now, ...(args.defaultPassword ? { defaultPassword: true } : {}) } : {}),
+    ...(args.defaultPassword ? { defaultPassword: true } : {}),
   });
   for (const m of pending) {
     await ctx.db.patch(m._id, { userId, status: "active", activatedAt: now });
@@ -266,11 +247,12 @@ export async function activatePendingAccount(ctx: MutationCtx, args: { loginId: 
 }
 
 /**
- * A temporary password: 12 random characters (unambiguous letters/digits) in
+ * A random password: 12 random characters (unambiguous letters/digits) in
  * groups of four, always containing a letter and a digit, e.g. "Kq7m-x3Rt-9pWd".
  * Uses crypto.getRandomValues — call ONLY from actions (never queries/mutations).
+ * The admin UI generates the same shape in the browser (src/features/accounts/password-reset-dialog.tsx).
  */
-export function generateTemporaryPassword(): string {
+export function generateSecurePassword(): string {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
   const limit = 65536 - (65536 % alphabet.length); // rejection sampling: no modulo bias
   for (;;) {
@@ -289,10 +271,10 @@ export function generateTemporaryPassword(): string {
  * Step 2: create the Convex Auth password account for a reserved Login ID.
  * The secret is hashed by the provider (Scrypt); only the hash is stored.
  */
-export async function provisionAccount(ctx: ActionCtx, args: { loginId: string; password: string; mustChangePassword: boolean; defaultPassword?: boolean }) {
+export async function provisionAccount(ctx: ActionCtx, args: { loginId: string; password: string; defaultPassword?: boolean }) {
   return await createAccount(ctx, {
     provider: PASSWORD_PROVIDER,
     account: { id: args.loginId, secret: args.password },
-    profile: { loginId: args.loginId, ...(args.mustChangePassword ? { mustChangePassword: true } : {}), ...(args.defaultPassword ? { defaultPassword: true } : {}) },
+    profile: { loginId: args.loginId, ...(args.defaultPassword ? { defaultPassword: true } : {}) },
   });
 }

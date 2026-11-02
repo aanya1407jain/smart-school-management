@@ -67,8 +67,6 @@ interface SessionContextValue {
   viewer: Viewer | null;
   /** Why the session is "unavailable". */
   notice: string | null;
-  /** The account must replace an administrator-issued temporary password. */
-  mustChangePassword: boolean;
   activeStudentId: string | null;
   /** "demo" (persona bound to demo data) or "live" (Convex only); null unless authenticated. */
   dataSource: DataSource | null;
@@ -101,7 +99,7 @@ const UNAVAILABLE_PREVIEW =
 function UnconfiguredSessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => { demoRuntime()?.purgeLegacyStorage(); demoRuntime()?.auth.clearIdentity(); }, []);
   const value = useMemo<SessionContextValue>(() => ({
-    status: "unauthenticated", user: null, viewer: null, notice: null, mustChangePassword: false, activeStudentId: null, dataSource: null,
+    status: "unauthenticated", user: null, viewer: null, notice: null, activeStudentId: null, dataSource: null,
     can: () => false, modules: [], modulesStatus: null, hasModule: () => false,
     login: async () => { throw new Error("Sign-in is not available: the school backend is not configured for this deployment."); },
     logout: async () => {},
@@ -232,7 +230,6 @@ function ConvexSessionProvider({ children }: { children: ReactNode }) {
       user,
       viewer: verifying ? null : base.viewer,
       notice: verifying ? null : base.notice,
-      mustChangePassword: !verifying && base.viewer?.mustChangePassword === true,
       activeStudentId: verifying ? null : base.activeStudentId,
       dataSource: verifying ? null : base.dataSource,
       can: (p) => perms.has(p),

@@ -9,7 +9,6 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { as, createSchool, errorCode, makeTest, type T } from "./fixtures";
 import { liveStudentPortalUser } from "../../src/features/auth/live-user";
 
-const NEW_PASSWORD = "MyChoice2026";
 
 async function setup() {
   const t = makeTest();
@@ -27,13 +26,10 @@ async function setup() {
 
 const userOf = (t: T, membershipId: Id<"schoolMemberships">) => t.run(async (ctx) => (await ctx.db.get(membershipId))!.userId! as Id<"users">);
 
-/** Sign in as the new account, prove it is locked until the temporary password is replaced, replace it. */
-async function firstLogin(t: T, userId: Id<"users">, temporaryPassword: string) {
+/** Sign in as the new account (usable straight away: no forced password change). */
+async function firstLogin(t: T, userId: Id<"users">, _issuedPassword: string) {
   const me = await as(t, userId);
-  const s = await me.query(api.users.session, {});
-  expect(s.status === "signedIn" && s.viewer.mustChangePassword).toBe(true);
-  expect(await errorCode(me.query(api.studentPortal.myProfile, {}))).toBe("PASSWORD_CHANGE_REQUIRED");
-  await me.action(api.account.changePassword, { currentPassword: temporaryPassword, newPassword: NEW_PASSWORD });
+  expect((await me.query(api.users.session, {})).status).toBe("signedIn");
   return me;
 }
 
@@ -53,7 +49,7 @@ describe("student portal: identity resolution after account creation", () => {
     const me = await firstLogin(t, await userOf(t, r.membershipId), r.temporaryPassword);
 
     const s = await me.query(api.users.session, {});
-    expect(s.status === "signedIn" && !s.viewer.mustChangePassword && s.viewer.student?.studentId === studentId).toBe(true);
+    expect(s.status === "signedIn" && s.viewer.student?.studentId === studentId).toBe(true);
     const p = expectOwnRecord(await myProfileOf(me), studentId);
     expect(p.student).toMatchObject({ name: "Meera Nair", admissionNo: "ADM-777", scholarNo: "ADM-777", dateOfBirth: "2013-02-03", gender: "female", status: "active" });
     expect(p.academicYear).toMatchObject({ academicYearId: A.yearId, name: "2026-27" });

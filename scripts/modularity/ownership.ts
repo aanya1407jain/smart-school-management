@@ -63,15 +63,15 @@ export const FILE_RULES: readonly [RegExp, Owner][] = [
   [/^convex\/seedData\//, "demo"], // the internal demo school (D4)
   [/^convex\/seed\.ts$/, "demo"],
   [/^convex\/migrations\.ts$/, "core"],
-  [/^convex\/(auth|auth\.config|users|account|memberships|schools|schoolModules|profile|audit|notifications|setup|http|notices|events|academicYearMaintenance|academics|teachers)\.ts$/, "core"],
-  [/^convex\/(accounts|bulkAccounts|files|studentLoginMigration)\.ts$/, "core"],
+  [/^convex\/(auth|auth\.config|users|memberships|schools|schoolModules|profile|audit|notifications|setup|http|notices|events|academicYearMaintenance|academics|teachers)\.ts$/, "core"],
+  [/^convex\/(accounts|bulkAccounts|credentials|files|studentLoginMigration)\.ts$/, "core"],
   [/^convex\/(students|studentReports|studentPortal|studentLifecycle|admissionRegister|imports|scholarNumberMaintenance|rollNumberMaintenance|tcVerification)\.ts$/, "students"],
   [/^convex\/(attendance|attendanceReports|staff)\.ts$/, "attendance"],
   [/^convex\/(fees|feeReports|feeReminders)\.ts$/, "fees"],
   [/^convex\/(exams|examReports)\.ts$/, "examinations"],
   [/^convex\/(subjects|timetable|timetableMaintenance|homework)\.ts$/, "academics"],
   [/^convex\/(reports|dashboards)\.ts$/, "core"], // admin and teacher dashboards; module parts come through providers
-  [/^convex\/model\/(audit|calendar|counters|loginIds|memberships|modules|notifications|sortedPagination|accounts|academics)\.ts$/, "core"],
+  [/^convex\/model\/(audit|calendar|counters|loginIds|memberships|modules|notifications|sortedPagination|accounts|academics|email)\.ts$/, "core"],
   [/^convex\/model\/(rollNumbers|scholarNumbers|studentCounts|studentRecords|lifecycle|importSpecs|importers|portalStudent|studentProviders)\.ts$/, "students"],
   [/^convex\/model\/attendanceRecords\.ts$/, "attendance"],
   [/^convex\/model\/feeRecords\.ts$/, "fees"],
@@ -138,7 +138,7 @@ export const TABLE_OWNER: Record<string, TargetModule> = {
   schools: "core", schoolSettings: "core", schoolModules: "core", schoolMemberships: "core", teachers: "core",
   academicYears: "core", classes: "core", sections: "core",
   counters: "core", auditLogs: "core", files: "core", notifications: "core", notices: "core", events: "core",
-  bulkAccountJobs: "core", bulkAccountJobItems: "core",
+  bulkAccountJobs: "core", bulkAccountJobItems: "core", credentialOtps: "core",
   // students
   students: "students", enrollments: "students", rollNumberHistory: "students", guardians: "students", guardianLinks: "students",
   admissionRegisterFields: "students", admissionRegisterValues: "students", transferCertificates: "students", promotionRuns: "students",

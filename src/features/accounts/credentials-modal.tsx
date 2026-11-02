@@ -1,8 +1,8 @@
 "use client";
 /**
- * Shows freshly issued Login IDs + temporary passwords exactly once. Nothing
- * is stored client-side; closing the dialog discards the passwords (a new
- * temporary password can always be issued again).
+ * Shows freshly issued Login IDs + first passwords exactly once. Nothing is
+ * stored client-side; closing the dialog discards the passwords (an
+ * administrator can reset a lost one: convex/credentials.ts).
  */
 import { useState } from "react";
 import { Check, Copy, Download, ShieldAlert } from "lucide-react";
@@ -27,7 +27,7 @@ export function CredentialsModal({
   };
   const download = () =>
     downloadCsv(`credentials-${new Date().toISOString().slice(0, 10)}`, [
-      ["Name", "Login ID", "Temporary password"],
+      ["Name", "Login ID", "Password"],
       ...credentials.map((c) => [c.displayName, c.loginId, c.temporaryPassword]),
     ]);
 
@@ -36,7 +36,7 @@ export function CredentialsModal({
       open={open}
       onOpenChange={(o) => { if (!o) onClose(); }}
       title={title}
-      description="Share these privately with each person. They must choose a new password after signing in."
+      description="Share these privately with each person. Only administrators can change a password later."
       size="lg"
       footer={
         <>
@@ -47,7 +47,7 @@ export function CredentialsModal({
     >
       <div role="note" className="mb-4 flex items-start gap-2.5 rounded-xl border border-plum/20 bg-plum/5 px-4 py-3 text-[13px] text-plum">
         <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-        <span>Temporary passwords are shown only now and are not stored anywhere readable. If one is lost, reset the password to issue a new one.</span>
+        <span>Passwords are shown only now and are not stored anywhere readable. If one is lost, reset the password from Credentials.</span>
       </div>
       {credentials.length > 0 && (
         <ul className="divide-y divide-line/70 rounded-xl border border-line/80 bg-white" aria-label="Issued credentials">
@@ -64,7 +64,7 @@ export function CredentialsModal({
               <Button
                 variant="ghost" size="sm"
                 aria-label={`Copy credentials for ${c.displayName}`}
-                onClick={() => copy(c.loginId, `Login ID: ${c.loginId}\nTemporary password: ${c.temporaryPassword}`)}
+                onClick={() => copy(c.loginId, `Login ID: ${c.loginId}\nPassword: ${c.temporaryPassword}`)}
               >
                 {copied === c.loginId ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />} {copied === c.loginId ? "Copied" : "Copy"}
               </Button>

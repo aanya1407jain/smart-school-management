@@ -28,13 +28,12 @@ const COLLAPSE_KEY = `${STORAGE_NAMESPACE}-sidebar-collapsed`;
  *  - the school does not have the page's module → "not enabled" page; the page
  *    itself is not rendered, so none of its queries run (the server refuses them
  *    with MODULE_DISABLED anyway — this is a convenience, not the boundary)
- *  - temporary password → /account (the server blocks school functions until it is changed)
  *  - allowed            → page content
  *  - live account on a page that still runs on demo data → explanation + the
  *    live pages it can use (never the demo school's data)
  */
 export function AppShell({ children }: { children: ReactNode }) {
-  const { status, user, viewer, notice, mustChangePassword, logout, dataSource, modulesStatus } = useSession();
+  const { status, user, viewer, notice, logout, dataSource, modulesStatus } = useSession();
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -58,12 +57,6 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   useEffect(() => setMobileOpen(false), [pathname]);
 
-  // Temporary password: the server refuses every school function
-  // (PASSWORD_CHANGE_REQUIRED) until it is changed, so go straight to /account.
-  useEffect(() => {
-    if (mustChangePassword) router.replace("/account");
-  }, [mustChangePassword, router]);
-
   if (status === "unavailable") {
     return (
       <div className="grid min-h-screen place-items-center bg-bg px-4" role="alert">
@@ -79,7 +72,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     );
   }
 
-  if (status === "loading" || access === null || access === "unauthenticated" || !user || mustChangePassword) {
+  if (status === "loading" || access === null || access === "unauthenticated" || !user) {
     return (
       <div className="grid min-h-screen place-items-center bg-bg" role="status" aria-label="Checking your session">
         <div className="flex flex-col items-center gap-3">

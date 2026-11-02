@@ -7,7 +7,7 @@
 import { describe, expect, test } from "vitest";
 import { api, internal } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
-import { as, createSchool, errorCode, makeTest, type T } from "./fixtures";
+import { as, createSchool, errorCode, makeTest, overwritePassword, type T } from "./fixtures";
 import { activatePendingAccount, reserveAccount } from "../../convex/model/accounts";
 
 async function setup() {
@@ -105,7 +105,7 @@ describe("audit: actor role vs target role", () => {
     // public API today — creation requires admin-only permissions — but the audit must not lie).
     await t.run(async (ctx) => {
       const { loginId } = await reserveAccount(ctx, { schoolId: A.schoolId, role: "student", kind: "student", year: "2026", displayName: "Kabir Rao", studentId: students[0], createdByUserId: A.users.classTeacher });
-      await activatePendingAccount(ctx, { loginId, mustChangePassword: true });
+      await activatePendingAccount(ctx, { loginId });
     });
     const [ev] = await createdEvents(t);
     expect(ev.actorUserId).toBe(A.users.classTeacher);
@@ -116,13 +116,13 @@ describe("audit: actor role vs target role", () => {
   test("credential, status and access events carry the target account's role", async () => {
     const { t, admin, students } = await setup();
     const r = await admin.action(api.accounts.create, { person: { kind: "student", studentId: students[1] } });
-    await admin.action(api.accounts.issueTemporaryPassword, { targetMembershipId: r.membershipId });
+    await overwritePassword(admin, r.membershipId, "Reset#2026x");
     await admin.action(api.accounts.setStatus, { targetMembershipId: r.membershipId, status: "suspended" });
     await admin.mutation(api.memberships.updateAccess, { targetMembershipId: r.membershipId, status: "active" });
     const rows = await t.run(async (ctx) => (await ctx.db.query("auditLogs").collect()).filter((a) => a.entity.id === r.membershipId));
     expect(rows.map((e) => [e.action, e.actorRole, (e.metadata as { targetRole?: string }).targetRole])).toEqual([
       ["account.created", "admin", "student"],
-      ["account.credentials_issued", "admin", "student"],
+      ["PASSWORD_OVERWRITE", "admin", "student"],
       ["account.disabled", "admin", "student"],
       ["membership.access_changed", "admin", "student"],
     ]);

@@ -1,8 +1,8 @@
 /**
  * Bulk student-account creation (Admin → Accounts & Import), built on the SAME
  * account path as single accounts: reserveAccount (Login ID) → provisionAccount
- * (Convex Auth createAccount with a server-generated temporary password) →
- * createOrUpdateUser activates the membership with mustChangePassword.
+ * (Convex Auth createAccount with the student default password) →
+ * createOrUpdateUser activates the membership.
  *
  * Lifecycle of a run ("job"):
  *   createJob   — selected students (explicit ids) or "all matching" (a filter)
@@ -441,7 +441,7 @@ export const processBatch = schoolAction({
       if (!begin.provision) continue;
       const { password: temporaryPassword, defaultPassword } = initialPasswordFor("student");
       try {
-        await provisionAccount(ctx, { loginId: begin.loginId, password: temporaryPassword, mustChangePassword: true, defaultPassword });
+        await provisionAccount(ctx, { loginId: begin.loginId, password: temporaryPassword, defaultPassword });
       } catch (e) {
         const msg = e instanceof Error && /already exists/i.test(e.message) ? "A sign-in account with this Login ID already exists" : "Could not create the account — retry later";
         await ctx.runMutation(internal.bulkAccounts.finishItem, { callerMembershipId: ctx.membershipId, itemId, ok: false, reason: msg });

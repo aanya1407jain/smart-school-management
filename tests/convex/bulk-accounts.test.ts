@@ -74,14 +74,12 @@ describe("bulk account creation", () => {
       for (const c of creds) users.push(await ctx.db.query("users").withIndex("by_login_id", (q) => q.eq("loginId", c.loginId)).unique());
       return { users, rolls: (await ctx.db.query("enrollments").collect()).map((e) => [e._id, e.rollNo]), items: await ctx.db.query("bulkAccountJobItems").collect() };
     });
-    expect(state.users.every((u) => u?.mustChangePassword === true && (u.temporaryPasswordIssuedAt ?? 0) > 0)).toBe(true);
+    expect(state.users.every((u) => u?.defaultPassword === true && u.mustChangePassword === undefined)).toBe(true);
     expect(state.rolls).toEqual(rollsBefore); // creating accounts never touches enrollments
     expect(JSON.stringify(state.items)).not.toMatch(/[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}/); // no password stored
-    // The temporary password works and is forced to change.
+    // The account is usable straight away (no forced password change).
     const u0 = state.users[0]!;
     const student = await as(t, u0._id);
-    expect(await errorCode(student.query(api.users.viewer, {}))).toBe("PASSWORD_CHANGE_REQUIRED");
-    await student.action(api.account.changePassword, { currentPassword: creds.find((c) => c.loginId === u0.loginId)!.temporaryPassword, newPassword: "Chosen2026" });
     expect((await student.query(api.users.viewer, {})).role).toBe("student");
     // Audit: start + completion, without passwords.
     const audit = await t.run(async (ctx) => (await ctx.db.query("auditLogs").collect()).filter((a) => a.action.startsWith("accounts.bulk_")));

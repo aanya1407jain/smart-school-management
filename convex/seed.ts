@@ -62,8 +62,8 @@ export const demo = internalAction({
     // Creates the school structure and RESERVES one membership per demo login.
     const { schoolId }: { schoolId: Id<"schools"> } = await ctx.runMutation(internal.seed.createStructure, { dataset });
 
-    // Demo passwords are known on purpose, so no forced change on first sign-in.
-    for (const l of logins) await provisionAccount(ctx, { loginId: l.loginId, password: l.password, mustChangePassword: false });
+    // Demo passwords are known on purpose (development fixtures).
+    for (const l of logins) await provisionAccount(ctx, { loginId: l.loginId, password: l.password });
 
     const summary: { attendanceRegisters: number; results: number } = await ctx.runMutation(internal.seed.createActivity, { dataset, schoolId });
     return { schoolId, logins: logins.map((l) => l.loginId), ...summary };

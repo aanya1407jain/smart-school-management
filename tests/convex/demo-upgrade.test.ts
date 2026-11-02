@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { Scrypt } from "lucia";
 import { api, internal } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { as, createSchool, errorCode, makeTest, type T } from "./fixtures";
+import { as, createSchool, enableSignIn, errorCode, makeTest, signInResult, type T } from "./fixtures";
 import { asterAcademy } from "../../convex/seedData/asterAcademy";
 
 const ds = asterAcademy;
@@ -64,10 +64,10 @@ describe("seed:upgradeDemoLoginIds", () => {
     expect(state.emailAccount).toBeNull();
     expect(applied.passwordAccountsWithoutLoginId).toBe(0);
 
-    // The ORIGINAL demo password now verifies under the Login ID (Convex Auth retrieveAccount).
-    const asTeacher = await as(t, teacher.userId);
-    await asTeacher.action(api.account.changePassword, { currentPassword: rahul.login!.password, newPassword: "Changed2026" });
-    expect(await errorCode(asTeacher.action(api.account.changePassword, { currentPassword: rahul.login!.password, newPassword: "Again2026x" }))).toBe("INVALID_ARGUMENT");
+    // The ORIGINAL demo password now verifies under the Login ID (real Convex Auth sign-in).
+    await enableSignIn();
+    expect(await signInResult(t, rahul.login!.loginId, rahul.login!.password)).toBe("OK");
+    expect(await signInResult(t, rahul.login!.loginId, "Changed2026")).toMatch(/InvalidSecret/);
 
     // Idempotent; the next generated teacher Login ID does not collide with the demo ones.
     const again = await t.mutation(internal.seed.upgradeDemoLoginIds, { apply: true });

@@ -1,8 +1,8 @@
 /**
  * One-off OPERATOR migration (internal: never callable from the browser):
  * existing STUDENT accounts move to the new sign-in rule — Login ID = scholar
- * number, password reset to the school default (STUDENT_DEFAULT_PASSWORD),
- * which must be changed at the next sign-in. Sessions are signed out.
+ * number, password reset to the school default (STUDENT_DEFAULT_PASSWORD).
+ * Sessions are signed out.
  *
  *   npx convex run studentLoginMigration:run '{"dryRun":true}'
  *   npx convex run studentLoginMigration:run '{}'
@@ -19,7 +19,7 @@ import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { internalAction, internalMutation, internalQuery, type QueryCtx } from "./_generated/server";
 import { conflict, notFound } from "./core/errors";
-import { PASSWORD_PROVIDER, STUDENT_DEFAULT_PASSWORD, isLoginIdTaken, renameLoginId, temporaryPasswordFields } from "./model/accounts";
+import { PASSWORD_PROVIDER, STUDENT_DEFAULT_PASSWORD, isLoginIdTaken, passwordIssuedFields, renameLoginId } from "./model/accounts";
 import { canonicalLoginId } from "./model/loginIds";
 import { accountTarget, writeAudit } from "./model/audit";
 import { DEMO_STUDENT_LOGIN_IDS } from "./demo.generated";
@@ -75,9 +75,7 @@ export const convertOne = internalMutation({
     if (!m || m.role !== "student" || !m.loginId) throw notFound("Student account");
     const from = m.loginId;
     await renameLoginId(ctx, m, to);
-    // Flag first (as accounts.issueTemporaryPassword does): if setting the password fails, the
-    // account is still forced to choose a new password rather than keeping a non-temporary one.
-    if (m.userId) await ctx.db.patch(m.userId, temporaryPasswordFields(Date.now(), true));
+    if (m.userId) await ctx.db.patch(m.userId, passwordIssuedFields(true));
     await writeAudit(ctx, {
       schoolId: m.schoolId, action: "account.login_id_changed", entity: { table: "schoolMemberships", id: m._id },
       summary: `Student login ${from} → ${to} (scholar number); password reset to the school default`,

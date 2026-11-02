@@ -26,11 +26,10 @@ export const SIGN_IN_FAILED = "The Login ID or password you entered is incorrect
 
 export function signInErrorMessage(error: unknown): string {
   const app = getAppError(error);
-  if (app?.code === "NO_SCHOOL_ACCESS" || app?.code === "TEMPORARY_PASSWORD_EXPIRED" || app?.code === "LOGIN_ID_REQUIRED") return app.message;
+  if (app?.code === "NO_SCHOOL_ACCESS" || app?.code === "LOGIN_ID_REQUIRED") return app.message;
   const raw = error instanceof Error ? error.message : String(error);
   if (/TooManyFailedAttempts/.test(raw)) return "Too many incorrect attempts. Please wait a while and try again.";
   if (/NO_SCHOOL_ACCESS/.test(raw)) return "Your account does not have active access to any school.";
-  if (/TEMPORARY_PASSWORD_EXPIRED/.test(raw)) return "This temporary password has expired. Ask your school office for a new one.";
   if (/LOGIN_ID_REQUIRED/.test(raw)) return "This sign-in page is out of date. Reload the page and sign in with your Login ID.";
   if (/InvalidSecret|InvalidAccountId|Invalid credentials/i.test(raw)) return SIGN_IN_FAILED;
   if (/Failed to fetch|NetworkError|network/i.test(raw)) return "We couldn't reach the server. Check your connection and try again.";

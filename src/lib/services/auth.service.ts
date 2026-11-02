@@ -1,6 +1,6 @@
 import type { Role, UserAccount } from "@/types/domain";
 import { readDb } from "@/lib/store/db";
-import { latency, ServiceError, requireActor } from "./core";
+import { ServiceError, requireActor } from "./core";
 import { clearSession, readSession, setDomainIdentity, subscribeSession, updateSession } from "./session-store";
 
 /**
@@ -115,13 +115,6 @@ export const mockAuthService = {
     const actor = requireActor();
     if (!actor.studentIds?.includes(studentId)) throw new ServiceError("FORBIDDEN", "This student is not linked to your account.");
     updateSession({ activeStudentId: studentId });
-  },
-
-  /** Password reset email is not wired up yet (no email provider) — simulated. */
-  async requestPasswordReset(email: string): Promise<void> {
-    await latency();
-    if (!/^\S+@\S+\.\S+$/.test(email)) throw new ServiceError("VALIDATION", "Enter a valid email address.");
-    // Always resolve — never reveal whether an account exists.
   },
 };
 

@@ -4,11 +4,10 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { motion } from "framer-motion";
-import { AlertCircle, Eye, EyeOff, ChevronDown, ArrowRight, KeyRound } from "lucide-react";
+import { AlertCircle, Eye, EyeOff, ChevronDown, ArrowRight } from "lucide-react";
 import { LogoMark } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
 import { Checkbox, FormField, Input } from "@/components/ui/form";
-import { Modal } from "@/components/ui/modal";
 import { useSession } from "./session-provider";
 import { canAccessRoute, landingRouteFor } from "@/lib/permissions";
 import { loginFormSchema, type LoginFormValues } from "./login-form";
@@ -27,7 +26,6 @@ export function LoginScreen() {
   const { login, status, user } = useSession();
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [forgotOpen, setForgotOpen] = useState(false);
   const [demoOpen, setDemoOpen] = useState(false);
 
   const { register, handleSubmit, setValue, formState: { errors, isSubmitting } } = useForm<FormValues>({
@@ -78,11 +76,10 @@ export function LoginScreen() {
               <PasswordInput show={showPassword} onToggle={() => setShowPassword((s) => !s)} {...register("password")} />
             </FormField>
 
-            <div className="flex items-center justify-between gap-3">
+            {/* No self-service recovery: only the school's administrators set passwords. */}
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
               <Checkbox label="Remember me" {...register("remember")} />
-              <button type="button" onClick={() => setForgotOpen(true)} className="text-[13px] font-medium text-lagoon hover:text-sapphire hover:underline">
-                Forgot password?
-              </button>
+              <p className="text-[12px] text-ink-muted">Can&apos;t sign in? Contact your school office.</p>
             </div>
 
             {error && (
@@ -127,7 +124,6 @@ export function LoginScreen() {
         <p className="mt-5 text-center text-[12px] text-ink-muted">© {new Date().getFullYear()} {school?.name ?? "Your school"} · {PRODUCT.name}</p>
       </motion.div>
 
-      <ForgotPasswordModal open={forgotOpen} onOpenChange={setForgotOpen} />
     </main>
   );
 }
@@ -144,22 +140,3 @@ const PasswordInput = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInput
     </div>
   );
 });
-
-function ForgotPasswordModal({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
-  return (
-    <Modal
-      open={open}
-      onOpenChange={onOpenChange}
-      title="Forgot your password?"
-      size="sm"
-      footer={<Button onClick={() => onOpenChange(false)}>Back to sign in</Button>}
-    >
-      <div className="flex flex-col items-center py-2 text-center">
-        <div className="grid h-12 w-12 place-items-center rounded-2xl bg-teal-soft text-lagoon"><KeyRound className="h-6 w-6" /></div>
-        <p className="mt-3 text-sm text-ink-soft">
-          Ask your school office for a new temporary password. They will give you your Login ID and a password you can change after signing in.
-        </p>
-      </div>
-    </Modal>
-  );
-}

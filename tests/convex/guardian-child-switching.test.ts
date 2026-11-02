@@ -61,11 +61,11 @@ describe("legacy guardian sign-ins grant nothing", () => {
     await t.run((ctx) => ctx.db.patch(A.memberships.legacyGuardian, { status: "suspended", loginId: "GRD-00001" }));
     expect(await errorCode(admin.mutation(api.memberships.updateAccess, { targetMembershipId: A.memberships.legacyGuardian, status: "active" }))).toBe("INVALID_ARGUMENT");
     expect(await errorCode(admin.action(api.accounts.setStatus, { targetMembershipId: A.memberships.legacyGuardian, status: "active" }))).toBe("INVALID_ARGUMENT");
-    expect(await errorCode(admin.action(api.accounts.issueTemporaryPassword, { targetMembershipId: A.memberships.legacyGuardian }))).toBe("INVALID_ARGUMENT");
+    expect(await errorCode(admin.action(api.credentials.requestPasswordOverwriteOtp, { targetMembershipId: A.memberships.legacyGuardian }))).toBe("INVALID_ARGUMENT");
     // An invited (never activated) legacy membership is not activated by creating its Login ID.
     await t.run((ctx) => ctx.db.patch(A.memberships.legacyGuardian, { status: "invited", userId: undefined }));
     const { activatePendingAccount } = await import("../../convex/model/accounts");
-    await expect(t.run((ctx) => activatePendingAccount(ctx, { loginId: "GRD-00001", mustChangePassword: true }))).rejects.toThrow(/created by your school/);
+    await expect(t.run((ctx) => activatePendingAccount(ctx, { loginId: "GRD-00001" }))).rejects.toThrow(/created by your school/);
   });
 
   test("only the three account roles grant access: no fourth role, no student link on a staff login", async () => {

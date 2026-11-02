@@ -11,11 +11,9 @@ import { liveStaffUser, liveWorkspaceUser } from "../../src/features/auth/live-u
 import { isLiveRoute, liveNavItems } from "../../src/lib/permissions/navigation";
 import { MODULE_KEYS } from "../../convex/core/modules";
 
-async function signedInAfterPasswordChange(t: T, membershipId: Id<"schoolMemberships">, temporaryPassword: string) {
+async function signedIn(t: T, membershipId: Id<"schoolMemberships">) {
   const m = (await t.run((ctx) => ctx.db.get(membershipId)))!;
-  const me = await as(t, m.userId!);
-  await me.action(api.account.changePassword, { currentPassword: temporaryPassword, newPassword: "Staff#2026x" });
-  return { me, userId: m.userId! };
+  return { me: await as(t, m.userId!), userId: m.userId! };
 }
 
 describe("live admin / teacher sessions", () => {
@@ -27,12 +25,12 @@ describe("live admin / teacher sessions", () => {
     const teacherId = await t.run((ctx) => ctx.db.insert("teachers", { schoolId: A.schoolId, employeeId: "E-77", firstName: "Nina", lastName: "Rao", specializationSubjectIds: [], status: "active" }));
     await t.run((ctx) => ctx.db.patch(A.sectionB, { classTeacherId: teacherId }));
     const acc = await admin.action(api.accounts.create, { person: { kind: "teacher", teacherId } });
-    const { me } = await signedInAfterPasswordChange(t, acc.membershipId, acc.temporaryPassword);
+    const { me } = await signedIn(t, acc.membershipId);
 
     const s = await me.query(api.users.session, {});
     expect(s.status).toBe("signedIn");
     if (s.status !== "signedIn") return;
-    expect(s.viewer).toMatchObject({ role: "teacher", loginId: acc.loginId, teacher: { teacherId }, students: [], mustChangePassword: false });
+    expect(s.viewer).toMatchObject({ role: "teacher", loginId: acc.loginId, teacher: { teacherId }, students: [] });
     expect(s.viewer.school.slug).toBe("alpha");
 
     const u = liveWorkspaceUser(s.viewer);
@@ -54,7 +52,7 @@ describe("live admin / teacher sessions", () => {
     const A = await createSchool(t, "solo");
     const r = await t.action(internal.setup.addAdministrator, { admin: { displayName: "Second Admin" } });
     const membership = await t.run(async (ctx) => (await ctx.db.query("schoolMemberships").withIndex("by_login_id", (q) => q.eq("loginId", r.loginId)).unique())!);
-    const { me } = await signedInAfterPasswordChange(t, membership._id, r.temporaryPassword);
+    const { me } = await signedIn(t, membership._id);
     const s = await me.query(api.users.session, {});
     if (s.status !== "signedIn") throw new Error(s.status);
     expect(s.viewer).toMatchObject({ role: "admin", loginId: r.loginId, teacher: null, students: [] });
@@ -65,7 +63,7 @@ describe("live admin / teacher sessions", () => {
     expect(Array.isArray(await me.query(api.attendance.dailyOverview, { date: "2026-07-01" }))).toBe(true);
   });
 
-  test("temporary password: session resolves but school data is refused until the change", async () => {
+  test("a newly issued password gives full access straight away (no forced change)", async () => {
     const t = makeTest();
     const A = await createSchool(t, "alpha");
     const admin = await as(t, A.users.admin);
@@ -74,8 +72,8 @@ describe("live admin / teacher sessions", () => {
     const m = (await t.run((ctx) => ctx.db.get(acc.membershipId)))!;
     const me = await as(t, m.userId!);
     const s = await me.query(api.users.session, {});
-    expect(s.status === "signedIn" && s.viewer.mustChangePassword).toBe(true);
-    expect(await errorCode(me.query(api.attendance.dailyOverview, { date: "2026-07-01" }))).toBe("PASSWORD_CHANGE_REQUIRED");
+    expect(s.status === "signedIn" && s.viewer.role === "teacher").toBe(true);
+    expect((await me.query(api.users.viewer, {})).role).toBe("teacher");
   });
 
   test("suspended membership, foreign membershipId and disabled users fail safely", async () => {
@@ -121,8 +119,8 @@ describe("live admin / teacher sessions", () => {
     // Module entitlements: a real session always carries the school's modules (here: all five, an
     // unconfigured school). Module filtering itself is tested in module-entitlements.test.ts.
     const modules = [...MODULE_KEYS];
-    expect(liveNavItems({ role: "teacher", permissionSets: [], modules }).map((i) => i.href)).toEqual(["/teacher/dashboard", "/teacher/classes", "/teacher/attendance", "/teacher/homework", "/teacher/examinations", "/teacher/timetable", "/teacher/notices", "/teacher/notifications", "/teacher/profile", "/teacher/settings"]);
-    expect(liveNavItems({ role: "admin", permissionSets: [], modules }).map((i) => i.href)).toEqual(["/admin/dashboard", "/admin/students", "/admin/promotions", "/admin/academics", "/admin/teachers", "/admin/accounts", "/admin/permissions", "/admin/attendance", "/admin/fees", "/admin/examinations", "/admin/timetable", "/admin/notices", "/admin/notifications", "/admin/reports", "/admin/audit", "/admin/settings", "/admin/profile"]);
+    expect(liveNavItems({ role: "teacher", permissionSets: [], modules }).map((i) => i.href)).toEqual(["/teacher/dashboard", "/teacher/classes", "/teacher/attendance", "/teacher/homework", "/teacher/examinations", "/teacher/timetable", "/teacher/notices", "/teacher/notifications", "/teacher/profile"]);
+    expect(liveNavItems({ role: "admin", permissionSets: [], modules }).map((i) => i.href)).toEqual(["/admin/dashboard", "/admin/students", "/admin/promotions", "/admin/academics", "/admin/teachers", "/admin/accounts", "/admin/permissions", "/admin/credentials", "/admin/attendance", "/admin/fees", "/admin/examinations", "/admin/timetable", "/admin/notices", "/admin/notifications", "/admin/reports", "/admin/audit", "/admin/settings", "/admin/profile"]);
     // A restricted (accountant-only) admin sees finance pages only.
     expect(liveNavItems({ role: "admin", permissionSets: ["accountant"], modules }).map((i) => i.href)).toEqual(["/admin/dashboard", "/admin/students", "/admin/fees", "/admin/notifications", "/admin/reports", "/admin/profile"]);
   });

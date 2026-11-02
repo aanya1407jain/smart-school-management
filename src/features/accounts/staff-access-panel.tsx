@@ -3,9 +3,11 @@
  * Administrative (admin-portal) logins: principals, office staff and
  * accountant-only logins. An administrator (users:manage) can add a login,
  * restrict or un-restrict it to the accountant (finance-only) permissions,
- * suspend / reactivate it and issue a new temporary password. Everything is
- * enforced and audited on the server (accounts.*, memberships.updateAccess);
- * nobody can change their own access here.
+ * suspend / reactivate it, issue its first password, and reset its password
+ * (confirmed with a one-time code emailed to the acting administrator).
+ * Everything is enforced and audited on the server (accounts.*,
+ * credentials.*, memberships.updateAccess); nobody can change their own
+ * access or password here.
  */
 import { useState } from "react";
 import Link from "next/link";
@@ -20,12 +22,13 @@ import { useSchoolAction, useSchoolMutation, useSchoolQuery } from "@/lib/convex
 import { errorMessage } from "@/lib/convex/errors";
 import { canonicalLoginId, LOGIN_ID_RULES_TEXT } from "@convex/model/loginIds";
 import { CredentialsModal, type IssuedCredential } from "./credentials-modal";
+import { PasswordResetDialog, type ResetTarget } from "./password-reset-dialog";
 
 type Row = { membershipId: Id<"schoolMemberships">; loginId: string | null; displayName: string; email: string | null; state: "pending" | "active" | "suspended"; accountantOnly: boolean; isSelf: boolean; customAccess: string | null };
-type Pending = { row: Row; action: "reset" | "suspend" | "reactivate" | "restrict" | "unrestrict" };
+type Pending = { row: Row; action: "issue" | "suspend" | "reactivate" | "restrict" | "unrestrict" };
 
 const COPY: Record<Pending["action"], { title: string; body: (n: string) => string; label: string; danger?: boolean }> = {
-  reset: { title: "Issue a new temporary password?", body: (n) => `${n} will be signed out everywhere and must choose a new password at next sign-in.`, label: "Issue password" },
+  issue: { title: "Issue the first password?", body: (n) => `${n} gets a password to sign in with. It is shown to you once to hand over.`, label: "Issue password" },
   suspend: { title: "Suspend this login?", body: (n) => `${n} is signed out everywhere and cannot sign in until reactivated. Records they created stay.`, label: "Suspend", danger: true },
   reactivate: { title: "Reactivate this login?", body: (n) => `${n} can sign in again with their existing password.`, label: "Reactivate" },
   restrict: { title: "Restrict to accountant access?", body: (n) => `${n} will only see fees, finance reports and student fee ledgers — no academics, attendance, settings or account management.`, label: "Restrict", danger: true },
@@ -37,7 +40,8 @@ export function StaffAccessPanel() {
   const rows = useSchoolQuery(api.accounts.listStaffAccounts, {}) as Row[] | undefined;
   const updateAccess = useSchoolMutation(api.memberships.updateAccess);
   const setStatus = useSchoolAction(api.accounts.setStatus);
-  const issue = useSchoolAction(api.accounts.issueTemporaryPassword);
+  const issue = useSchoolAction(api.accounts.issuePendingCredentials);
+  const [resetting, setResetting] = useState<ResetTarget | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const [busy, setBusy] = useState(false);
   const [issued, setIssued] = useState<IssuedCredential[] | null>(null);
@@ -48,10 +52,14 @@ export function StaffAccessPanel() {
     const { row, action } = pending;
     setBusy(true);
     try {
-      if (action === "reset") setIssued([await issue({ targetMembershipId: row.membershipId })]);
+      if (action === "issue") {
+        const [r] = await issue({ targetMembershipIds: [row.membershipId] });
+        if (!r.ok) { toast({ tone: "error", title: "Action failed", description: r.error }); return; }
+        setIssued([r]);
+      }
       else if (action === "suspend" || action === "reactivate") await setStatus({ targetMembershipId: row.membershipId, status: action === "suspend" ? "suspended" : "active" });
       else await updateAccess({ targetMembershipId: row.membershipId, permissionSets: action === "restrict" ? ["accountant"] : [] });
-      if (action !== "reset") toast({ title: "Access updated", description: row.displayName });
+      if (action !== "issue") toast({ title: "Access updated", description: row.displayName });
       setPending(null);
     } catch (e) {
       toast({ tone: "error", title: "Action failed", description: errorMessage(e) });
@@ -77,7 +85,8 @@ export function StaffAccessPanel() {
               <DropdownMenu>
                 <DropdownTrigger asChild><Button variant="ghost" size="icon-sm" aria-label={`Access actions for ${r.displayName}`}><MoreHorizontal className="h-4 w-4" /></Button></DropdownTrigger>
                 <DropdownContent>
-                  {r.state !== "suspended" && <DropdownItem onSelect={() => setPending({ row: r, action: "reset" })}><KeyRound className="h-4 w-4" /> {r.state === "pending" ? "Issue password" : "Reset password"}</DropdownItem>}
+                  {r.state === "pending" && <DropdownItem onSelect={() => setPending({ row: r, action: "issue" })}><KeyRound className="h-4 w-4" /> Issue password</DropdownItem>}
+                  {r.state === "active" && <DropdownItem onSelect={() => setResetting({ membershipId: r.membershipId, name: r.displayName, loginId: r.loginId })}><KeyRound className="h-4 w-4" /> Reset password</DropdownItem>}
                   {r.customAccess
                     ? <DropdownItem onSelect={() => { window.location.href = "/admin/permissions"; }}><ShieldCheck className="h-4 w-4" /> Edit permissions</DropdownItem>
                     : r.accountantOnly
@@ -96,6 +105,7 @@ export function StaffAccessPanel() {
       )}
       {adding && <AddStaffLoginModal onClose={() => setAdding(false)} onIssued={(c) => { setAdding(false); setIssued([c]); }} />}
       {issued && <CredentialsModal open onClose={() => setIssued(null)} credentials={issued} />}
+      <PasswordResetDialog target={resetting} onClose={() => setResetting(null)} />
     </Card>
   );
 }

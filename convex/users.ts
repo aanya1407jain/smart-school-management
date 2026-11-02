@@ -24,7 +24,6 @@ import { activeMembershipsOf, getCurrentUser, requireActor, type Actor } from ".
 import { linkedStudentIds } from "./core/authorization";
 import { AppError } from "./core/errors";
 import { fullName, teacherDisplayName } from "./model/academics";
-import { temporaryPasswordExpiresAt } from "./model/accounts";
 import { enabledList, moduleStateOf } from "./model/modules";
 
 async function membershipsOf(ctx: QueryCtx, userId: Id<"users">) {
@@ -42,7 +41,6 @@ async function membershipsOf(ctx: QueryCtx, userId: Id<"users">) {
 /** The viewer object for a resolved actor (shared by `viewer` and `session`). */
 async function buildViewer(ctx: QueryCtx, actor: Actor) {
   const school = (await ctx.db.get(actor.schoolId))!;
-  const user = await ctx.db.get(actor.userId);
   const teacher = actor.teacherId ? await ctx.db.get(actor.teacherId) : null;
   const studentIds = await linkedStudentIds(ctx, actor);
   const students = [];
@@ -57,14 +55,6 @@ async function buildViewer(ctx: QueryCtx, actor: Actor) {
     displayName: actor.displayName,
     loginId: actor.loginId,
     email: actor.email,
-    /**
-     * The account still uses an administrator-issued temporary password. While
-     * true the server refuses every school function (PASSWORD_CHANGE_REQUIRED)
-     * until account.changePassword succeeds.
-     */
-    mustChangePassword: user?.mustChangePassword === true,
-    /** When the temporary password stops working (server time, ms), or null. */
-    temporaryPasswordExpiresAt: user ? temporaryPasswordExpiresAt(user) : null,
     permissions: [...actor.permissions].sort(),
     permissionSets: [...actor.permissionSets],
     /**
@@ -117,9 +107,7 @@ export const session = query({
     if (!user) return { status: "signedOut" as const };
     const memberships = await membershipsOf(ctx, user._id);
     try {
-      // The only school-scoped read allowed during a forced password change:
-      // the UI needs it to send the person to /account.
-      const actor = await requireActor(ctx, membershipId, { allowPendingPasswordChange: true });
+      const actor = await requireActor(ctx, membershipId);
       return { status: "signedIn" as const, viewer: await buildViewer(ctx, actor), memberships };
     } catch (e) {
       if (e instanceof AppError && (e.data.code === "NO_SCHOOL_ACCESS" || e.data.code === "SCHOOL_SELECTION_REQUIRED")) {

@@ -268,12 +268,9 @@ async function main() {
   const temp = issued.ok ? issued.temporaryPassword : "";
   const ishita = await signIn(newStudent.loginId!.toLowerCase(), temp);
   const sIshita = await ishita.query(api.users.session, {});
-  check("New student signs in; role and school come from the server; must change password",
-    sIshita.status === "signedIn" && sIshita.viewer.role === "student" && sIshita.viewer.school.slug === vAdmin.school.slug && sIshita.viewer.mustChangePassword === true && sIshita.viewer.student?.name === `Ishita ${surname}`);
-  await expectCode("Temporary password: school functions are refused until it is changed", () => ishita.query(api.users.viewer, {}), "PASSWORD_CHANGE_REQUIRED");
-  await expectCode("Temporary password: student data is refused until it is changed", () => ishita.query(api.attendance.studentHistory, { studentId: newStudent.studentId }), "PASSWORD_CHANGE_REQUIRED");
-  await ishita.action(api.account.changePassword, { currentPassword: temp, newPassword: "Ishita#2026" });
-  check("After the change the student can use the portal", (await ishita.query(api.users.viewer, {})).role === "student");
+  check("New student signs in; role and school come from the server",
+    sIshita.status === "signedIn" && sIshita.viewer.role === "student" && sIshita.viewer.school.slug === vAdmin.school.slug && sIshita.viewer.student?.name === `Ishita ${surname}`);
+  check("No forced password change: the student uses the portal straight away", (await ishita.query(api.users.viewer, {})).role === "student");
   // Student portal: the new account resolves ITS OWN student record server-side.
   const pIshita = await ishita.query(api.studentPortal.myProfile, {});
   check("Student portal: new account resolves its own record, class, section and year",
@@ -300,14 +297,11 @@ async function main() {
     }
     check("Bulk account: run completes with one account", issued.length === 1 && (await admin.query(api.bulkAccounts.getJob, { jobId })).status === "completed");
     const cred = issued[0];
-    const bulkStudent = await signIn(cred.loginId, cred.temporaryPassword);
-    await expectCode("Bulk account: portal locked until the temporary password is changed", () => bulkStudent.query(api.studentPortal.myProfile, {}), "PASSWORD_CHANGE_REQUIRED");
-    await bulkStudent.action(api.account.changePassword, { currentPassword: cred.temporaryPassword, newPassword: "BulkPortal#2026" });
-    const pb = await (await signIn(cred.loginId, "BulkPortal#2026")).query(api.studentPortal.myProfile, {});
+    const pb = await (await signIn(cred.loginId, cred.temporaryPassword)).query(api.studentPortal.myProfile, {});
     check("Bulk account: signs in and resolves its own record (10-C, current year)",
       pb.state === "ok" && pb.student.studentId === bulkImported.studentId && pb.enrollment?.sectionDisplayName === "10-C" && typeof pb.enrollment.rollNo === "number");
     // Every student-portal module resolves for the bulk-created account (real records, own only).
-    const bulkClient = await signIn(cred.loginId, "BulkPortal#2026");
+    const bulkClient = await signIn(cred.loginId, cred.temporaryPassword);
     const [tt, hw, res, fees, notices] = await Promise.all([
       bulkClient.query(api.timetable.myStudentTimetable, {}), bulkClient.query(api.homework.myHomework, {}), bulkClient.query(api.exams.myResults, {}),
       bulkClient.query(api.fees.myFees, {}), bulkClient.query(api.studentPortal.myNotices, { today: TODAY }),
@@ -332,56 +326,30 @@ async function main() {
       teacherView?.access === "assigned" && teacherView.parentContacts.every((g) => g.phone === null) && teacherView.fees === null);
     check("A malformed (demo) id is simply not found", (await admin.query(api.students.getStudentProfile, { studentId: "stu_aarav" })) === null);
   }
-  check("After changing it: temp password stops working, the new one works, flag cleared",
-    (await signInFails(newStudent.loginId!, temp)) !== null &&
-    (await (await signIn(newStudent.loginId!, "Ishita#2026")).query(api.users.session, {})).status === "signedIn");
   await expectCode("Duplicate Login ID is rejected", async () => {
     const t = await admin.mutation(api.imports.commitTeacherRows, { rows: [{ rowNumber: 2, values: { fullName: "Dup Login", loginId: newStudent.loginId!.toLowerCase() } }], createAccounts: true, today: TODAY });
     return t;
   }, "INVALID_ARGUMENT");
 
-  // Admin-assisted reset: new temporary password, old one dead, sessions revoked, forced change again.
-  const beforeReset = await signIn(newStudent.loginId!, "Ishita#2026");
-  await expectCode("Teacher cannot reset passwords", () => rahul.action(api.accounts.issueTemporaryPassword, { targetMembershipId: newStudent.membershipId! }), "FORBIDDEN");
-  const reset = await admin.action(api.accounts.issueTemporaryPassword, { targetMembershipId: newStudent.membershipId! });
-  check("Reset: the previous password stops working", (await signInFails(newStudent.loginId!, "Ishita#2026")) !== null);
-  let resetSessionDead = false;
-  try { await beforeReset.query(api.users.session, {}); } catch { resetSessionDead = true; }
-  check("Reset: existing sessions are revoked", resetSessionDead || (await beforeReset.query(api.users.session, {})).status !== "signedIn");
-  const afterReset = await signIn(newStudent.loginId!, reset.temporaryPassword);
-  await expectCode("Reset: the forced password change applies again", () => afterReset.query(api.users.viewer, {}), "PASSWORD_CHANGE_REQUIRED");
-  await afterReset.action(api.account.changePassword, { currentPassword: reset.temporaryPassword, newPassword: "Ishita#2026" });
+  // Password resets are OTP-authorized by email (convex/credentials.ts); the full flow is covered by
+  // tests/convex/credentials.test.ts. Here: non-admins are refused on the deployment.
+  await expectCode("Teacher cannot reset passwords", () => rahul.action(api.credentials.requestPasswordOverwriteOtp, { targetMembershipId: newStudent.membershipId! }), "FORBIDDEN");
+  await expectCode("Teacher cannot look up credentials", () => rahul.query(api.credentials.search, { query: newStudent.loginId! }), "FORBIDDEN");
 
   await expectCode("Teacher cannot disable accounts", () => rahul.action(api.accounts.setStatus, { targetMembershipId: newStudent.membershipId!, status: "suspended" }), "FORBIDDEN");
-  const live = await signIn(newStudent.loginId!, "Ishita#2026");
+  const live = await signIn(newStudent.loginId!, temp);
   await admin.action(api.accounts.setStatus, { targetMembershipId: newStudent.membershipId!, status: "suspended" });
   await expectCode("Disabled account's existing session is revoked immediately", () => live.query(api.users.viewer, {}), "UNAUTHENTICATED");
-  check("Disabled account cannot sign in", (await signInFails(newStudent.loginId!, "Ishita#2026")) !== null);
-  await expectCode("Disabled account cannot use the password-change endpoint", () => live.action(api.account.changePassword, { currentPassword: "Ishita#2026", newPassword: "Other#2026x" }), "NO_SCHOOL_ACCESS");
+  check("Disabled account cannot sign in", (await signInFails(newStudent.loginId!, temp)) !== null);
   await admin.action(api.accounts.setStatus, { targetMembershipId: newStudent.membershipId!, status: "active" });
-  check("Re-enabled account signs in again", (await (await signIn(newStudent.loginId!, "Ishita#2026")).query(api.users.session, {})).status === "signedIn");
+  check("Re-enabled account signs in again", (await (await signIn(newStudent.loginId!, temp)).query(api.users.session, {})).status === "signedIn");
   await expectCode("Admin cannot disable their own account", () => admin.action(api.accounts.setStatus, { targetMembershipId: vAdmin.membershipId, status: "suspended" }), "FORBIDDEN");
 
   const firstPage = await admin.query(api.memberships.list, { paginationOpts: { numItems: 5, cursor: null } });
   const secondPage = await admin.query(api.memberships.list, { paginationOpts: { numItems: 5, cursor: firstPage.continueCursor } });
   check("memberships.list paginates without overlap", firstPage.page.length === 5 && !firstPage.isDone && secondPage.page.every((m) => !firstPage.page.some((x) => x._id === m._id)));
 
-  // ---------------------------------------------------------------- change password (Convex Auth credentials)
-  {
-    const loginId = ID.meera;
-    const NEW = "Changed@456";
-    const me = await signIn(loginId, PW.welcome);
-    await expectCode("Change password: wrong current password rejected", () => me.action(api.account.changePassword, { currentPassword: "not-it-1", newPassword: NEW }), "INVALID_ARGUMENT");
-    await expectCode("Change password: weak new password rejected", () => me.action(api.account.changePassword, { currentPassword: PW.welcome, newPassword: "short" }), "INVALID_ARGUMENT");
-    await expectCode("Change password: signed out rejected", () => anon.action(api.account.changePassword, { currentPassword: PW.welcome, newPassword: NEW }), "UNAUTHENTICATED");
-    await me.action(api.account.changePassword, { currentPassword: PW.welcome, newPassword: NEW });
-    let oldWorks = true;
-    try { await signIn(loginId, PW.welcome); } catch { oldWorks = false; }
-    const again = await signIn(loginId, NEW);
-    check("Change password: old password stops working, new one signs in", !oldWorks && (await again.query(api.users.viewer, {})).loginId === loginId);
-    await again.action(api.account.changePassword, { currentPassword: NEW, newPassword: PW.welcome }); // restore the demo password
-    check("Change password: restored demo password signs in", !!(await signIn(loginId, PW.welcome)));
-  }
+  // (Self-service password change was removed: only administrators set passwords, see convex/credentials.ts.)
 
   console.log(`\n${passed}/${passed + failed} passed`);
   if (failed) process.exit(1);

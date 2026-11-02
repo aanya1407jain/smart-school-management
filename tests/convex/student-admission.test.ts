@@ -129,7 +129,6 @@ describe("createStudentWithEnrollment", () => {
     const m = await t.run((ctx) => ctx.db.get(acc.membershipId));
     expect(m).toMatchObject({ role: "student", studentId: r.studentId, loginId: "SR501" }); // Login ID = scholar number
     const me = await as(t, m!.userId!);
-    await me.action(api.account.changePassword, { currentPassword: acc.temporaryPassword, newPassword: "Neel#2026x" });
     const p = await me.query(api.studentPortal.myProfile, {});
     expect(p.state === "ok" && p.student.studentId === r.studentId && p.enrollment?.sectionDisplayName === "8-A").toBe(true);
     expect(await count(t, "students")).toBe(students);

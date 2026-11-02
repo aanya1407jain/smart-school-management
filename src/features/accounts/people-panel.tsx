@@ -16,6 +16,7 @@ import { useSchoolAction, useSchoolMutation, useSchoolPaginatedQuery, useSchoolQ
 import { errorMessage } from "@/lib/convex/errors";
 import { canonicalLoginId, LOGIN_ID_RULES_TEXT } from "@convex/model/loginIds";
 import { CredentialsModal, type IssuedCredential } from "./credentials-modal";
+import { PasswordResetDialog, type ResetTarget } from "./password-reset-dialog";
 import { AddPersonModal } from "./add-person-modal";
 import { BulkAccountRun } from "./bulk-account-run";
 
@@ -53,14 +54,15 @@ export function PeoplePanel({ kind, canAdd }: { kind: Kind; canAdd: boolean }) {
   const [runJob, setRunJob] = useState<{ id: Id<"bulkAccountJobs">; autoPrepare: boolean } | null>(null);
   const [starting, setStarting] = useState(false);
   const create = useSchoolAction(api.accounts.create);
-  const issue = useSchoolAction(api.accounts.issueTemporaryPassword);
+  const issue = useSchoolAction(api.accounts.issuePendingCredentials);
   const setStatus = useSchoolAction(api.accounts.setStatus);
 
   const [busy, setBusy] = useState<string | null>(null);
   const [creating, setCreating] = useState<Person | null>(null);
   const [customId, setCustomId] = useState("");
-  const [confirm, setConfirm] = useState<{ person: Person; action: "reset" | "disable" | "enable" } | null>(null);
+  const [confirm, setConfirm] = useState<{ person: Person; action: "issue" | "disable" | "enable" } | null>(null);
   const [issued, setIssued] = useState<IssuedCredential[] | null>(null);
+  const [resetting, setResetting] = useState<ResetTarget | null>(null);
   const [adding, setAdding] = useState(false);
 
   const noun = kind === "student" ? "student" : "teacher";
@@ -90,8 +92,9 @@ export function PeoplePanel({ kind, canAdd }: { kind: Kind; canAdd: boolean }) {
     const { person, action } = confirm;
     const id = person.account!.membershipId;
     void run(`${action}:${person.personId}`, async () => {
-      if (action === "reset") {
-        const r = await issue({ targetMembershipId: id });
+      if (action === "issue") {
+        const [r] = await issue({ targetMembershipIds: [id] });
+        if (!r.ok) { toast({ tone: "error", title: "Action failed", description: r.error }); return; }
         setIssued([r]);
       } else {
         await setStatus({ targetMembershipId: id, status: action === "disable" ? "suspended" : "active" });
@@ -135,9 +138,14 @@ export function PeoplePanel({ kind, canAdd }: { kind: Kind; canAdd: boolean }) {
           <Button variant="ghost" size="icon-sm" aria-label={`Account actions for ${p.name}`}><MoreHorizontal className="h-4 w-4" /></Button>
         </DropdownTrigger>
         <DropdownContent>
-          {state !== "suspended" && (
-            <DropdownItem onSelect={() => setConfirm({ person: p, action: "reset" })}>
-              <KeyRound className="h-4 w-4" /> {state === "pending" ? "Issue password" : "Reset password"}
+          {state === "pending" && (
+            <DropdownItem onSelect={() => setConfirm({ person: p, action: "issue" })}>
+              <KeyRound className="h-4 w-4" /> Issue password
+            </DropdownItem>
+          )}
+          {state === "active" && (
+            <DropdownItem onSelect={() => setResetting({ membershipId: p.account!.membershipId, name: p.name, loginId: p.account!.loginId })}>
+              <KeyRound className="h-4 w-4" /> Reset password
             </DropdownItem>
           )}
           {state === "active" && <DropdownItem tone="danger" onSelect={() => setConfirm({ person: p, action: "disable" })}><PowerOff className="h-4 w-4" /> Disable account</DropdownItem>}
@@ -299,7 +307,7 @@ export function PeoplePanel({ kind, canAdd }: { kind: Kind; canAdd: boolean }) {
         open={!!creating}
         onOpenChange={(o) => { if (!o) setCreating(null); }}
         title={`Create account for ${creating?.name ?? ""}`}
-        description="A Login ID is generated automatically unless you enter one. A temporary password is issued once."
+        description="A Login ID is generated automatically unless you enter one. The first password is shown once."
         size="sm"
         footer={
           <>
@@ -316,13 +324,13 @@ export function PeoplePanel({ kind, canAdd }: { kind: Kind; canAdd: boolean }) {
       <ConfirmDialog
         open={!!confirm}
         onOpenChange={(o) => { if (!o) setConfirm(null); }}
-        title={confirm?.action === "disable" ? "Disable account?" : confirm?.action === "enable" ? "Enable account?" : "Issue a new temporary password?"}
+        title={confirm?.action === "disable" ? "Disable account?" : confirm?.action === "enable" ? "Enable account?" : "Issue the first password?"}
         description={
           confirm?.action === "disable"
             ? `${confirm.person.name} will be signed out everywhere and cannot sign in until the account is enabled again.`
             : confirm?.action === "enable"
               ? `${confirm?.person.name} will be able to sign in again with their existing password.`
-              : `${confirm?.person.name ?? ""} will be signed out everywhere; their current password stops working. They must choose a new password after signing in.`
+              : `${confirm?.person.name ?? ""} gets a password to sign in with. It is shown to you once to hand over.`
         }
         confirmLabel={confirm?.action === "disable" ? "Disable" : confirm?.action === "enable" ? "Enable" : "Issue password"}
         tone={confirm?.action === "disable" ? "danger" : "primary"}
@@ -332,6 +340,7 @@ export function PeoplePanel({ kind, canAdd }: { kind: Kind; canAdd: boolean }) {
 
       {runJob && <BulkAccountRun jobId={runJob.id} autoPrepare={runJob.autoPrepare} onClose={() => { setRunJob(null); setSelection(EMPTY); }} />}
       <CredentialsModal open={!!issued} onClose={() => setIssued(null)} credentials={issued ?? []} />
+      <PasswordResetDialog target={resetting} onClose={() => setResetting(null)} />
       {canAdd && <AddPersonModal kind={kind} open={adding} onClose={() => setAdding(false)} onIssued={(c) => setIssued(c)} />}
     </Card>
   );
