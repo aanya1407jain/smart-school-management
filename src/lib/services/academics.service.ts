@@ -119,6 +119,37 @@ export const mockAcademicsService = {
     });
   },
 
+  /**
+   * Which of a year's classes study a subject (the subject-first view of each
+   * class's subjectIds). A class whose sections still have a teacher for the subject
+   * cannot be removed — remove the assignment first.
+   */
+  async setSubjectClasses(input: { subjectId: ID; academicYearId: ID; classIds: ID[] }) {
+    const { subjectId, academicYearId, classIds } = input;
+    return handle(() => {
+      requirePermission(requireActor(), "academics:manage");
+      return writeDb((db) => {
+        const subject = db.subjects.find((s) => s.id === subjectId);
+        if (!subject) throw notFound("Subject");
+        const yearClasses = db.classes.filter((x) => x.academicYearId === academicYearId);
+        const adding = yearClasses.filter((c) => classIds.includes(c.id) && !c.subjectIds.includes(subjectId));
+        const removing = yearClasses.filter((c) => !classIds.includes(c.id) && c.subjectIds.includes(subjectId));
+        // Check every removal before changing anything.
+        for (const c of removing) {
+          const sectionIds = new Set(db.sections.filter((s) => s.classId === c.id).map((s) => s.id));
+          if (db.teacherAssignments.some((a) => a.subjectId === subjectId && sectionIds.has(a.sectionId) && a.academicYearId === academicYearId)) {
+            throw new ServiceError("CONFLICT", `${subject.name} still has a teacher assigned in ${c.name}. Remove the assignment first.`);
+          }
+        }
+        for (const c of adding) c.subjectIds.push(subjectId);
+        for (const c of removing) c.subjectIds = c.subjectIds.filter((id) => id !== subjectId);
+        const added = adding.length;
+        const removed = removing.length;
+        return { added, removed };
+      });
+    });
+  },
+
   async createSection(input: { classId: ID; name: string; room: string; capacity: number; classTeacherId: ID | null }) {
     return handle(() => {
       requirePermission(requireActor(), "academics:manage");

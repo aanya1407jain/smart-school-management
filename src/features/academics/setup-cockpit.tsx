@@ -1,100 +1,92 @@
 "use client";
 /**
- * Academics → Year setup cockpit: the six setup steps as an interactive
- * horizontal rail (click a step to open its tab) plus the two health metrics
- * that tell the office whether the year is ready — teacher coverage (class
- * teachers per section) and student enrollment (enrolled vs active records).
+ * Academics → year summary: one KPI strip (classes, sections, class-teacher
+ * coverage, students placed). While the year's setup is unfinished a single
+ * "next step" line sits above it; once every step is done nothing else shows.
  */
-import type { CSSProperties } from "react";
-import { BookMarked, CalendarRange, Check, GraduationCap, Layers, School, UserCheck } from "lucide-react";
-import { GlassCard, ProgressRing } from "@/components/ui";
+import { ArrowRight, Layers, School, UserCheck, Users } from "lucide-react";
+import type { ComponentType, ReactNode } from "react";
 import { cn } from "@/lib/utils/cn";
 
 export type CockpitStep = { tab: string; key: string; title: string; metric: string | null; detail: string; done: boolean };
 
-const ICONS: Record<string, typeof Check> = { years: CalendarRange, classes: School, sections: Layers, subjects: BookMarked, enrollments: GraduationCap, assignments: UserCheck };
-
 export function SetupCockpit({
-  steps, onStep, coverage, enrollment,
+  steps, onStep, classes, sections, yearName, coverage, enrollment,
 }: {
   steps: CockpitStep[];
   onStep: (tab: string) => void;
-  /** Teacher coverage percentage (null = nothing to cover yet) and its caption. */
-  coverage: { pct: number | null; caption: string };
-  /** Enrolled vs active students and a caption; null when Student Management is off. */
-  enrollment: { enrolled: number; active: number; caption: string } | null;
+  classes: number;
+  sections: number;
+  yearName: string | null;
+  /** Sections with a class teacher, out of all sections. */
+  coverage: { assigned: number; total: number };
+  /** Enrolled vs active students; null when Student Management is off. */
+  enrollment: { enrolled: number; active: number } | null;
 }) {
   const doneCount = steps.filter((s) => s.done).length;
-  const enrolledPct = enrollment && enrollment.active ? (enrollment.enrolled / enrollment.active) * 100 : 0;
+  const next = steps.find((s) => !s.done);
+  const perClass = classes ? (sections / classes).toFixed(1).replace(/\.0$/, "") : null;
   return (
-    <div className="space-y-4">
-      <GlassCard className="spatial p-5">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h2 className="text-base font-semibold text-sapphire">Year setup workflow</h2>
-            <p className="text-[13px] text-ink-muted">Each step builds on the previous one. Select a step to open it.</p>
-          </div>
-          <span className={cn("figures inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-bold ring-1 ring-inset", doneCount === steps.length ? "bg-teal-soft text-lagoon ring-teal/25" : "bg-lavender/25 text-plum ring-mauve/30")}>
-            {doneCount}/{steps.length} complete
-          </span>
-        </div>
-        <ol className="scrollbar-thin -mx-1 flex snap-x gap-2 relative overflow-x-auto px-1 pb-2 lg:grid lg:grid-cols-6 lg:overflow-visible">
-          {steps.map((s, i) => {
-            const Icon = ICONS[s.key] ?? Check;
-            return (
-              <li key={s.key} className="stagger min-w-[10.5rem] snap-start lg:min-w-0" style={{ "--stagger-i": i } as CSSProperties}>
-                <button
-                  type="button"
-                  onClick={() => onStep(s.tab)}
-                  className={cn(
-                    "group relative flex h-full w-full flex-col gap-2 rounded-2xl border p-3 text-left transition-all duration-200 ease-out hover:shadow-ambient-lg focus-visible:outline-none focus-visible:shadow-focus active:scale-[0.98]",
-                    s.done ? "border-line bg-white" : "border-dashed border-mauve/40 bg-white/40",
-                  )}
-                >
-                  {/* Connector to the next step (wide screens). */}
-                  {i < steps.length - 1 && <span aria-hidden className={cn("absolute -right-2 top-7 hidden h-0.5 w-2 lg:block", s.done ? "bg-teal/50" : "bg-line")} />}
-                  <span className="flex items-center justify-between gap-2">
-                    <span className={cn("grid h-9 w-9 place-items-center rounded-xl ring-1 ring-inset transition-shadow group-hover:shadow-glow", s.done ? "bg-primary text-white ring-transparent" : "bg-heather/25 text-ink-soft ring-line/70")}>
-                      <Icon className="h-[18px] w-[18px]" aria-hidden />
-                    </span>
-                    {s.done ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10.5px] font-bold text-emerald-700 ring-1 ring-inset ring-emerald-600/20">
-                        <Check className="h-3 w-3" aria-hidden /> Done
-                      </span>
-                    ) : <span className="rounded-full bg-lavender/30 px-2 py-0.5 text-[10.5px] font-bold text-plum">To do</span>}
-                  </span>
-                  <span>
-                    <span className="block text-[11px] font-semibold uppercase tracking-wide text-ink-muted">Step {i + 1}</span>
-                    <span className="block text-[13.5px] font-semibold leading-5 text-ink">
-                      {s.title}{s.metric && <span className="figures ml-1 font-mono text-[12px] text-lagoon">({s.metric})</span>}
-                    </span>
-                    <span className="mt-0.5 line-clamp-2 block text-[12px] leading-4 text-ink-muted">{s.detail}</span>
-                  </span>
-                </button>
-              </li>
-            );
-          })}
-        </ol>
-      </GlassCard>
+    <div className="space-y-3">
+      {next && (
+        <button
+          type="button"
+          onClick={() => onStep(next.tab)}
+          className="group flex w-full items-center gap-3 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-2.5 text-left text-[13px] text-amber-900 transition-colors hover:bg-amber-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40"
+        >
+          <span className="figures shrink-0 rounded-md bg-white px-1.5 py-0.5 text-[12px] font-semibold ring-1 ring-inset ring-amber-200">{doneCount}/{steps.length}</span>
+          <span className="min-w-0 flex-1 truncate">Year setup · next: <b className="font-semibold">{next.title}</b> <span className="text-amber-800/80">— {next.detail}</span></span>
+          <ArrowRight className="h-4 w-4 shrink-0 transition-transform group-hover:translate-x-0.5" aria-hidden />
+        </button>
+      )}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <GlassCard className="spatial flex items-center gap-4 p-4 transition-transform duration-200">
-          <ProgressRing value={coverage.pct} size={78} stroke={7} />
-          <div className="min-w-0">
-            <p className="text-[12px] font-semibold uppercase tracking-wide text-ink-muted">Teacher coverage</p>
-            <p className="figures font-mono text-2xl font-bold text-sapphire">{coverage.pct === null ? "—" : `${Math.round(coverage.pct)}%`}</p>
-            <p className="text-[12.5px] text-ink-muted">{coverage.caption}</p>
-          </div>
-        </GlassCard>
-        <GlassCard className="spatial flex items-center gap-4 p-4 transition-transform duration-200">
-          <ProgressRing value={enrollment ? enrolledPct : null} size={78} stroke={7} tone="purple" />
-          <div className="min-w-0">
-            <p className="text-[12px] font-semibold uppercase tracking-wide text-ink-muted">Student enrollment</p>
-            <p className="figures font-mono text-2xl font-bold text-sapphire">{enrollment ? `${enrollment.enrolled} / ${enrollment.active}` : "—"}</p>
-            <p className="text-[12.5px] text-ink-muted">{enrollment ? enrollment.caption : "Student Management is not enabled"}</p>
-          </div>
-        </GlassCard>
-      </div>
+      <section aria-label={yearName ? `${yearName} at a glance` : "Year at a glance"} className="grid grid-cols-2 overflow-hidden rounded-xl border border-line bg-white shadow-sm lg:grid-cols-4">
+        <Kpi icon={School} label="Classes" value={classes} caption={yearName ? `In ${yearName}` : "No current year"} onClick={() => onStep("classes")} />
+        <Kpi icon={Layers} label="Sections" value={sections} caption={perClass ? `≈ ${perClass} per class` : "Add a class first"} onClick={() => onStep("classes")} />
+        <Kpi
+          icon={UserCheck}
+          label="Class teachers"
+          value={<>{coverage.assigned}<span className="text-base font-medium text-ink-muted"> / {coverage.total}</span></>}
+          caption={coverage.total === 0 ? "No sections yet" : `${coverage.assigned} assigned / ${coverage.total} sections`}
+          progress={coverage.total ? (coverage.assigned / coverage.total) * 100 : null}
+          onClick={() => onStep(steps.some((s) => s.tab === "assignments") ? "assignments" : "classes")}
+        />
+        <Kpi
+          icon={Users}
+          label="Students placed"
+          value={enrollment ? <>{enrollment.enrolled}<span className="text-base font-medium text-ink-muted"> / {enrollment.active}</span></> : "—"}
+          caption={!enrollment ? "Student Management is off" : enrollment.enrolled === enrollment.active ? "Every active student has a section" : `${enrollment.active - enrollment.enrolled} without a section`}
+          progress={enrollment && enrollment.active ? (enrollment.enrolled / enrollment.active) * 100 : null}
+          onClick={enrollment && steps.some((s) => s.tab === "enrollments") ? () => onStep("enrollments") : undefined}
+        />
+      </section>
     </div>
   );
+}
+
+/**
+ * One cell of the strip. Cells are split by hairlines rather than gaps: a left
+ * border from the second column, and on phones (2 × 2) a top border on row two.
+ */
+function Kpi({ icon: Icon, label, value, caption, progress = null, onClick }: { icon: ComponentType<{ className?: string; "aria-hidden"?: boolean }>; label: string; value: ReactNode; caption: string; progress?: number | null; onClick?: () => void }) {
+  const body = (
+    <>
+      <span className="flex items-center gap-2 text-[12.5px] font-medium text-ink-muted">
+        <Icon className="h-4 w-4 text-emerald-700" aria-hidden /> {label}
+      </span>
+      <span className="figures mt-1.5 block text-2xl font-semibold leading-none tracking-tight text-ink">{value}</span>
+      <span className="mt-2 flex items-center gap-2">
+        {progress !== null && (
+          <span className="h-1 w-12 shrink-0 overflow-hidden rounded-full bg-line" aria-hidden>
+            <span className={cn("block h-full rounded-full", progress >= 100 ? "bg-emerald-600" : "bg-amber-500")} style={{ width: `${Math.min(100, progress)}%` }} />
+          </span>
+        )}
+        <span className="truncate text-[12px] text-ink-muted">{caption}</span>
+      </span>
+    </>
+  );
+  const cls = "block min-w-0 border-line px-5 py-4 text-left [&:nth-child(n+2)]:border-l max-lg:[&:nth-child(3)]:border-l-0 max-lg:[&:nth-child(n+3)]:border-t";
+  return onClick ? (
+    <button type="button" onClick={onClick} className={cn(cls, "transition-colors hover:bg-emerald-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-600/40")}>{body}</button>
+  ) : <div className={cls}>{body}</div>;
 }

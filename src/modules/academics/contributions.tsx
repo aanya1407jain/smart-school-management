@@ -3,7 +3,7 @@
 import type { ModuleUiContributions } from "@/lib/contributions/types";
 import { LiveHomeworkList, homeworkState } from "@/features/homework/live-homework-list";
 import { HomeworkAction, TeachingPanels, TeachingStats } from "@/features/homework/teacher-dashboard-parts";
-import { AssignmentsSetupTab, CurriculumAction, PacingOverviewTab, SubjectsSetupTab } from "@/features/academics/subjects-setup";
+import { AssignmentsSetupTab, ClassCurriculumSummary, CurriculumAction, PacingOverviewTab, SubjectsSetupTab } from "@/features/academics/subjects-setup";
 
 export const academicsUi: ModuleUiContributions = {
   // Not gated by an entitlement: subjects and curriculum never were (convex/subjects.ts keeps core wrappers).
@@ -15,6 +15,7 @@ export const academicsUi: ModuleUiContributions = {
       { value: "assignments", label: "Teacher assignments", order: 50, Content: AssignmentsSetupTab },
     ],
     ClassAction: CurriculumAction,
+    ClassSummary: ClassCurriculumSummary,
   },
   teacherDashboard: { module: "academics", order: 20, Actions: HomeworkAction, Stats: TeachingStats, Panels: TeachingPanels },
   studentProfile: {

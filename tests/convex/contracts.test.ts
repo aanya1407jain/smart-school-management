@@ -107,10 +107,47 @@ describe("curriculum (class subjects)", () => {
     const admin = await as(t, A.users.admin);
     const sci = await t.run((ctx) => ctx.db.insert("subjects", { schoolId: A.schoolId, name: "Science", code: "SCI", active: true }));
     expect(await errorCode(admin.mutation(api.subjects.assignSubjectTeacher, { sectionId: A.sectionA, subjectId: sci, teacherId: A.classTeacher }))).toBe("INVALID_RELATIONSHIP");
-    expect(await admin.mutation(api.subjects.setClassSubjects, { classId: A.classId, academicYearId: A.yearId, subjectIds: [A.subjectId, sci] })).toEqual({ added: 1, removed: 0 });
+    expect(await admin.mutation(api.subjects.setClassSubjects, { classId: A.classId, academicYearId: A.yearId, subjectIds: [A.subjectId, sci] })).toEqual({ added: 1, removed: 0, changed: 0 });
     await admin.mutation(api.subjects.assignSubjectTeacher, { sectionId: A.sectionA, subjectId: sci, teacherId: A.classTeacher });
     expect(await errorCode(admin.mutation(api.subjects.setClassSubjects, { classId: A.classId, academicYearId: A.yearId, subjectIds: [A.subjectId] }))).toBe("INVALID_RELATIONSHIP");
     expect((await admin.query(api.audit.list, { action: "curriculum.updated" })).length).toBe(1);
+  });
+
+  test("a new subject can be offered to chosen classes; its classes can be changed later", async () => {
+    const t = makeTest();
+    const A = await createSchool(t, "alpha");
+    const B = await createSchool(t, "beta");
+    const admin = await as(t, A.users.admin);
+    const other = await t.run((ctx) => ctx.db.insert("classes", { schoolId: A.schoolId, name: "Grade 11", level: 11, active: true }));
+    expect(await errorCode(admin.mutation(api.subjects.createSubject, { name: "Physics", code: "PHY", classIds: [other] }))).toBe("INVALID_ARGUMENT");
+    expect(await errorCode(admin.mutation(api.subjects.createSubject, { name: "Physics", code: "PHY", academicYearId: A.yearId, classIds: [B.classId] }))).toBe("NOT_FOUND");
+    const phy = await admin.mutation(api.subjects.createSubject, { name: "Physics", code: "PHY", academicYearId: A.yearId, classIds: [A.classId, other] });
+    const rows = (await admin.query(api.subjects.listCurriculum, { academicYearId: A.yearId })).filter((r) => r.subjectId === phy);
+    expect(rows.map((r) => r.classId).sort()).toEqual([A.classId, other].sort());
+
+    // A teacher is assigned in A's class: that class cannot be dropped, the other can.
+    await admin.mutation(api.subjects.assignSubjectTeacher, { sectionId: A.sectionA, subjectId: phy, teacherId: A.classTeacher });
+    expect(await errorCode(admin.mutation(api.subjects.setSubjectClasses, { subjectId: phy, academicYearId: A.yearId, classIds: [other] }))).toBe("INVALID_RELATIONSHIP");
+    expect(await admin.mutation(api.subjects.setSubjectClasses, { subjectId: phy, academicYearId: A.yearId, classIds: [A.classId] })).toEqual({ added: 0, removed: 1 });
+    const teacher = await as(t, A.users.classTeacher);
+    expect(await errorCode(teacher.mutation(api.subjects.setSubjectClasses, { subjectId: phy, academicYearId: A.yearId, classIds: [] }))).toBe("FORBIDDEN");
+  });
+
+  test("curriculum options: elective, stream and credits per class", async () => {
+    const t = makeTest();
+    const A = await createSchool(t, "alpha");
+    const admin = await as(t, A.users.admin);
+    const bio = await t.run((ctx) => ctx.db.insert("subjects", { schoolId: A.schoolId, name: "Biology", code: "BIO", active: true }));
+    const base = { classId: A.classId, academicYearId: A.yearId, subjectIds: [A.subjectId, bio] };
+    const opts = [{ subjectId: bio, elective: true, stream: " PCB ", credits: 4 }, { subjectId: A.subjectId, credits: 5 }];
+    expect(await errorCode(admin.mutation(api.subjects.setClassSubjects, { ...base, options: [{ subjectId: bio, credits: 0.3 }] }))).toBe("INVALID_ARGUMENT");
+    expect(await errorCode(admin.mutation(api.subjects.setClassSubjects, { ...base, subjectIds: [A.subjectId], options: [{ subjectId: bio, elective: true }] }))).toBe("INVALID_ARGUMENT");
+    expect(await admin.mutation(api.subjects.setClassSubjects, { ...base, options: opts })).toEqual({ added: 1, removed: 0, changed: 1 });
+    const list = await admin.query(api.subjects.listClassSubjects, { classId: A.classId, academicYearId: A.yearId });
+    expect(list.map((s) => [s.code, s.elective, s.stream, s.credits])).toEqual([["BIO", true, "PCB", 4], ["MATH", false, null, 5]]);
+    // Omitting options keeps them; saving the same options again changes nothing.
+    expect(await admin.mutation(api.subjects.setClassSubjects, base)).toEqual({ added: 0, removed: 0, changed: 0 });
+    expect(await admin.mutation(api.subjects.setClassSubjects, { ...base, options: opts })).toEqual({ added: 0, removed: 0, changed: 0 });
   });
 
   test("a subject assignment never grants attendance ownership", async () => {

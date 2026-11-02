@@ -6,7 +6,7 @@
  * schools.
  */
 import { v } from "convex/values";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
 import { schoolMutation, schoolQuery } from "./core/functions";
 import { getCurrentAcademicYearId, getInSchool, requirePermission, requireSectionRead } from "./core/authorization";
@@ -35,16 +35,36 @@ export const listTeacherAssignments = schoolQuery({
   },
 });
 
+/**
+ * Create a school subject. `classIds` (with `academicYearId`) also adds it to
+ * those classes' curriculum for that year in the same transaction, so a new
+ * subject can be offered to e.g. Classes 8–10 in one step.
+ */
 export const createSubject = schoolMutation({
-  args: { name: v.string(), code: v.string() },
+  args: { name: v.string(), code: v.string(), academicYearId: v.optional(v.id("academicYears")), classIds: v.optional(v.array(v.id("classes"))) },
   handler: async (ctx, a) => {
     requirePermission(ctx.actor, "academics:manage");
     const name = assertNonEmpty(a.name, "name", 60);
     const code = assertNonEmpty(a.code, "code", 12).toUpperCase();
+    const classIds = [...new Set(a.classIds ?? [])];
+    if (classIds.length && !a.academicYearId) throw invalid("Choose the academic year the classes study it in.", { academicYearId: "Required" });
+    const year = a.academicYearId ? await getInSchool(ctx, "academicYears", a.academicYearId, "Academic year") : null;
+    const classes: Doc<"classes">[] = [];
+    for (const id of classIds) classes.push(await getInSchool(ctx, "classes", id, "Class"));
     const dup = await ctx.db.query("subjects").withIndex("by_school_code", (q) => q.eq("schoolId", ctx.actor.schoolId).eq("code", code)).first();
     if (dup) throw conflict(`Subject code ${code} is already used.`);
     const id = await ctx.db.insert("subjects", { schoolId: ctx.actor.schoolId, name, code, active: true });
-    await writeAudit(ctx, { schoolId: ctx.actor.schoolId, actor: ctx.actor, action: "subject.created", entity: { table: "subjects", id }, summary: `Created subject ${name}` });
+    if (year) {
+      for (const cls of classes) {
+        await assertCurriculumRoom(ctx, cls, year._id);
+        await ctx.db.insert("classSubjects", { schoolId: ctx.actor.schoolId, academicYearId: year._id, classId: cls._id, subjectId: id });
+      }
+    }
+    await writeAudit(ctx, {
+      schoolId: ctx.actor.schoolId, actor: ctx.actor, action: "subject.created", entity: { table: "subjects", id },
+      summary: classes.length ? `Created subject ${name} for ${classes.map((c) => c.name).join(", ")}` : `Created subject ${name}`,
+      ...(year && classes.length ? { metadata: { academicYearId: year._id, classIds: classes.map((c) => c._id) } } : {}),
+    });
     return id;
   },
 });
@@ -82,6 +102,46 @@ export const assignSubjectTeacher = schoolMutation({
 
 // ================================================================ curriculum (class ↔ subject per year)
 const MAX_SUBJECTS_PER_CLASS = 40;
+/** Upper bound for one year's curriculum rows across the school (classes × subjects). */
+const MAX_CURRICULUM_ROWS = 2000;
+const MAX_CREDITS = 20;
+
+const vCurriculumOptions = v.object({
+  subjectId: v.id("subjects"),
+  elective: v.optional(v.boolean()),
+  stream: v.optional(v.string()),
+  credits: v.optional(v.number()),
+});
+type CurriculumOptions = { elective?: boolean; stream?: string; credits?: number };
+
+/** Validated, minimal options (omitted fields stay omitted: core, every stream, unweighted). */
+function cleanOptions(o: CurriculumOptions): CurriculumOptions {
+  const stream = o.stream?.trim();
+  if (stream && stream.length > 24) throw invalid("Stream names are at most 24 characters.", { stream: "Too long" });
+  if (o.credits !== undefined && (!Number.isFinite(o.credits) || o.credits < 0 || o.credits > MAX_CREDITS || Math.round(o.credits * 2) !== o.credits * 2)) {
+    throw invalid(`Credits must be between 0 and ${MAX_CREDITS}, in steps of 0.5.`, { credits: "Invalid" });
+  }
+  return { ...(o.elective ? { elective: true } : {}), ...(stream ? { stream } : {}), ...(o.credits !== undefined ? { credits: o.credits } : {}) };
+}
+
+const sameOptions = (row: CurriculumOptions, o: CurriculumOptions) => (row.elective ?? false) === (o.elective ?? false) && row.stream === o.stream && row.credits === o.credits;
+
+async function assertCurriculumRoom(ctx: QueryCtx, cls: Doc<"classes">, academicYearId: Id<"academicYears">) {
+  const rows = await ctx.db.query("classSubjects").withIndex("by_class_year_subject", (q) => q.eq("classId", cls._id).eq("academicYearId", academicYearId)).take(MAX_SUBJECTS_PER_CLASS);
+  if (rows.length >= MAX_SUBJECTS_PER_CLASS) throw invalid(`${cls.name} already has ${MAX_SUBJECTS_PER_CLASS} subjects.`, { classIds: "Too many" });
+}
+
+/** A subject cannot leave a class's curriculum while one of the class's sections still has a teacher for it. */
+async function assertNoTeacherAssigned(ctx: QueryCtx, cls: Doc<"classes">, academicYearId: Id<"academicYears">, subjectId: Id<"subjects">) {
+  const sections = await ctx.db.query("sections").withIndex("by_class_year", (q) => q.eq("classId", cls._id).eq("academicYearId", academicYearId)).collect();
+  for (const section of sections) {
+    const assigned = await ctx.db.query("teacherAssignments").withIndex("by_section_subject", (q) => q.eq("sectionId", section._id).eq("subjectId", subjectId)).first();
+    if (assigned) {
+      const subject = await ctx.db.get(subjectId);
+      throw invalidRelationship(`${subject?.name ?? "A subject"} still has a teacher assigned in ${section.displayName}. Remove the assignment first.`);
+    }
+  }
+}
 
 async function isInCurriculum(ctx: QueryCtx, classId: Id<"classes">, academicYearId: Id<"academicYears">, subjectId: Id<"subjects">) {
   const row = await ctx.db
@@ -108,9 +168,22 @@ export const listClassSubjects = schoolQuery({
     const out = [];
     for (const r of rows) {
       const subject = await ctx.db.get(r.subjectId);
-      if (subject && subject.schoolId === ctx.actor.schoolId) out.push({ subjectId: subject._id, name: subject.name, code: subject.code });
+      if (subject && subject.schoolId === ctx.actor.schoolId) out.push({ subjectId: subject._id, name: subject.name, code: subject.code, elective: r.elective ?? false, stream: r.stream ?? null, credits: r.credits ?? null });
     }
     return out.sort((x, y) => x.name.localeCompare(y.name));
+  },
+});
+
+/**
+ * The whole school's curriculum for a year (default: current year): one row
+ * per class ↔ subject, for the Subjects tab's per-class view. Not sensitive.
+ */
+export const listCurriculum = schoolQuery({
+  args: { academicYearId: v.optional(v.id("academicYears")) },
+  handler: async (ctx, { academicYearId }) => {
+    const yearId = await resolveYearId(ctx, academicYearId);
+    const rows = await ctx.db.query("classSubjects").withIndex("by_school_year", (q) => q.eq("schoolId", ctx.actor.schoolId).eq("academicYearId", yearId)).take(MAX_CURRICULUM_ROWS);
+    return rows.map((r) => ({ classId: r.classId, subjectId: r.subjectId, elective: r.elective ?? false, stream: r.stream ?? null, credits: r.credits ?? null }));
   },
 });
 
@@ -120,7 +193,11 @@ export const listClassSubjects = schoolQuery({
  * the assignments first, so no orphaned assignment is left behind.
  */
 export const setClassSubjects = schoolMutation({
-  args: { classId: v.id("classes"), academicYearId: v.id("academicYears"), subjectIds: v.array(v.id("subjects")) },
+  args: {
+    classId: v.id("classes"), academicYearId: v.id("academicYears"), subjectIds: v.array(v.id("subjects")),
+    /** Elective / stream / credits per subject. When given, a subject without an entry is core for every stream, unweighted; when omitted, kept subjects keep theirs. */
+    options: v.optional(v.array(vCurriculumOptions)),
+  },
   handler: async (ctx, a) => {
     requirePermission(ctx.actor, "academics:manage");
     const cls = await getInSchool(ctx, "classes", a.classId, "Class");
@@ -136,30 +213,75 @@ export const setClassSubjects = schoolMutation({
       .withIndex("by_class_year_subject", (q) => q.eq("classId", cls._id).eq("academicYearId", year._id))
       .take(MAX_SUBJECTS_PER_CLASS + 1);
     const currentIds = new Set(current.map((r) => r.subjectId));
+    const options = new Map<string, CurriculumOptions>();
+    for (const o of a.options ?? []) {
+      if (!wanted.includes(o.subjectId)) throw invalid("Options were given for a subject that is not in the curriculum.", { options: "Unknown subject" });
+      options.set(o.subjectId, cleanOptions(o));
+    }
     const added = wanted.filter((id) => !currentIds.has(id));
     const removed = current.filter((r) => !wanted.includes(r.subjectId));
 
-    if (removed.length) {
-      const sections = await ctx.db.query("sections").withIndex("by_class_year", (q) => q.eq("classId", cls._id).eq("academicYearId", year._id)).collect();
-      for (const r of removed) {
-        for (const section of sections) {
-          const assigned = await ctx.db.query("teacherAssignments").withIndex("by_section_subject", (q) => q.eq("sectionId", section._id).eq("subjectId", r.subjectId)).first();
-          if (assigned) {
-            const subject = await ctx.db.get(r.subjectId);
-            throw invalidRelationship(`${subject?.name ?? "A subject"} still has a teacher assigned in ${section.displayName}. Remove the assignment first.`);
-          }
-        }
-      }
-    }
+    for (const r of removed) await assertNoTeacherAssigned(ctx, cls, year._id, r.subjectId);
     for (const r of removed) await ctx.db.delete(r._id);
     for (const subjectId of added) {
-      await ctx.db.insert("classSubjects", { schoolId: ctx.actor.schoolId, academicYearId: year._id, classId: cls._id, subjectId });
+      await ctx.db.insert("classSubjects", { schoolId: ctx.actor.schoolId, academicYearId: year._id, classId: cls._id, subjectId, ...options.get(subjectId) });
+    }
+    // Kept subjects: rewrite a row only when its options changed.
+    let changed = 0;
+    if (a.options) {
+      for (const r of current) {
+        if (!wanted.includes(r.subjectId)) continue;
+        const o = options.get(r.subjectId) ?? {};
+        if (sameOptions(r, o)) continue;
+        await ctx.db.replace(r._id, { schoolId: r.schoolId, academicYearId: r.academicYearId, classId: r.classId, subjectId: r.subjectId, ...o });
+        changed += 1;
+      }
+    }
+    if (added.length || removed.length || changed) {
+      await writeAudit(ctx, {
+        schoolId: ctx.actor.schoolId, actor: ctx.actor, action: "curriculum.updated", entity: { table: "classes", id: cls._id },
+        summary: `Updated ${cls.name} curriculum for ${year.name} (+${added.length} / −${removed.length}${changed ? ` / ${changed} changed` : ""})`,
+        metadata: { academicYearId: year._id, added, removed: removed.map((r) => r.subjectId), changed },
+      });
+    }
+    return { added: added.length, removed: removed.length, changed };
+  },
+});
+
+/**
+ * Set which classes study a subject in a year (the subject-first view of the
+ * same curriculum rows). Kept classes keep their elective / stream / credits;
+ * removing a class that still has a teacher for the subject is rejected.
+ */
+export const setSubjectClasses = schoolMutation({
+  args: { subjectId: v.id("subjects"), academicYearId: v.id("academicYears"), classIds: v.array(v.id("classes")) },
+  handler: async (ctx, a) => {
+    requirePermission(ctx.actor, "academics:manage");
+    const subject = await getInSchool(ctx, "subjects", a.subjectId, "Subject");
+    const year = await getInSchool(ctx, "academicYears", a.academicYearId, "Academic year");
+    const classes = new Map<string, Doc<"classes">>();
+    for (const id of new Set(a.classIds)) classes.set(id, await getInSchool(ctx, "classes", id, "Class"));
+    const current = (await ctx.db.query("classSubjects").withIndex("by_school_year", (q) => q.eq("schoolId", ctx.actor.schoolId).eq("academicYearId", year._id)).take(MAX_CURRICULUM_ROWS))
+      .filter((r) => r.subjectId === subject._id);
+    const currentIds = new Set<string>(current.map((r) => r.classId));
+    const added = [...classes.values()].filter((c) => !currentIds.has(c._id));
+    const removed = current.filter((r) => !classes.has(r.classId));
+    if (added.length && !subject.active) throw invalidRelationship(`${subject.name} is inactive.`);
+
+    for (const r of removed) {
+      const cls = await ctx.db.get(r.classId);
+      if (cls) await assertNoTeacherAssigned(ctx, cls, year._id, subject._id);
+    }
+    for (const r of removed) await ctx.db.delete(r._id);
+    for (const cls of added) {
+      await assertCurriculumRoom(ctx, cls, year._id);
+      await ctx.db.insert("classSubjects", { schoolId: ctx.actor.schoolId, academicYearId: year._id, classId: cls._id, subjectId: subject._id });
     }
     if (added.length || removed.length) {
       await writeAudit(ctx, {
-        schoolId: ctx.actor.schoolId, actor: ctx.actor, action: "curriculum.updated", entity: { table: "classes", id: cls._id },
-        summary: `Updated ${cls.name} curriculum for ${year.name} (+${added.length} / −${removed.length})`,
-        metadata: { academicYearId: year._id, added, removed: removed.map((r) => r.subjectId) },
+        schoolId: ctx.actor.schoolId, actor: ctx.actor, action: "curriculum.updated", entity: { table: "subjects", id: subject._id },
+        summary: `Updated the classes studying ${subject.name} in ${year.name} (+${added.length} / −${removed.length})`,
+        metadata: { academicYearId: year._id, added: added.map((c) => c._id), removed: removed.map((r) => r.classId) },
       });
     }
     return { added: added.length, removed: removed.length };

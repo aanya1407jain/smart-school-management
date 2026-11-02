@@ -9,10 +9,9 @@
  *
  * Props are unchanged from the original tracker, so every caller keeps working.
  */
-import { useMemo, useState, type CSSProperties } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { AlertTriangle, BookOpen, CheckCircle2, ChevronDown, Plus } from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { Avatar, BadgeChip, CardHeader, GlassCard, Select } from "@/components/ui";
+import { Avatar, Select } from "@/components/ui";
 import { formatDate, todayISO } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils/cn";
 import { PACING_TOLERANCE, pacingOf, type PacingStatus } from "./pacing";
@@ -28,7 +27,7 @@ export interface SyllabusSubject {
   targetDate: string; // ISO
 }
 
-const SAMPLE_SUBJECTS: SyllabusSubject[] = [
+export const SAMPLE_SUBJECTS: SyllabusSubject[] = [
   { id: "1", className: "Class 10-A", subject: "Mathematics", teacher: "Ramesh Sharma", totalChapters: 15, completedChapters: 9, startDate: "2026-04-01", targetDate: "2027-02-15" },
   { id: "2", className: "Class 10-A", subject: "Science", teacher: "Pooja Verma", totalChapters: 16, completedChapters: 6, startDate: "2026-04-01", targetDate: "2027-02-15" },
   { id: "3", className: "Class 9-B", subject: "English", teacher: "Anjali Gupta", totalChapters: 12, completedChapters: 8, startDate: "2026-04-01", targetDate: "2027-02-15" },
@@ -45,7 +44,6 @@ export function SyllabusProgressTracker({
   readOnly?: boolean;
   onChapterComplete?: (subjectId: string, newCompleted: number) => void;
 }) {
-  const reduceMotion = useReducedMotion();
   const [data, setData] = useState<SyllabusSubject[]>(subjects);
   const [selectedClass, setSelectedClass] = useState<string>("all");
   const [behindOnly, setBehindOnly] = useState(false);
@@ -59,7 +57,12 @@ export function SyllabusProgressTracker({
   const stats = useMemo(() => {
     const total = inClass.reduce((a, s) => a + s.totalChapters, 0);
     const completed = inClass.reduce((a, s) => a + s.completedChapters, 0);
-    return { total, completed, pending: total - completed, pct: total > 0 ? Math.round((completed / total) * 100) : 0, behind: inClass.filter((s) => pacingOf(s, today).status === "behind").length };
+    const statuses = inClass.map((s) => pacingOf(s, today).status);
+    return {
+      total, completed, pct: total > 0 ? Math.round((completed / total) * 100) : 0,
+      behind: statuses.filter((s) => s === "behind").length,
+      onTrack: statuses.filter((s) => s !== "behind").length,
+    };
   }, [inClass, today]);
 
   const handleIncrement = (id: string) => {
@@ -75,148 +78,177 @@ export function SyllabusProgressTracker({
   };
 
   return (
-    <GlassCard className="spatial overflow-hidden">
-      <CardHeader
-        title="Curriculum progress & pacing"
-        description={readOnly ? "Principal view (read only) · Chapter coverage against each subject's planned pace." : "Teacher view · Log chapters as you finish them."}
-        icon={<BookOpen className="h-4 w-4" />}
-        className="flex-wrap"
-        action={
-          <div className="flex flex-wrap items-center gap-2">
-            <Select aria-label="Filter by class" value={selectedClass} onChange={(e) => setSelectedClass(e.target.value)} className="h-9 w-40">
-              <option value="all">All classes</option>
-              {classList.map((c) => <option key={c} value={c}>{c}</option>)}
-            </Select>
-            <button
-              type="button"
-              aria-pressed={behindOnly}
-              onClick={() => setBehindOnly((b) => !b)}
-              className={cn(
-                "inline-flex h-9 items-center gap-1.5 rounded-xl px-3 text-[12.5px] font-semibold ring-1 ring-inset transition-all duration-200 active:scale-95 focus-visible:outline-none focus-visible:shadow-focus",
-                behindOnly ? "bg-pd-warning text-white ring-transparent" : "bg-white text-ink-soft ring-line/80 hover:bg-white hover:text-plum",
-              )}
-            >
-              <AlertTriangle className="h-3.5 w-3.5" aria-hidden /> Behind pacing only
-            </button>
+    <section aria-labelledby="pacing-title" className="overflow-hidden rounded-xl border border-line bg-white shadow-sm">
+      {/* Header + filters */}
+      <div className="flex flex-col gap-3 border-b border-line p-5 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-emerald-50 text-emerald-700" aria-hidden><BookOpen className="h-[18px] w-[18px]" /></span>
+          <div className="min-w-0">
+            <h2 id="pacing-title" className="text-[15px] font-semibold text-ink">Curriculum progress &amp; pacing</h2>
+            <p className="text-[13px] text-ink-muted">{readOnly ? "Chapter coverage against each subject's planned pace." : "Log chapters as you finish them."}</p>
           </div>
-        }
-      />
-
-      {/* Executive summary strip */}
-      <div className="mx-5 mb-4 rounded-2xl border border-line bg-white p-4">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <p className="text-sm font-semibold text-ink">{selectedClass === "all" ? "Whole school progress" : `${selectedClass} progress`}</p>
-          <p className="figures font-mono text-xl font-bold text-sapphire">{stats.pct}%</p>
         </div>
-        <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-white shadow-[inset_0_1px_2px_rgb(6_49_84/0.10)] ring-1 ring-inset ring-line/70" role="progressbar" aria-valuenow={stats.pct} aria-valuemin={0} aria-valuemax={100} aria-label="Curriculum completed">
-          <div className="h-full rounded-full bg-lagoon transition-[width] duration-700 ease-out" style={{ width: `${stats.pct}%` }} />
+        <div className="flex flex-wrap items-center gap-2">
+          <Select aria-label="Filter by class" value={selectedClass} onChange={(e) => setSelectedClass(e.target.value)} className="h-9 w-full min-[420px]:w-44">
+            <option value="all">All classes</option>
+            {classList.map((c) => <option key={c} value={c}>{c}</option>)}
+          </Select>
+          <button
+            type="button"
+            aria-pressed={behindOnly}
+            onClick={() => setBehindOnly((b) => !b)}
+            className={cn(
+              "inline-flex h-9 items-center gap-1.5 rounded-xl border px-3 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:shadow-focus",
+              behindOnly ? "border-amber-300 bg-amber-50 text-amber-900" : "border-line bg-white text-ink-soft hover:border-amber-300 hover:text-amber-900",
+            )}
+          >
+            <AlertTriangle className="h-3.5 w-3.5" aria-hidden /> Behind pacing only
+            {stats.behind > 0 && <span className="figures rounded-full bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-900">{stats.behind}</span>}
+          </button>
         </div>
-        <p className="figures mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] text-ink-muted">
-          <span><b className="font-mono text-ink">{stats.total}</b> total chapters</span><span aria-hidden>•</span>
-          <span><b className="font-mono text-lagoon">{stats.completed}</b> completed</span><span aria-hidden>•</span>
-          <span><b className="font-mono text-ink">{stats.pending}</b> in progress</span><span aria-hidden>•</span>
-          <span className={stats.behind ? "text-plum" : undefined}><b className="font-mono">{stats.behind}</b> at risk / behind</span>
-        </p>
       </div>
 
-      {/* Subject cards */}
+      {/* Summary strip */}
+      <div className="grid grid-cols-2 gap-px border-b border-line bg-line sm:grid-cols-4">
+        <Summary label={selectedClass === "all" ? "Whole school" : selectedClass} value={`${stats.pct}%`} hint="chapters covered" />
+        <Summary label="Chapters" value={`${stats.completed} / ${stats.total}`} hint="completed" />
+        <Summary label="On schedule" value={String(stats.onTrack)} hint={`subject${stats.onTrack === 1 ? "" : "s"}`} tone="ok" />
+        <Summary label="Behind pacing" value={String(stats.behind)} hint={`more than ${PACING_TOLERANCE} pts behind`} tone={stats.behind ? "warn" : undefined} />
+      </div>
+
       {shown.length === 0 ? (
-        <p className="px-5 pb-6 text-center text-sm text-ink-muted">{behindOnly ? "Nothing is behind pacing — every subject is on track." : "No subjects to show."}</p>
+        <p className="px-5 py-10 text-center text-sm text-ink-muted">{behindOnly ? "Nothing is behind pacing — every subject is on track." : "No subjects to show."}</p>
       ) : (
-        <motion.ul layout={!reduceMotion} className="grid grid-cols-1 gap-3 px-5 pb-5 sm:grid-cols-2 xl:grid-cols-3">
-          <AnimatePresence initial={false}>
-            {shown.map((sub, i) => {
+        <>
+          {/* Table (sm and up) */}
+          <div className="hidden overflow-x-auto sm:block">
+            <table className="w-full text-left text-[13px]">
+              <thead className="bg-bg/60 text-[12px] font-medium text-ink-muted">
+                <tr>
+                  <th scope="col" className="px-5 py-2.5 font-medium">Subject</th>
+                  <th scope="col" className="px-3 py-2.5 font-medium">Teacher</th>
+                  <th scope="col" className="w-[28%] px-3 py-2.5 font-medium">Progress</th>
+                  <th scope="col" className="px-3 py-2.5 font-medium">Status</th>
+                  <th scope="col" className="px-5 py-2.5 text-right font-medium"><span className="sr-only">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line">
+                {shown.map((sub) => {
+                  const p = pacingOf(sub, today);
+                  const isOpen = open === sub.id;
+                  return (
+                    <Fragment key={sub.id}>
+                      <tr className={cn("align-middle transition-colors hover:bg-bg/50", isOpen && "bg-bg/50")}>
+                        <td className="px-5 py-3">
+                          <p className="font-semibold text-ink">{sub.subject}</p>
+                          <p className="text-[12px] text-ink-muted">{sub.className}</p>
+                        </td>
+                        <td className="px-3 py-3"><span className="inline-flex items-center gap-2 text-ink-soft"><Avatar name={sub.teacher} size="xs" />{sub.teacher}</span></td>
+                        <td className="px-3 py-3"><ProgressCell sub={sub} pct={p.pct} expected={p.expected} status={p.status} /></td>
+                        <td className="px-3 py-3"><PacingBadge status={p.status} /></td>
+                        <td className="px-5 py-3">
+                          <RowActions readOnly={readOnly} done={p.status === "completed"} isOpen={isOpen} id={sub.id} onAdd={() => handleIncrement(sub.id)} onToggle={() => setOpen(isOpen ? null : sub.id)} />
+                        </td>
+                      </tr>
+                      {isOpen && (
+                        <tr id={`pacing-log-${sub.id}`} className="bg-bg/50">
+                          <td colSpan={5} className="px-5 pb-4 pt-0"><PacingLog sub={sub} pct={p.pct} expected={p.expected} /></td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Stacked list (phones) */}
+          <ul className="divide-y divide-line sm:hidden">
+            {shown.map((sub) => {
               const p = pacingOf(sub, today);
-              const pct = Math.round(p.pct);
               const isOpen = open === sub.id;
               return (
-                <motion.li
-                  key={sub.id}
-                  layout={!reduceMotion}
-                  initial={reduceMotion ? false : { opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.97 }}
-                  transition={{ type: "spring", stiffness: 420, damping: 34, delay: reduceMotion ? 0 : i * 0.04 }}
-                  style={{ "--stagger-i": i } as CSSProperties}
-                  className="group flex flex-col rounded-2xl border border-line bg-white p-4 shadow-ambient transition-[transform,box-shadow] duration-200 hover:shadow-ambient-lg"
-                >
+                <li key={sub.id} className="space-y-2.5 p-4">
                   <div className="flex items-start justify-between gap-2">
-                    <BadgeChip tone="sapphire">{sub.className}</BadgeChip>
-                    <PacingPill status={p.status} />
-                  </div>
-                  <p className="mt-2.5 text-[15px] font-semibold text-ink">{sub.subject}</p>
-                  <span className="mt-1 inline-flex w-fit items-center gap-1.5 rounded-full bg-white py-0.5 pl-0.5 pr-2.5 text-[12px] font-medium text-ink-soft ring-1 ring-inset ring-line/70">
-                    <Avatar name={sub.teacher} size="xs" /> {sub.teacher}
-                  </span>
-
-                  <div className="mt-3.5">
-                    <div className="relative h-2.5 w-full overflow-hidden rounded-full bg-white shadow-[inset_0_1px_2px_rgb(6_49_84/0.10)] ring-1 ring-inset ring-line/70" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label={`${sub.subject} chapters completed`}>
-                      <div
-                        className={cn("h-full rounded-full transition-[width] duration-700 ease-out", p.status === "behind" ? "bg-amber-500" : p.status === "completed" ? "bg-teal" : "bg-sapphire/70")}
-                        style={{ width: `${pct}%` }}
-                      />
-                      {/* Where the subject should be today. */}
-                      {p.status !== "completed" && <span aria-hidden title="Expected by today" className="absolute inset-y-0 w-0.5 bg-ink/40" style={{ left: `${Math.min(99.5, p.expected)}%` }} />}
+                    <div className="min-w-0">
+                      <p className="font-semibold text-ink">{sub.subject}</p>
+                      <p className="text-[12px] text-ink-muted">{sub.className}</p>
                     </div>
+                    <PacingBadge status={p.status} />
                   </div>
-
-                  <div className="mt-3 flex items-center justify-between gap-2">
-                    <span className="figures font-mono text-[12.5px] font-semibold text-ink">{sub.completedChapters}/{sub.totalChapters} chapters • {pct}%</span>
-                    <div className="flex items-center gap-1">
-                      {!readOnly && (
-                        <button type="button" disabled={p.status === "completed"} onClick={() => handleIncrement(sub.id)}
-                          className="inline-flex items-center gap-1 rounded-lg bg-white px-2 py-1 text-[12px] font-semibold text-lagoon ring-1 ring-inset ring-teal/25 transition-all hover:bg-teal-soft active:scale-95 disabled:opacity-40">
-                          <Plus className="h-3 w-3" aria-hidden /> Chapter
-                        </button>
-                      )}
-                      <button type="button" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : sub.id)}
-                        className="inline-flex items-center gap-0.5 rounded-lg px-2 py-1 text-[12px] font-semibold text-lagoon transition-colors hover:bg-teal-soft focus-visible:outline-none focus-visible:shadow-focus">
-                        Pacing log <ChevronDown className={cn("h-3.5 w-3.5 transition-transform duration-200", isOpen && "rotate-180")} aria-hidden />
-                      </button>
-                    </div>
-                  </div>
-                  <AnimatePresence initial={false}>
-                    {isOpen && (
-                      <motion.dl
-                        initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: reduceMotion ? 0 : 0.2 }}
-                        className="figures mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 overflow-hidden border-t border-line/60 pt-2.5 text-[12px]"
-                      >
-                        <dt className="text-ink-muted">Expected by today</dt><dd className="text-right font-mono font-semibold text-ink">{Math.round(p.expected)}%</dd>
-                        <dt className="text-ink-muted">Gap</dt><dd className={cn("text-right font-mono font-semibold", pct - p.expected < -PACING_TOLERANCE ? "text-plum" : "text-lagoon")}>{pct - Math.round(p.expected) > 0 ? "+" : ""}{pct - Math.round(p.expected)} pts</dd>
-                        <dt className="text-ink-muted">Chapters left</dt><dd className="text-right font-mono font-semibold text-ink">{sub.totalChapters - sub.completedChapters}</dd>
-                        <dt className="text-ink-muted">Target date</dt><dd className="text-right font-semibold text-ink">{formatDate(sub.targetDate)}</dd>
-                      </motion.dl>
-                    )}
-                  </AnimatePresence>
-                </motion.li>
+                  <span className="inline-flex items-center gap-2 text-[13px] text-ink-soft"><Avatar name={sub.teacher} size="xs" />{sub.teacher}</span>
+                  <ProgressCell sub={sub} pct={p.pct} expected={p.expected} status={p.status} />
+                  <RowActions readOnly={readOnly} done={p.status === "completed"} isOpen={isOpen} id={`m-${sub.id}`} onAdd={() => handleIncrement(sub.id)} onToggle={() => setOpen(isOpen ? null : sub.id)} align="start" />
+                  {isOpen && <div id={`pacing-log-m-${sub.id}`}><PacingLog sub={sub} pct={p.pct} expected={p.expected} /></div>}
+                </li>
               );
             })}
-          </AnimatePresence>
-        </motion.ul>
+          </ul>
+        </>
       )}
-    </GlassCard>
+    </section>
   );
 }
 
-function PacingPill({ status }: { status: PacingStatus }) {
+function Summary({ label, value, hint, tone }: { label: string; value: string; hint: string; tone?: "ok" | "warn" }) {
+  return (
+    <div className="bg-white px-5 py-3">
+      <p className="truncate text-[12px] font-medium text-ink-muted">{label}</p>
+      <p className={cn("figures text-lg font-semibold leading-snug", tone === "ok" ? "text-emerald-700" : tone === "warn" ? "text-amber-700" : "text-ink")}>{value}</p>
+      <p className="truncate text-[11.5px] text-ink-muted">{hint}</p>
+    </div>
+  );
+}
+
+/** Thin bar (amber when behind) with a tick where the subject should be today. */
+function ProgressCell({ sub, pct, expected, status }: { sub: SyllabusSubject; pct: number; expected: number; status: PacingStatus }) {
+  const rounded = Math.round(pct);
+  return (
+    <div className="min-w-[9rem]">
+      <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-line" role="progressbar" aria-valuenow={rounded} aria-valuemin={0} aria-valuemax={100} aria-label={`${sub.subject} chapters completed`}>
+        <div className={cn("h-full rounded-full", status === "behind" ? "bg-amber-500" : "bg-emerald-600")} style={{ width: `${rounded}%` }} />
+        {status !== "completed" && <span aria-hidden title="Expected by today" className="absolute inset-y-0 w-0.5 bg-ink/50" style={{ left: `${Math.min(99.5, expected)}%` }} />}
+      </div>
+      <p className="figures mt-1 text-[12px] text-ink-muted"><span className="font-semibold text-ink">{sub.completedChapters}/{sub.totalChapters}</span> chapters · {rounded}%</p>
+    </div>
+  );
+}
+
+function RowActions({ readOnly, done, isOpen, id, onAdd, onToggle, align = "end" }: { readOnly: boolean; done: boolean; isOpen: boolean; id: string; onAdd: () => void; onToggle: () => void; align?: "start" | "end" }) {
+  return (
+    <div className={cn("flex items-center gap-1", align === "end" ? "justify-end" : "justify-start")}>
+      {!readOnly && (
+        <button type="button" disabled={done} onClick={onAdd}
+          className="inline-flex h-8 items-center gap-1 rounded-lg border border-line px-2 text-[12px] font-semibold text-emerald-800 transition-colors hover:border-emerald-300 hover:bg-emerald-50 disabled:opacity-40">
+          <Plus className="h-3 w-3" aria-hidden /> Chapter
+        </button>
+      )}
+      <button type="button" aria-expanded={isOpen} aria-controls={`pacing-log-${id}`} onClick={onToggle}
+        className="inline-flex h-8 items-center gap-0.5 whitespace-nowrap rounded-lg px-2 text-[12.5px] font-semibold text-emerald-800 transition-colors hover:bg-emerald-50 focus-visible:outline-none focus-visible:shadow-focus">
+        Pacing log <ChevronDown className={cn("h-3.5 w-3.5 transition-transform duration-200", isOpen && "rotate-180")} aria-hidden />
+      </button>
+    </div>
+  );
+}
+
+function PacingLog({ sub, pct, expected }: { sub: SyllabusSubject; pct: number; expected: number }) {
+  const gap = Math.round(pct) - Math.round(expected);
+  return (
+    <dl className="figures grid grid-cols-2 gap-3 rounded-lg border border-line bg-white p-3 text-[12.5px] sm:grid-cols-4">
+      <div><dt className="text-ink-muted">Expected by today</dt><dd className="font-semibold text-ink">{Math.round(expected)}%</dd></div>
+      <div><dt className="text-ink-muted">Gap</dt><dd className={cn("font-semibold", gap < -PACING_TOLERANCE ? "text-amber-700" : "text-emerald-700")}>{gap > 0 ? "+" : ""}{gap} pts</dd></div>
+      <div><dt className="text-ink-muted">Chapters left</dt><dd className="font-semibold text-ink">{sub.totalChapters - sub.completedChapters}</dd></div>
+      <div><dt className="text-ink-muted">Target date</dt><dd className="font-semibold text-ink">{formatDate(sub.targetDate)}</dd></div>
+    </dl>
+  );
+}
+
+function PacingBadge({ status }: { status: PacingStatus }) {
   if (status === "completed") {
-    return <span className="inline-flex items-center gap-1 rounded-full bg-teal-soft px-2.5 py-0.5 text-[11.5px] font-bold text-lagoon ring-1 ring-inset ring-teal/25"><CheckCircle2 className="h-3 w-3" aria-hidden /> Completed</span>;
+    return <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-emerald-50 px-2 py-0.5 text-[12px] font-medium text-emerald-800 ring-1 ring-inset ring-emerald-600/20"><CheckCircle2 className="h-3 w-3" aria-hidden /> Completed</span>;
   }
   if (status === "behind") {
-    return (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-50/90 px-2.5 py-0.5 text-[11.5px] font-bold text-rose-700 ring-1 ring-inset ring-rose-500/25">
-        <span className="relative grid h-1.5 w-1.5 place-items-center" aria-hidden>
-          <span className="absolute h-1.5 w-1.5 animate-ping rounded-full bg-rose-500 opacity-60 motion-reduce:hidden" />
-          <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
-        </span>
-        Behind pacing
-      </span>
-    );
+    return <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-amber-50 px-2 py-0.5 text-[12px] font-medium text-amber-800 ring-1 ring-inset ring-amber-500/30"><span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden /> Behind pacing</span>;
   }
-  return (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50/90 px-2.5 py-0.5 text-[11.5px] font-bold text-emerald-700 ring-1 ring-inset ring-emerald-600/20">
-      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden /> On schedule
-    </span>
-  );
+  return <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-emerald-50/70 px-2 py-0.5 text-[12px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-600/15"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden /> On schedule</span>;
 }
