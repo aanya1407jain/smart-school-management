@@ -28,7 +28,7 @@ export function NoticeListItem({ notice, compact, onClick, actions, className }:
           <span aria-hidden>·</span>
           <Badge tone="outline" className="py-0">{notice.audienceLabel}</Badge>
           {notice.eventDate && (
-            <span className="inline-flex items-center gap-1"><CalendarDays className="h-3.5 w-3.5" aria-hidden /> {formatDate(notice.eventDate)}</span>
+            <span className="inline-flex items-center gap-1"><CalendarDays className="h-3.5 w-3.5" aria-hidden /> {formatDate(notice.eventDate)}{notice.endDate && notice.endDate !== notice.eventDate ? ` – ${formatDate(notice.endDate)}` : ""}</span>
           )}
           <span className="ml-auto">
             Posted {formatShortDate(notice.publishDate)}

@@ -34,11 +34,11 @@ export function SetupCockpit({
             <h2 className="text-base font-semibold text-sapphire">Year setup workflow</h2>
             <p className="text-[13px] text-ink-muted">Each step builds on the previous one. Select a step to open it.</p>
           </div>
-          <span className={cn("figures inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-bold ring-1 ring-inset", doneCount === steps.length ? "bg-gradient-to-r from-teal-soft to-cyan/10 text-lagoon ring-teal/25" : "bg-lavender/25 text-plum ring-mauve/30")}>
+          <span className={cn("figures inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-bold ring-1 ring-inset", doneCount === steps.length ? "bg-teal-soft text-lagoon ring-teal/25" : "bg-lavender/25 text-plum ring-mauve/30")}>
             {doneCount}/{steps.length} complete
           </span>
         </div>
-        <ol className="scrollbar-thin -mx-1 flex snap-x gap-2 overflow-x-auto px-1 pb-2 lg:grid lg:grid-cols-6 lg:overflow-visible">
+        <ol className="scrollbar-thin -mx-1 flex snap-x gap-2 relative overflow-x-auto px-1 pb-2 lg:grid lg:grid-cols-6 lg:overflow-visible">
           {steps.map((s, i) => {
             const Icon = ICONS[s.key] ?? Check;
             return (
@@ -47,14 +47,14 @@ export function SetupCockpit({
                   type="button"
                   onClick={() => onStep(s.tab)}
                   className={cn(
-                    "group relative flex h-full w-full flex-col gap-2 rounded-2xl border p-3 text-left backdrop-blur-md transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-ambient-lg focus-visible:outline-none focus-visible:shadow-focus active:scale-[0.98]",
-                    s.done ? "border-white/70 bg-white/60" : "border-dashed border-mauve/40 bg-white/40",
+                    "group relative flex h-full w-full flex-col gap-2 rounded-2xl border p-3 text-left transition-all duration-200 ease-out hover:shadow-ambient-lg focus-visible:outline-none focus-visible:shadow-focus active:scale-[0.98]",
+                    s.done ? "border-line bg-white" : "border-dashed border-mauve/40 bg-white/40",
                   )}
                 >
                   {/* Connector to the next step (wide screens). */}
                   {i < steps.length - 1 && <span aria-hidden className={cn("absolute -right-2 top-7 hidden h-0.5 w-2 lg:block", s.done ? "bg-teal/50" : "bg-line")} />}
                   <span className="flex items-center justify-between gap-2">
-                    <span className={cn("grid h-9 w-9 place-items-center rounded-xl ring-1 ring-inset transition-shadow group-hover:shadow-glow", s.done ? "bg-gradient-to-br from-teal to-aqua text-white ring-white/30" : "bg-heather/25 text-ink-soft ring-line/70")}>
+                    <span className={cn("grid h-9 w-9 place-items-center rounded-xl ring-1 ring-inset transition-shadow group-hover:shadow-glow", s.done ? "bg-primary text-white ring-transparent" : "bg-heather/25 text-ink-soft ring-line/70")}>
                       <Icon className="h-[18px] w-[18px]" aria-hidden />
                     </span>
                     {s.done ? (
@@ -77,8 +77,8 @@ export function SetupCockpit({
         </ol>
       </GlassCard>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <GlassCard className="spatial flex items-center gap-4 p-4 transition-transform duration-200 hover:-translate-y-0.5">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <GlassCard className="spatial flex items-center gap-4 p-4 transition-transform duration-200">
           <ProgressRing value={coverage.pct} size={78} stroke={7} />
           <div className="min-w-0">
             <p className="text-[12px] font-semibold uppercase tracking-wide text-ink-muted">Teacher coverage</p>
@@ -86,7 +86,7 @@ export function SetupCockpit({
             <p className="text-[12.5px] text-ink-muted">{coverage.caption}</p>
           </div>
         </GlassCard>
-        <GlassCard className="spatial flex items-center gap-4 p-4 transition-transform duration-200 hover:-translate-y-0.5">
+        <GlassCard className="spatial flex items-center gap-4 p-4 transition-transform duration-200">
           <ProgressRing value={enrollment ? enrolledPct : null} size={78} stroke={7} tone="purple" />
           <div className="min-w-0">
             <p className="text-[12px] font-semibold uppercase tracking-wide text-ink-muted">Student enrollment</p>

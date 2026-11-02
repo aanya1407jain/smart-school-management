@@ -13,6 +13,7 @@ import { Button, Card, CardHeader, Checkbox, ConfirmDialog, FormField, FormSecti
 import { FormError } from "@/features/shared/form-error";
 import { LogoMark } from "@/components/brand/logo";
 import { formatDate } from "@/lib/utils/dates";
+import { PasswordSecurity } from "@/features/profile/password-card";
 import { useMemo } from "react";
 
 // Demo-dataset edits (internal demo personas only; live schools use the Convex settings below).
@@ -83,7 +84,7 @@ export function SettingsPage() {
       <QueryView query={queryState}>
         {(d) => (
           <Tabs defaultValue="school">
-            <TabsList items={[{ value: "school", label: "School information" }, { value: "year", label: "Academic year" }, { value: "general", label: "General" }, { value: "notifications", label: "Notifications" }, { value: "data", label: live ? "System status" : "Demo data" }]} />
+            <TabsList items={[{ value: "school", label: "School information" }, { value: "year", label: "Academic year" }, { value: "general", label: "General" }, { value: "notifications", label: "Notifications" }, { value: "security", label: "Security" }, { value: "data", label: live ? "System status" : "Demo data" }]} />
             <TabsContent value="school"><SchoolInfo initial={d.school} /></TabsContent>
             <TabsContent value="year">
               <Card className="p-6">
@@ -98,6 +99,8 @@ export function SettingsPage() {
             </TabsContent>
             <TabsContent value="general"><GeneralSettings initial={d.school.settings} gradingScheme={d.gradingScheme} /></TabsContent>
             <TabsContent value="notifications"><NotificationSettings initial={d.school.settings} /></TabsContent>
+            {/* Personal sign-in security for the signed-in administrator (moved here from the profile page). */}
+            <TabsContent value="security"><PasswordSecurity /></TabsContent>
             <TabsContent value="data"><DemoData /></TabsContent>
           </Tabs>
         )}

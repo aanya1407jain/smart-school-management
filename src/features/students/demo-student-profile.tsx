@@ -51,7 +51,6 @@ export function DemoStudentProfileBody({ p, backHref }: { p: Profile; backHref?:
   return (
     <div className="space-y-6">
       <GlassCard className="relative overflow-hidden p-6">
-        <div aria-hidden className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full bg-lavender/35 blur-3xl" />
         <div className="relative flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-4">
             <Avatar name={name} size="xl" />
@@ -72,7 +71,7 @@ export function DemoStudentProfileBody({ p, backHref }: { p: Profile; backHref?:
             {isAdmin && <LinkButton href={`/admin/students/${s.id}/edit`}><Pencil className="h-4 w-4" /> Edit</LinkButton>}
           </div>
         </div>
-        <dl className="relative mt-6 grid grid-cols-2 gap-4 border-t border-white/70 pt-5 sm:grid-cols-4">
+        <dl className="relative mt-6 grid grid-cols-2 gap-4 border-t border-line pt-5 sm:grid-cols-4">
           {A && <Metric label="Attendance" value={formatPercent(p.attendance.stats.percentage, 1)} tone={(p.attendance.stats.percentage ?? 100) < 85 ? "warn" : undefined} />}
           {AC && <Metric label="Latest result" value={p.results[0]?.percentage != null ? `${formatPercent(p.results[0].percentage, 1)} · ${p.results[0].grade}` : "—"} />}
           {AC && <Metric label="Pending homework" value={String(pendingHw)} />}
@@ -84,10 +83,10 @@ export function DemoStudentProfileBody({ p, backHref }: { p: Profile; backHref?:
         <TabsList items={tabs} />
 
         <TabsContent value="overview">
-          <div className="grid gap-4 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <Card className="lg:col-span-2">
               <CardHeader title="Personal information" />
-              <dl className="grid gap-x-6 gap-y-4 p-5 sm:grid-cols-2">
+              <dl className="grid grid-cols-1 gap-x-6 gap-y-4 p-5 sm:grid-cols-2">
                 <Info icon={<Cake />} label="Date of birth" value={`${formatDate(s.dateOfBirth)} (${age} yrs)`} />
                 <Info icon={<UserRound />} label="Gender" value={titleCase(s.gender)} />
                 <Info icon={<Droplet />} label="Blood group" value={s.bloodGroup} />
@@ -103,7 +102,7 @@ export function DemoStudentProfileBody({ p, backHref }: { p: Profile; backHref?:
                 {p.guardians[0] ? (
                   <div className="flex items-start gap-3">
                     <Avatar name={p.guardians[0].name} />
-                    <div className="text-sm">
+                    <div className="min-w-0 break-words text-sm">
                       <p className="font-semibold text-ink">{p.guardians[0].name}</p>
                       <p className="text-ink-muted">{p.guardians[0].relation} · {p.guardians[0].occupation}</p>
                       <p className="mt-2 text-ink-soft">{p.guardians[0].phone}</p>
@@ -120,7 +119,7 @@ export function DemoStudentProfileBody({ p, backHref }: { p: Profile; backHref?:
         <TabsContent value="academic">
           <Card>
             <CardHeader title="Subjects & teachers" description={`${p.classInfo.longLabel} · ${p.classInfo.room ?? ""}`} />
-            <ul className="grid gap-2 p-5 sm:grid-cols-2 lg:grid-cols-3">
+            <ul className="grid grid-cols-1 gap-2 p-5 sm:grid-cols-2 lg:grid-cols-3">
               {p.teachers.map((t) => (
                 <li key={t.subjectId} className="rounded-xl border border-line/70 bg-alabaster/60 px-4 py-3">
                   <p className="text-sm font-semibold text-ink">{t.subject}</p>
@@ -132,7 +131,7 @@ export function DemoStudentProfileBody({ p, backHref }: { p: Profile; backHref?:
         </TabsContent>
 
         <TabsContent value="attendance">
-          <div className="grid gap-4 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <Card className="flex flex-col items-center justify-center p-6 text-center">
               <ProgressRing value={p.attendance.stats.percentage} size={132} stroke={11} sublabel="this year" />
               <dl className="mt-5 grid w-full grid-cols-3 gap-2 text-sm">
@@ -176,7 +175,7 @@ export function DemoStudentProfileBody({ p, backHref }: { p: Profile; backHref?:
         {p.fees && (
           <TabsContent value="fees">
             <div className="space-y-4">
-              <div className="grid gap-4 sm:grid-cols-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
                 <Metric boxed label="Total fees" value={formatCurrency(p.fees.totals.gross)} />
                 <Metric boxed label="Concession" value={formatCurrency(p.fees.totals.concession)} />
                 <Metric boxed label="Paid" value={formatCurrency(p.fees.totals.paid)} />
@@ -190,7 +189,7 @@ export function DemoStudentProfileBody({ p, backHref }: { p: Profile; backHref?:
 
         <TabsContent value="exams">
           {p.results.length === 0 ? <Card><EmptyState title="No examination results" description="Results appear here once marks are entered." /></Card> : (
-            <div className="grid gap-4 lg:grid-cols-2">{p.results.map((r) => r && <ResultCard key={r.examId} result={r} />)}</div>
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">{p.results.map((r) => r && <ResultCard key={r.examId} result={r} />)}</div>
           )}
         </TabsContent>
 
@@ -215,7 +214,7 @@ export function DemoStudentProfileBody({ p, backHref }: { p: Profile; backHref?:
         <TabsContent value="documents">
           <Card>
             {s.documents.length === 0 ? <EmptyState title="No documents uploaded" description="Document upload will be available once file storage is connected." icon={<FileText className="h-6 w-6" />} /> : (
-              <ul className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
+              <ul className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
                 {s.documents.map((d) => (
                   <li key={d.id} className="flex items-center gap-3 rounded-xl border border-line/70 bg-alabaster/50 p-3.5">
                     <span className="grid h-10 w-10 place-items-center rounded-xl bg-white text-lagoon shadow-soft"><FileText className="h-5 w-5" aria-hidden /></span>
@@ -232,7 +231,7 @@ export function DemoStudentProfileBody({ p, backHref }: { p: Profile; backHref?:
         </TabsContent>
 
         <TabsContent value="parent">
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             {p.guardians.map((g) => (
               <Card key={g.id} className="p-5">
                 <div className="flex items-start gap-3">

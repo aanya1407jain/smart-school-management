@@ -33,7 +33,7 @@ export function Segmented<T extends string>({
       aria-label={label}
       className={cn(
         "relative inline-flex",
-        chips ? "gap-1.5" : "rounded-xl bg-white/55 p-1 shadow-[inset_0_1px_2px_rgb(6_49_84/0.06)] ring-1 ring-inset ring-line/70 backdrop-blur-md",
+        chips ? "gap-1.5" : "rounded-xl bg-bg p-1 ring-1 ring-inset ring-line",
         className,
       )}
     >
@@ -72,8 +72,8 @@ export function Segmented<T extends string>({
                   "absolute inset-0 -z-10",
                   chips ? "rounded-full" : "rounded-lg",
                   pillClass || (chips
-                    ? "bg-gradient-to-br from-teal to-aqua shadow-[0_4px_14px_-4px_rgb(var(--c-teal)/0.6)]"
-                    : "bg-white shadow-[0_2px_10px_-3px_rgb(var(--c-cyan)/0.45)] ring-1 ring-teal/20"),
+                    ? "bg-primary"
+                    : "bg-white shadow-[0_1px_2px_rgb(16_24_40/0.08)] ring-1 ring-line"),
                 )}
               />
             )}

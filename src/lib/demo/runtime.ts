@@ -21,6 +21,8 @@ import type {
 
 export type NoticeInput = {
   title: string; body: string; type: NoticeType; audience: NoticeAudience; publishDate: string; eventDate: string | null;
+  /** Last day of a multi-day event or holiday. */
+  endDate?: string | null;
   priority: NoticePriority; status: "draft" | "published" | "archived";
 };
 export type NoticeFilters = {

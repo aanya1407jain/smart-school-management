@@ -29,13 +29,21 @@ const LIVE_CATEGORY_MAP: Record<string, NotificationCategory> = {
   account: "general",
 };
 
+/** "Approvals" is a filter, not a stored category: leave decisions and other approval notices. */
+type Filter = NotificationCategory | "all" | "approvals";
+const APPROVAL_TEXT = /\b(leave|approval|approved|approve)\b/i;
+const isApproval = (n: { title: string; message: string; approval?: boolean }) => n.approval ?? APPROVAL_TEXT.test(`${n.title} ${n.message}`);
+const filterLabel = (c: Filter) => (c === "all" ? "All" : c === "approvals" ? "Approvals" : NOTIFICATION_CATEGORY_LABELS[c]);
+
 export function NotificationCenter() {
   const router = useRouter();
   const { toast } = useToast();
-  const { dataSource } = useSession();
+  const { dataSource, user } = useSession();
   const live = dataSource === "live";
+  // The principal's centre (Trisha, Oct 31): no Homework category, plus an Approvals filter.
+  const admin = user?.role === "admin";
   const unread = useUnreadCount();
-  const [category, setCategory] = useState<NotificationCategory | "all">("all");
+  const [category, setCategory] = useState<Filter>("all");
   const [onlyUnread, setOnlyUnread] = useState<"all" | "unread">("all");
 
   // Real Convex queries & mutations
@@ -50,7 +58,7 @@ export function NotificationCenter() {
   // Demo fallback queries
   const allItemsQuery = useQuery(() => (live ? Promise.resolve([]) : requireDemo().notifications.list({})), [live]);
   const q = useQuery(
-    () => (live ? Promise.resolve([]) : requireDemo().notifications.list({ category, unreadOnly: onlyUnread === "unread" })),
+    () => (live ? Promise.resolve([]) : requireDemo().notifications.list({ category: category === "approvals" ? "all" : category, unreadOnly: onlyUnread === "unread" })),
     [live, category, onlyUnread]
   );
 
@@ -62,6 +70,8 @@ export function NotificationCenter() {
       message: n.message,
       read: n.isRead,
       category: (LIVE_CATEGORY_MAP[n.type] ?? "general") as NotificationCategory,
+      // Leave decisions are stored as general notifications linked to the leave request.
+      approval: n.entity?.table === "leaveRequests" || APPROVAL_TEXT.test(n.title),
       createdAt: new Date(n._creationTime).toISOString(),
       href: n.href ?? null,
     }));
@@ -73,19 +83,23 @@ export function NotificationCenter() {
     const base = live ? liveItems : q.data;
     if (!base) return undefined;
     return base.filter((n) => {
-      if (category !== "all" && n.category !== category) return false;
+      if (admin && n.category === "homework") return false;
+      if (category === "approvals") { if (!isApproval(n)) return false; }
+      else if (category !== "all" && n.category !== category) return false;
       if (onlyUnread === "unread" && n.read) return false;
       return true;
     });
-  }, [live, liveItems, q.data, category, onlyUnread]);
+  }, [live, liveItems, q.data, category, onlyUnread, admin]);
 
   const unreadByCategory = useMemo(() => {
     const counts: Record<string, number> = {};
     (allList ?? []).forEach((n) => {
-      if (!n.read) counts[n.category] = (counts[n.category] ?? 0) + 1;
+      if (n.read || (admin && n.category === "homework")) return;
+      counts[n.category] = (counts[n.category] ?? 0) + 1;
+      if (isApproval(n)) counts.approvals = (counts.approvals ?? 0) + 1;
     });
     return counts;
-  }, [allList]);
+  }, [allList, admin]);
 
   const queryState = useMemo<QueryState<NonNullable<typeof items>>>(
     () => ({
@@ -98,15 +112,9 @@ export function NotificationCenter() {
     [live, liveItems, items, q.isLoading, q.error, q.refetch]
   );
 
-  const cats: (NotificationCategory | "all")[] = [
-    "all",
-    "attendance",
-    "fees",
-    "homework",
-    "examination",
-    "notice",
-    "general",
-  ];
+  const cats: Filter[] = admin
+    ? ["all", "attendance", "fees", "examination", "notice", "approvals", "general"]
+    : ["all", "attendance", "fees", "homework", "examination", "notice", "general"];
 
   const fail = (e: unknown) => toast({ title: "That didn't work", description: e instanceof Error ? e.message : "Please try again.", tone: "error" });
 
@@ -200,7 +208,7 @@ export function NotificationCenter() {
           onChange={setCategory}
           items={cats.map((c) => {
             const count = c === "all" ? unread : (unreadByCategory[c] ?? 0);
-            return { value: c, label: c === "all" ? "All" : NOTIFICATION_CATEGORY_LABELS[c], count: count > 0 ? count : null };
+            return { value: c, label: filterLabel(c), count: count > 0 ? count : null };
           })}
         />
         <Segmented
@@ -225,7 +233,7 @@ export function NotificationCenter() {
                   title="No unread notifications"
                   description={
                     category !== "all"
-                      ? `You're all caught up on ${NOTIFICATION_CATEGORY_LABELS[category].toLowerCase()} updates.`
+                      ? `You're all caught up on ${filterLabel(category).toLowerCase()} updates.`
                       : "You have reviewed all incoming notifications."
                   }
                   action={
@@ -237,7 +245,7 @@ export function NotificationCenter() {
               ) : category !== "all" ? (
                 <EmptyState
                   icon={<Bell className="h-6 w-6" />}
-                  title={`No ${NOTIFICATION_CATEGORY_LABELS[category].toLowerCase()} notifications`}
+                  title={`No ${filterLabel(category).toLowerCase()} notifications`}
                   description="New updates in this category will appear here."
                   action={
                     <Button variant="outline" onClick={() => setCategory("all")}>

@@ -12,7 +12,7 @@ export function DropdownContent({ children, align = "end", className }: { childr
       <DM.Content
         align={align}
         sideOffset={8}
-        className={cn("glass-strong spatial z-50 min-w-[200px] origin-[var(--radix-dropdown-menu-content-transform-origin)] rounded-2xl bg-white/90 p-1.5 backdrop-blur-xl data-[state=open]:animate-scale-in", className)}
+        className={cn("glass-strong z-50 min-w-[200px] max-w-[calc(100vw-1rem)] origin-[var(--radix-dropdown-menu-content-transform-origin)] rounded-xl p-1.5 data-[state=open]:animate-scale-in", className)}
       >
         {children}
       </DM.Content>
@@ -28,7 +28,7 @@ export function DropdownItem({ children, onSelect, className, tone }: { children
         // Highlighted item: teal wash with a slim accent bar on the left.
         "relative flex cursor-pointer select-none items-center gap-2.5 rounded-xl px-3 py-2 text-sm outline-none transition-colors",
         "before:absolute before:left-0.5 before:top-1/2 before:h-0 before:w-[3px] before:-translate-y-1/2 before:rounded-full before:transition-all data-[highlighted]:before:h-4",
-        tone === "danger" ? "text-plum before:bg-plum data-[highlighted]:bg-blush/50" : "text-ink-soft before:bg-gradient-to-b before:from-cyan before:to-teal data-[highlighted]:bg-gradient-to-r data-[highlighted]:from-teal-soft data-[highlighted]:to-teal-soft/30 data-[highlighted]:text-lagoon",
+        tone === "danger" ? "text-plum before:bg-plum data-[highlighted]:bg-blush/50" : "text-ink-soft before:bg-primary data-[highlighted]:bg-teal-soft/70 data-[highlighted]:text-lagoon",
         className,
       )}
     >

@@ -9,8 +9,7 @@ import { cn } from "@/lib/utils/cn";
  */
 export function ResultSummary({ term, examName, percentage, grade, rank, failed, badges }: { term?: string | null; examName: string; percentage: number | null; grade?: string | null; rank?: string | null; failed?: boolean; badges?: ReactNode }) {
   return (
-    <div className="relative flex items-center gap-4 overflow-hidden border-b border-line/60 bg-gradient-to-br from-teal-soft/60 via-white/70 to-blush/25 px-5 py-4">
-      <div aria-hidden className="pointer-events-none absolute -right-8 -top-10 h-28 w-28 rounded-full bg-cyan/15 blur-2xl" />
+    <div className="relative flex items-center gap-4 overflow-hidden border-b border-line/60 bg-bg px-5 py-4">
       <ProgressRing value={percentage} size={72} stroke={7} tone={failed ? "plum" : "teal"} />
       <div className="relative min-w-0 flex-1">
         {term && <p className="text-[12px] font-semibold uppercase tracking-wide text-plum">{term}</p>}

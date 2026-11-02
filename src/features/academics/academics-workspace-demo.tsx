@@ -171,7 +171,7 @@ function ClassesTab({ d, autoOpen = false }: { d: Overview; autoOpen?: boolean }
     <div className="space-y-4">
       <div className="flex justify-end"><Button onClick={() => setClassOpen(true)}><Plus className="h-4 w-4" /> Add class</Button></div>
       {d.classes.length === 0 && <Card><EmptyState title={`No classes for ${d.year.name} yet`} description="Create classes to start setting up this academic year." action={<Button onClick={() => setClassOpen(true)}>Add class</Button>} /></Card>}
-      <div className="grid gap-4 xl:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         {d.classes.map((c) => (
           <Card key={c.id}>
             <CardHeader
@@ -179,7 +179,7 @@ function ClassesTab({ d, autoOpen = false }: { d: Overview; autoOpen?: boolean }
               description={`${c.sections.length} sections · ${c.sections.reduce((a, s) => a + s.studentCount, 0)} students · ${c.subjects.length} subjects`}
               action={<div className="flex gap-1.5"><Button size="sm" variant="ghost" onClick={() => setSubjectsFor(c)}>Subjects</Button><Button size="sm" variant="soft" onClick={() => setSectionFor(c.id)}><Plus className="h-3.5 w-3.5" /> Section</Button></div>}
             />
-            <ul className="grid gap-2.5 p-5 sm:grid-cols-3">
+            <ul className="grid grid-cols-1 gap-2.5 p-5 sm:grid-cols-3">
               {c.sections.map((s) => {
                 const open = s.subjectCoverage.filter((x) => !x.teacherId).length;
                 return (
@@ -336,7 +336,7 @@ function EnrollmentsTab({ d }: { d: Overview }) {
   const section = allSections.find((s) => s.id === sectionId);
 
   return (
-    <div className="grid gap-4 lg:grid-cols-5">
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
       <Card className="lg:col-span-2">
         <CardHeader title="Not yet enrolled" description={`Active students without a section in ${d.year.name}`} />
         <div className="space-y-3 p-5">
@@ -367,7 +367,7 @@ function EnrollmentsTab({ d }: { d: Overview }) {
         <div className="p-5">
           <QueryView query={roster} loading="inline">
             {(rows) => rows.length === 0 ? <EmptyState title="No students in this section" /> : (
-              <ul className="grid gap-x-6 sm:grid-cols-2">
+              <ul className="grid grid-cols-1 gap-x-6 sm:grid-cols-2">
                 {rows.map((s) => (
                   <li key={s.id} className="flex items-center justify-between border-b border-line/50 py-2 text-sm">
                     <span><span className="mr-2 inline-block w-6 text-[12px] text-ink-muted">{s.rollNo}</span><span className="font-medium text-ink">{s.name}</span></span>
@@ -399,7 +399,7 @@ function AssignmentsTab({ d }: { d: Overview }) {
         description="Choose who teaches each subject in each section. The teacher sees the class, its students, attendance and marks entry immediately."
         action={<Select aria-label="Class" value={classId} onChange={(e) => setClassId(e.target.value)} className="w-36">{d.classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select>}
       />
-      <div className="overflow-x-auto p-5">
+      <div className="relative overflow-x-auto p-5">
         <table className="w-full min-w-[640px] border-separate border-spacing-0 text-sm">
           <caption className="sr-only">{cls.name} teacher assignments</caption>
           <thead>

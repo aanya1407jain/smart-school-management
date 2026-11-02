@@ -105,7 +105,7 @@ export function StudentLedger({ studentId }: { studentId: string }) {
                   <Button onClick={() => setPayOpen(true)} disabled={!l.totals.outstanding}><Wallet className="h-4 w-4" /> Record payment</Button>
                 </div>
               </div>
-              <div className="mt-6 grid grid-cols-2 gap-4 border-t border-white/70 pt-5 sm:grid-cols-5">
+              <div className="mt-6 grid grid-cols-2 gap-4 border-t border-line pt-5 sm:grid-cols-5">
                 {[["Total fees", l.totals.gross], ["Concession", l.totals.concession], ["Net payable", l.totals.net], ["Paid", l.totals.paid], ["Outstanding", l.totals.outstanding]].map(([k, v]) => (
                   <div key={k as string}><p className="text-[12px] uppercase tracking-wide text-ink-muted">{k}</p><p className={k === "Outstanding" && l.totals.overdue ? "text-lg font-semibold text-plum" : "text-lg font-semibold text-sapphire"}>{formatCurrency(v as number)}</p></div>
                 ))}

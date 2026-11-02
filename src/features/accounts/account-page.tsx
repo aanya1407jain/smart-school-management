@@ -84,7 +84,7 @@ export function AccountPage() {
         <PasswordCard />
 
         {status === "unavailable" && (
-          <p className="rounded-xl border border-line bg-white/60 px-4 py-3 text-[13px] text-ink-muted">{notice}</p>
+          <p className="rounded-xl border border-line bg-white px-4 py-3 text-[13px] text-ink-muted">{notice}</p>
         )}
 
         <div className="flex flex-wrap items-center justify-between gap-3">

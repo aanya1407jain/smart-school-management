@@ -6,7 +6,7 @@ import { GradeChip, ResultSummary } from "./result-card";
 
 export function ResultCard({ result, rank, classSize }: { result: ExamResult; rank?: number | null; classSize?: number }) {
   return (
-    <Card className="spatial overflow-hidden transition-all duration-300 hover:-translate-y-0.5 hover:shadow-ambient-lg">
+    <Card className="spatial overflow-hidden transition-all duration-300 hover:shadow-ambient-lg">
       <ResultSummary
         term={result.term}
         examName={result.examName}

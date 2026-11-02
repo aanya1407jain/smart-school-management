@@ -41,7 +41,7 @@ function LiveExamReport() {
         <Select aria-label="Examination" value={selected} onChange={(e) => setExamId(e.target.value)} className="w-64">{published.map((e) => <option key={e.examId} value={e.examId}>{e.name}</option>)}</Select>
         <p className="text-sm text-ink-muted">{perf.students} students · average <span className="font-semibold text-ink">{perf.averagePercentage === null ? "—" : formatPercent(perf.averagePercentage, 1)}</span> · pass rate <span className="font-semibold text-ink">{perf.passRate === null ? "—" : formatPercent(perf.passRate, 1)}</span></p>
       </div>
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <ChartCard title="Average by section" description="Percentage of total marks">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={perf.sections.map((x) => ({ name: x.section, average: x.averagePercentage ?? 0 }))} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
@@ -84,7 +84,7 @@ function DemoExamReport() {
             </div>
             <p className="text-sm text-ink-muted">Pass rate <span className="font-semibold text-ink">{formatPercent(d.passRate, 1)}</span>{d.exam.status !== "published" && " · includes unpublished marks"}</p>
           </Card>
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <ChartCard title="Average by class" description="Class average vs highest score">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={d.byClass} margin={{ top: 8, right: 8, left: 0, bottom: 0 }} barGap={2}>
@@ -110,7 +110,7 @@ function DemoExamReport() {
               </ResponsiveContainer>
             </ChartCard>
           </div>
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <ChartCard title="Subject averages" description="All classes combined">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={d.bySubject} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 0 }}>
@@ -159,7 +159,7 @@ function DemoAcademicReport() {
       {(rows) => rows.length < 1 ? <Card><EmptyState title="Not enough exam data" /></Card> : (
         <div className="space-y-5">
           <p className="text-sm text-ink-muted">Subject averages across examinations this year — one small chart per subject so every line stays readable.</p>
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {subjects.filter((s) => s in rows[0]).map((s) => {
               const data = rows.map((r: Record<string, unknown>) => ({ exam: String(r.exam).replace(" Examination", ""), value: Number(r[s]) }));
               const last = data[data.length - 1]?.value ?? 0;

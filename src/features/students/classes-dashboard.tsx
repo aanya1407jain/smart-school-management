@@ -82,7 +82,7 @@ export function ClassesDashboard({ classes, liveNote }: { classes: TeacherClassC
       <PageHeader title="My Classes" description="Your advisory section and the subject classes you teach this year — with today's tasks at a glance." />
 
       {/* Summary strip */}
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Metric icon={<Users className="h-5 w-5" />} label="Students taught" value={stats.students} hint="Across all your sections" />
         <Metric icon={<Presentation className="h-5 w-5" />} label="Sections assigned" value={stats.sections} hint={`${classes.filter((c) => c.isClassTeacher).length} advisory · ${classes.filter((c) => !c.isClassTeacher).length} subject`} />
         <Metric
@@ -91,8 +91,8 @@ export function ClassesDashboard({ classes, liveNote }: { classes: TeacherClassC
           value={stats.avg === null ? "—" : `${stats.avg.toFixed(1)}%`}
           hint={stats.avg === null ? "Not available yet" : undefined}
           extra={stats.avg !== null && (
-            <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/70 ring-1 ring-inset ring-line/70" role="progressbar" aria-valuenow={Math.round(stats.avg)} aria-valuemin={0} aria-valuemax={100} aria-label="Attendance average">
-              <div className={cn("h-full rounded-full bg-gradient-to-r", stats.avg >= 85 ? "from-emerald-400 to-teal" : "from-amber-400 to-rose-500")} style={{ width: `${stats.avg}%` }} />
+            <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white ring-1 ring-inset ring-line/70" role="progressbar" aria-valuenow={Math.round(stats.avg)} aria-valuemin={0} aria-valuemax={100} aria-label="Attendance average">
+              <div className={cn("h-full rounded-full", stats.avg >= 85 ? "bg-teal" : "bg-amber-500")} style={{ width: `${stats.avg}%` }} />
             </div>
           )}
         />
@@ -127,7 +127,7 @@ export function ClassesDashboard({ classes, liveNote }: { classes: TeacherClassC
           {subject.length > 0 && (
             <section aria-label="Subject classes">
               {advisory.length > 0 && <h2 className="mb-3 text-[13px] font-semibold uppercase tracking-[0.12em] text-ink-muted">Subject classes</h2>}
-              <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 {subject.map((c, i) => <li key={c.sectionId} className="stagger" style={{ "--stagger-i": i } as CSSProperties}><ClassCard c={c} /></li>)}
               </ul>
             </section>
@@ -140,13 +140,13 @@ export function ClassesDashboard({ classes, liveNote }: { classes: TeacherClassC
 
 function Metric({ icon, label, value, hint, extra, tone = "default" }: { icon: ReactNode; label: string; value: ReactNode; hint?: ReactNode; extra?: ReactNode; tone?: "default" | "amber" }) {
   return (
-    <div className="spatial rounded-2xl border border-white/70 bg-white/70 p-4 backdrop-blur-md transition-transform duration-200 hover:-translate-y-0.5">
+    <div className="spatial rounded-2xl border border-line bg-white p-4 transition-transform duration-200">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-[12.5px] font-medium text-ink-muted">{label}</p>
           <p className="figures mt-1 text-2xl font-bold text-sapphire">{value}</p>
         </div>
-        <span className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-xl ring-1 ring-inset", tone === "amber" ? "bg-amber-50 text-amber-700 ring-amber-500/25" : "bg-gradient-to-br from-teal-soft to-cyan/15 text-lagoon ring-teal/20")}>{icon}</span>
+        <span className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-xl ring-1 ring-inset", tone === "amber" ? "bg-amber-50 text-amber-700 ring-amber-500/25" : "bg-teal-soft text-lagoon ring-teal/20")}>{icon}</span>
       </div>
       {extra}
       {hint && <p className="mt-1.5 text-[12px] text-ink-muted">{hint}</p>}
@@ -166,17 +166,17 @@ function AvatarStack({ names, total }: { names: string[]; total: number | null }
 
 function RoomBadge({ room }: { room: string | null }) {
   if (!room) return null;
-  return <span className="inline-flex items-center gap-1 rounded-full bg-white/80 px-2 py-0.5 text-[12px] font-medium text-ink-soft ring-1 ring-inset ring-line/70"><DoorOpen className="h-3 w-3" aria-hidden />{room}</span>;
+  return <span className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-0.5 text-[12px] font-medium text-ink-soft ring-1 ring-inset ring-line/70"><DoorOpen className="h-3 w-3" aria-hidden />{room}</span>;
 }
 
 function MetricTiles({ c }: { c: TeacherClassCard }) {
   return (
     <dl className="grid grid-cols-3 gap-2">
-      <div className="rounded-xl bg-white/60 p-2.5 ring-1 ring-inset ring-line/60">
+      <div className="rounded-xl bg-white p-2.5 ring-1 ring-inset ring-line/60">
         <dt className="flex items-center gap-1 text-[11px] font-medium text-ink-muted"><Users className="h-3 w-3" aria-hidden /> Students</dt>
         <dd className="mt-1 flex flex-col items-start gap-1"><span className="figures text-lg font-bold leading-none text-ink">{c.students ?? "—"}</span><AvatarStack names={c.studentNames.slice(0, 3)} total={c.students} /></dd>
       </div>
-      <div className="rounded-xl bg-white/60 p-2.5 ring-1 ring-inset ring-line/60">
+      <div className="rounded-xl bg-white p-2.5 ring-1 ring-inset ring-line/60">
         <dt className="flex items-center gap-1 text-[11px] font-medium text-ink-muted"><CalendarCheck2 className="h-3 w-3" aria-hidden /> Attendance</dt>
         <dd className="mt-1 flex items-center gap-2">
           {c.attendancePct === null ? <span className="text-[12px] text-ink-muted">Not available</span> : (
@@ -184,7 +184,7 @@ function MetricTiles({ c }: { c: TeacherClassCard }) {
           )}
         </dd>
       </div>
-      <div className="rounded-xl bg-white/60 p-2.5 ring-1 ring-inset ring-line/60">
+      <div className="rounded-xl bg-white p-2.5 ring-1 ring-inset ring-line/60">
         <dt className="flex items-center gap-1 text-[11px] font-medium text-ink-muted"><ClipboardList className="h-3 w-3" aria-hidden /> Homework</dt>
         <dd className="mt-1">
           {c.activeHomework === null ? <span className="text-[12px] text-ink-muted">—</span> : (
@@ -216,23 +216,22 @@ function AdvisoryHero({ c }: { c: TeacherClassCard }) {
   const pending = c.markedToday === false;
   return (
     <section aria-label={`Advisory section ${c.label}`} className="gradient-border spatial relative overflow-hidden rounded-3xl p-5 sm:p-6">
-      <div aria-hidden className="pointer-events-none absolute -right-16 -top-20 h-56 w-56 rounded-full bg-gradient-to-br from-violet-400/20 to-cyan/20 blur-3xl" />
-      <div className="relative grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
+      <div className="relative grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
         <div className="space-y-4">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 px-2.5 py-1 text-[11.5px] font-bold uppercase tracking-wide text-white shadow-[0_4px_14px_-4px_rgb(99_102_241/0.6)]"><Star className="h-3 w-3" aria-hidden /> My advisory · Class teacher</span>
+            <span className="inline-flex items-center gap-1 rounded-full bg-sapphire px-2.5 py-1 text-[11.5px] font-bold uppercase tracking-wide text-white"><Star className="h-3 w-3" aria-hidden /> My advisory · Class teacher</span>
             <RoomBadge room={c.room} />
             {c.subjects.map((s) => <SubjectPill key={s} subject={s} />)}
           </div>
           <div>
-            <h2 className="text-3xl font-bold tracking-tight text-sapphire">Class {c.label}</h2>
+            <h2 className="text-2xl font-semibold tracking-tight text-sapphire">Class {c.label}</h2>
             <p className="text-[13px] text-ink-muted">You mark and correct this section&apos;s daily register and are the first contact for its parents.</p>
           </div>
           <MetricTiles c={c} />
         </div>
-        <div className="flex flex-col justify-between gap-3 rounded-2xl bg-white/60 p-4 ring-1 ring-inset ring-white/70 backdrop-blur-md">
+        <div className="flex flex-col justify-between gap-3 rounded-2xl bg-bg p-4 ring-1 ring-inset ring-line">
           <StatusBanner c={c} />
-          {isRouteShipped(attendanceHref(c)) && <LinkButton href={attendanceHref(c)} size="lg" className={cn("w-full justify-center", pending ? "bg-gradient-to-br from-violet-600 to-indigo-600 shadow-[0_8px_24px_-8px_rgb(99_102_241/0.7)] hover:shadow-[0_10px_28px_-8px_rgb(99_102_241/0.8)]" : "")} variant={pending ? "primary" : "outline"}>
+          {isRouteShipped(attendanceHref(c)) && <LinkButton href={attendanceHref(c)} size="lg" className={cn("w-full justify-center", pending ? "bg-sapphire hover:bg-sapphire/90" : "")} variant={pending ? "primary" : "outline"}>
             <CalendarCheck2 className="h-4 w-4" /> {pending ? "Mark attendance now" : "Edit today's attendance"}
           </LinkButton>}
           <div className="grid grid-cols-3 gap-2">
@@ -250,7 +249,7 @@ function AdvisoryHero({ c }: { c: TeacherClassCard }) {
 function QuickLink({ href, icon, label }: { href: string; icon: ReactNode; label: string }) {
   if (!isRouteShipped(href)) return null; // the module is not part of this build
   return (
-    <Link href={href} className="flex flex-col items-center gap-1 rounded-xl bg-white/70 px-2 py-2 text-[12px] font-semibold text-ink-soft ring-1 ring-inset ring-line/70 transition-all hover:-translate-y-0.5 hover:bg-white hover:text-lagoon active:scale-95 focus-visible:outline-none focus-visible:shadow-focus">
+    <Link href={href} className="flex flex-col items-center gap-1 rounded-xl bg-white px-2 py-2 text-[12px] font-semibold text-ink-soft ring-1 ring-inset ring-line/70 transition-all hover:bg-white hover:text-lagoon active:scale-95 focus-visible:outline-none focus-visible:shadow-focus">
       <span className="text-lagoon">{icon}</span>{label}
     </Link>
   );
@@ -258,7 +257,7 @@ function QuickLink({ href, icon, label }: { href: string; icon: ReactNode; label
 
 function ClassCard({ c }: { c: TeacherClassCard }) {
   return (
-    <article className="flex h-full flex-col rounded-2xl border border-white/70 bg-white/70 p-4 shadow-sm backdrop-blur-md transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-ambient-lg">
+    <article className="flex h-full flex-col rounded-2xl border border-line bg-white p-4 shadow-sm transition-all duration-200 ease-out hover:shadow-ambient-lg">
       <div className="flex items-start justify-between gap-2">
         <h3 className="text-xl font-bold tracking-tight text-sapphire">Class {c.label}</h3>
         <RoomBadge room={c.room} />

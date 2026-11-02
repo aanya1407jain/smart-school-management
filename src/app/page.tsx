@@ -49,7 +49,7 @@ export default function SplashPage() {
           initial={{ scaleX: 0 }}
           animate={{ scaleX: 1 }}
           transition={{ delay: 0.9, duration: 1.3, ease: "easeInOut" }}
-          className="mt-9 h-[2px] w-24 origin-left rounded-full bg-gradient-to-r from-teal via-mauve to-lavender"
+          className="mt-9 h-[2px] w-24 origin-left rounded-full bg-teal"
           aria-hidden
         />
         <span className="sr-only" role="status">Loading {PRODUCT.name}</span>

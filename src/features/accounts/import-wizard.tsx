@@ -186,7 +186,7 @@ export function ImportWizard({ allowed, canCreateAccounts }: { allowed: ImportTa
           {allowed.length > 1 && (
             <Segmented label="What are you importing?" value={target} onChange={(v) => setTarget(v)} options={allowed.map((t) => ({ value: t, label: IMPORT_SPECS[t].label }))} />
           )}
-          <div className="rounded-2xl border border-dashed border-heather bg-white/60 p-6 text-center">
+          <div className="rounded-2xl border border-dashed border-heather bg-white p-6 text-center">
             <FileSpreadsheet className="mx-auto mb-2 h-8 w-8 text-sapphire" aria-hidden />
             <p className="text-sm font-medium text-ink">Upload a CSV or Excel (.xlsx) file of {spec.label.toLowerCase()}</p>
             <p className="mt-1 text-[13px] text-ink-muted">First row = column headings. Up to {MAX_IMPORT_ROWS} rows per import.</p>
@@ -225,7 +225,7 @@ export function ImportWizard({ allowed, canCreateAccounts }: { allowed: ImportTa
           </div>
 
           {target === "students" && (
-            <p role="note" className="rounded-xl border border-line/80 bg-white/60 px-4 py-3 text-[13px] text-ink-soft">
+            <p role="note" className="rounded-xl border border-line/80 bg-white px-4 py-3 text-[13px] text-ink-soft">
               Roll numbers are assigned automatically based on the complete class roster: after the import every affected section
               (existing and new students together) is numbered 1, 2, 3… alphabetically by first name, then last name.
               {matches.columns.some((c) => c.status === "not_imported" && /roll/i.test(c.note ?? "")) && <> The file&apos;s roll-number column is ignored.</>}
@@ -247,7 +247,7 @@ export function ImportWizard({ allowed, canCreateAccounts }: { allowed: ImportTa
             </p>
           )}
 
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {spec.fields.filter((f) => f.key !== "loginId" || createAccounts).map((f) => (
               <FormField key={f.key} label={f.label} required={f.required} hint={f.help}>
                 <Select value={mapping[f.key] === null || mapping[f.key] === undefined ? "" : String(mapping[f.key])} onChange={(e) => setField(f.key, e.target.value)}>
@@ -258,9 +258,9 @@ export function ImportWizard({ allowed, canCreateAccounts }: { allowed: ImportTa
             ))}
           </div>
 
-          <details className="rounded-xl border border-line/80 bg-white/60 p-4 text-[13px]" open={matches.columns.some((c) => c.status !== "mapped" && c.status !== "empty")}>
+          <details className="rounded-xl border border-line/80 bg-white p-4 text-[13px]" open={matches.columns.some((c) => c.status !== "mapped" && c.status !== "empty")}>
             <summary className="cursor-pointer font-medium text-ink">Columns in this sheet ({sheet.headings.filter(Boolean).length})</summary>
-            <ul className="mt-3 grid gap-1.5 sm:grid-cols-2">
+            <ul className="mt-3 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
               {matches.columns.filter((c) => c.status !== "empty").map((c) => {
                 const usedFor = columnUse.get(c.index);
                 return (
@@ -280,7 +280,7 @@ export function ImportWizard({ allowed, canCreateAccounts }: { allowed: ImportTa
           </details>
 
           {sampleFields.length > 0 && (
-            <div className="overflow-x-auto rounded-xl border border-line/80 bg-white/70">
+            <div className="relative overflow-x-auto rounded-xl border border-line/80 bg-white">
               <table className="w-full text-[12.5px]">
                 <caption className="px-3 py-2 text-left text-[12px] font-medium text-ink-muted">First rows as they will be read with this mapping</caption>
                 <thead className="bg-alabaster text-left text-ink-muted">
@@ -299,7 +299,7 @@ export function ImportWizard({ allowed, canCreateAccounts }: { allowed: ImportTa
           )}
 
           {canCreateAccounts && (
-            <div className="rounded-xl border border-line/80 bg-white/60 p-4">
+            <div className="rounded-xl border border-line/80 bg-white p-4">
               <Checkbox
                 checked={createAccounts}
                 onChange={(e) => setCreateAccounts(e.target.checked)}
@@ -333,7 +333,7 @@ export function ImportWizard({ allowed, canCreateAccounts }: { allowed: ImportTa
             </p>
           )}
           <Segmented label="Rows to show" size="sm" value={filter} onChange={setFilter} options={[{ value: "problems", label: "Errors & warnings" }, { value: "all", label: "All rows" }]} />
-          <div className="max-h-[420px] overflow-y-auto rounded-xl border border-line/80 bg-white/70">
+          <div className="max-h-[420px] overflow-y-auto rounded-xl border border-line/80 bg-white">
             <table className="w-full text-sm">
               <caption className="sr-only">Validation results</caption>
               <thead className="sticky top-0 bg-alabaster text-left text-[12px] uppercase tracking-wide text-ink-muted">

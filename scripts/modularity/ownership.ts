@@ -115,7 +115,6 @@ export const FILE_RULES: readonly [RegExp, Owner][] = [
   [/^src\/features\/teachers\/my-classes\.tsx$/, "demo"], // demo My Classes
   [/^src\/features\/teachers\//, "core"],
   [/^src\/features\/dashboard\/(student|teacher)-dashboard\.tsx$/, "demo"], // demo dashboards
-  [/^src\/features\/dashboard\/student-achievements\.tsx$/, "students"],
   [/^src\/features\/(dashboard|reports)\//, "core"], // shells: module parts are contributions
   // ---------------------------------------------------------------- frontend: routes
   [/^src\/app\/(admin\/(students|promotions)|student\/(certificates|profile|notices|dashboard)|teacher\/(students|classes)|verify)(\/|$)/, "students"],

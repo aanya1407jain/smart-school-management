@@ -97,7 +97,7 @@ function EnrollmentsTab({ year, sections }: { year: Year; sections: Section[] })
                 <span className="text-[12.5px] text-ink-muted">Start date {formatDate(startDate)}</span>
               </div>
               {unenrolled.truncated && <p className="text-[12.5px] text-plum">Showing the first {unenrolled.students.length} of {unenrolled.total}.</p>}
-              <ul className="grid gap-2 sm:grid-cols-2">
+              <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 {unenrolled.students.map((s) => (
                   <li key={s.studentId} className="rounded-xl border border-line/70 px-3 py-2">
                     <Checkbox label={`${s.name} · ${s.admissionNo}`} checked={selected.has(s.studentId)} onChange={(e) => {

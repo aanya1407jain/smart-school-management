@@ -13,6 +13,8 @@ export interface NoticeInput {
   audience: NoticeAudience;
   publishDate: string;
   eventDate: string | null;
+  /** Last day of a multi-day event or holiday. */
+  endDate?: string | null;
   priority: NoticePriority;
   status: "draft" | "published" | "archived";
 }
@@ -33,6 +35,8 @@ function validate(input: NoticeInput) {
   if (input.body.trim().length < 10) e.body = "Add a short description";
   if (!input.publishDate) e.publishDate = "Publish date is required";
   if ((input.type === "event" || input.type === "holiday") && !input.eventDate) e.eventDate = "Events and holidays need a date";
+  if (input.endDate && !input.eventDate) e.endDate = "Set the start date first";
+  else if (input.endDate && input.eventDate && input.endDate < input.eventDate) e.endDate = "Cannot be before the start date";
   if (input.audience.scope === "classes" && !input.audience.classIds?.length) e.audience = "Select at least one class";
   if (input.audience.scope === "sections" && !input.audience.sectionIds?.length) e.audience = "Select at least one section";
   if (Object.keys(e).length) throw invalid("Please fix the highlighted fields.", e);
@@ -95,6 +99,7 @@ export const mockNoticeService = {
         audience: input.audience,
         publishDate: input.publishDate,
         eventDate: input.eventDate,
+        endDate: input.endDate ?? null,
         priority: input.priority,
         status: input.status,
       };
@@ -109,6 +114,7 @@ export const mockNoticeService = {
         n.audience = editable.audience;
         n.publishDate = editable.publishDate;
         n.eventDate = editable.eventDate;
+        n.endDate = editable.endDate && editable.endDate !== editable.eventDate ? editable.endDate : null;
         n.priority = editable.priority;
         n.status = editable.status;
         // Only send notifications when transitioning a draft to published (not when restoring an archived notice)

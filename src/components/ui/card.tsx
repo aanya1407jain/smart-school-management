@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils/cn";
 export function GlassCard({ className, hover, ...props }: HTMLAttributes<HTMLDivElement> & { hover?: boolean }) {
   return (
     <div
-      className={cn("glass rounded-2xl", hover && "transition-all duration-300 ease-out hover:-translate-y-0.5 hover:shadow-ambient-lg", className)}
+      className={cn("glass rounded-2xl", hover && "transition-colors duration-150 hover:border-ink-muted/30", className)}
       {...props}
     />
   );
@@ -22,7 +22,7 @@ export function CardHeader({
   return (
     <div className={cn("flex items-start justify-between gap-3 px-5 pt-5", className)}>
       <div className="flex min-w-0 items-start gap-3">
-        {icon && <div className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-teal-soft to-cyan/15 text-lagoon ring-1 ring-inset ring-teal/20">{icon}</div>}
+        {icon && <div className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-teal-soft text-lagoon">{icon}</div>}
         <div className="min-w-0">
           <h2 className="text-[15px] font-semibold text-ink">{title}</h2>
           {description && <p className="mt-0.5 text-[13px] text-ink-muted">{description}</p>}

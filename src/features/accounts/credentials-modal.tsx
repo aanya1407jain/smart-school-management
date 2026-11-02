@@ -50,7 +50,7 @@ export function CredentialsModal({
         <span>Temporary passwords are shown only now and are not stored anywhere readable. If one is lost, reset the password to issue a new one.</span>
       </div>
       {credentials.length > 0 && (
-        <ul className="divide-y divide-line/70 rounded-xl border border-line/80 bg-white/70" aria-label="Issued credentials">
+        <ul className="divide-y divide-line/70 rounded-xl border border-line/80 bg-white" aria-label="Issued credentials">
           {credentials.map((c) => (
             <li key={c.loginId} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
               <div className="min-w-0">
@@ -73,7 +73,7 @@ export function CredentialsModal({
         </ul>
       )}
       {failures.length > 0 && (
-        <div className="mt-4 rounded-xl border border-plum/20 bg-white/70 px-4 py-3 text-[13px]" role="alert">
+        <div className="mt-4 rounded-xl border border-plum/20 bg-white px-4 py-3 text-[13px]" role="alert">
           <p className="mb-1 font-medium text-plum">{failures.length} account(s) could not be issued credentials</p>
           <ul className="list-disc space-y-0.5 pl-5 text-ink-soft">
             {failures.map((f, i) => <li key={i}>{f.displayName}: {f.error}</li>)}

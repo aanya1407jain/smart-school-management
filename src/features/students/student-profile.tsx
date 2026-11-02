@@ -107,6 +107,7 @@ function normalizeProfile(raw: ServerProfile) {
     email: s.email ?? undefined,
     phone: s.phone ?? undefined,
     address: s.address ?? undefined,
+    previousSchool: s.previousSchool ?? null,
     documents: [] as { id?: string; name?: string; kind?: string; sizeKb?: number; uploadedAt?: string }[],
   };
   const classLabel = enrollment ? enrollment.sectionDisplayName ?? [enrollment.className, enrollment.sectionName].filter(Boolean).join(" - ") : "";
@@ -209,7 +210,6 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
   return (
     <div className="space-y-6">
       <GlassCard className="relative overflow-hidden p-6">
-        <div aria-hidden className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full bg-lavender/35 blur-3xl" />
         <div className="relative flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-4">
             <Avatar name={name} size="xl" />
@@ -234,7 +234,7 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
             {isAdmin && S && s.id && <LinkButton href={`/admin/students/${s.id}/edit`}><Pencil className="h-4 w-4" /> Edit</LinkButton>}
           </div>
         </div>
-        <dl className="relative mt-6 grid grid-cols-2 gap-4 border-t border-white/70 pt-5 sm:grid-cols-4">
+        <dl className="relative mt-6 grid grid-cols-2 gap-4 border-t border-line pt-5 sm:grid-cols-4">
           {A && <Metric label="Attendance" value={pct != null ? formatPercent(pct, 1) : dash} tone={pct != null && pct < 85 ? "warn" : undefined} />}
           {contributed.flatMap((c) => c.metrics?.(slot) ?? []).map((m) => <Metric key={m.key} label={m.label} value={m.value} tone={m.tone} />)}
         </dl>
@@ -244,10 +244,10 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
         <TabsList items={tabs} />
 
         <TabsContent value="overview">
-          <div className="grid gap-4 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <Card className="lg:col-span-2">
               <CardHeader title="Personal information" />
-              <dl className="grid gap-x-6 gap-y-4 p-5 sm:grid-cols-2">
+              <dl className="grid grid-cols-1 gap-x-6 gap-y-4 p-5 sm:grid-cols-2">
                 <Info icon={<Cake />} label="Date of birth" value={s.dateOfBirth ? `${formatDate(s.dateOfBirth)}${age != null ? ` (${age} yrs)` : ""}` : dash} />
                 <Info icon={<UserRound />} label="Gender" value={safeTitle(s.gender)} />
                 <Info icon={<Droplet />} label="Blood group" value={safe(s.bloodGroup)} />
@@ -263,7 +263,7 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
                 {primaryContact ? (
                   <div className="flex items-start gap-3">
                     <Avatar name={primaryContact.name} />
-                    <div className="text-sm">
+                    <div className="min-w-0 break-words text-sm">
                       <p className="font-semibold text-ink">{primaryContact.name}</p>
                       <p className="text-ink-muted">
                         {primaryContact.relation}{primaryContact.occupation ? ` · ${primaryContact.occupation}` : ""}
@@ -281,6 +281,26 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
               )}
             </Card>
           </div>
+          {s.previousSchool && (
+            <Card className="mt-4" data-testid="previous-school">
+              <CardHeader title="Previous school" description="Admitted from another school with a transfer certificate." />
+              <dl className="grid grid-cols-1 gap-x-6 gap-y-3 p-5 text-sm sm:grid-cols-3">
+                {[
+                  ["School", s.previousSchool.name],
+                  ["Board", s.previousSchool.board],
+                  ["Last class passed", s.previousSchool.lastClassPassed],
+                  ["TC number", s.previousSchool.tcNumber],
+                  ["TC issue date", s.previousSchool.tcIssueDate ? formatDate(s.previousSchool.tcIssueDate) : undefined],
+                  ["Reason for leaving", s.previousSchool.leavingReason],
+                ].map(([label, value]) => (
+                  <div key={label} className="min-w-0">
+                    <dt className="text-[12px] text-ink-muted">{label}</dt>
+                    <dd className="break-words font-medium text-ink">{value || "—"}</dd>
+                  </div>
+                ))}
+              </dl>
+            </Card>
+          )}
         </TabsContent>
 
         <TabsContent value="academic">
@@ -289,7 +309,7 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
               title="Enrollment"
               description={[p.classLabel && `Class ${p.classLabel}`, p.room].filter(Boolean).join(" · ") || undefined}
             />
-            <dl className="grid gap-x-6 gap-y-4 p-5 sm:grid-cols-3">
+            <dl className="grid grid-cols-1 gap-x-6 gap-y-4 p-5 sm:grid-cols-3">
               <Info icon={<UserRound />} label="Class" value={safe(p.enrollment?.className)} />
               <Info icon={<UserRound />} label="Section" value={safe(p.enrollment?.sectionName)} />
               <Info icon={<UserRound />} label="Roll no." value={p.enrollment?.rollNo != null ? String(p.enrollment.rollNo) : dash} />
@@ -300,7 +320,7 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
             {p.teachers.length > 0 && (
               <>
                 <CardHeader title="Subjects & teachers" />
-                <ul className="grid gap-2 p-5 sm:grid-cols-2 lg:grid-cols-3">
+                <ul className="grid grid-cols-1 gap-2 p-5 sm:grid-cols-2 lg:grid-cols-3">
                   {p.teachers.map((t) => (
                     <li key={t.subjectId} className="rounded-xl border border-line/70 bg-alabaster/60 px-4 py-3">
                       <p className="text-sm font-semibold text-ink">{t.subject}</p>
@@ -315,7 +335,7 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
         </TabsContent>
 
         <TabsContent value="attendance">
-          <div className="grid gap-4 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <Card className="flex flex-col items-center justify-center p-6 text-center">
               <ProgressRing value={pct ?? 0} size={132} stroke={11} sublabel="this year" />
               <dl className="mt-5 grid w-full grid-cols-3 gap-2 text-sm">
@@ -383,7 +403,7 @@ function ProfileBody({ p, backHref }: { p: ProfileVM; backHref?: string }) {
           {p.parentContacts.length === 0 ? (
             <Card><EmptyState title="No parent contact recorded" /></Card>
           ) : (
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               {p.parentContacts.map((g) => (
                 <Card key={g.id} className="p-5">
                   <div className="flex items-start gap-3">

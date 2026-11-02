@@ -20,17 +20,17 @@ export function LiveFeesPanel({ fees, today = todayISO() }: { fees: LiveFees; to
   return (
     <div className="space-y-4" data-testid="live-fees">
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <Amount label="Total fees" value={rupees(fees.totals.grossMinor)} accent="from-sapphire/70 to-lagoon/60" />
-        <Amount label="Concession" value={rupees(fees.totals.concessionMinor)} accent="from-lavender to-mauve" />
-        <Amount label="Paid" value={rupees(fees.totals.paidMinor)} accent="from-emerald-400 to-teal" />
-        <Amount label="Outstanding" value={rupees(fees.totals.outstandingMinor)} warn={overdue} accent={overdue ? "from-amber-400 to-rose-500" : "from-amber-300 to-amber-500"} />
+        <Amount label="Total fees" value={rupees(fees.totals.grossMinor)} accent="bg-sapphire/70" />
+        <Amount label="Concession" value={rupees(fees.totals.concessionMinor)} accent="bg-mauve" />
+        <Amount label="Paid" value={rupees(fees.totals.paidMinor)} accent="bg-teal" />
+        <Amount label="Outstanding" value={rupees(fees.totals.outstandingMinor)} warn={overdue} accent={overdue ? "bg-pd-danger" : "bg-amber-500"} />
       </div>
       <Card>
         <CardHeader title="Installments" description={fees.academicYear} />
         {fees.obligations.length === 0 ? (
           <EmptyState title="No fees assigned" description="The school office has not assigned a fee structure to this student for the current year." />
         ) : (
-          <div className="overflow-x-auto p-5">
+          <div className="relative overflow-x-auto p-5">
             <table className="w-full text-sm">
               <caption className="sr-only">Fee installments</caption>
               <thead><tr className="text-left text-[11.5px] uppercase tracking-wide text-ink-muted"><th className="py-2">Installment</th><th className="py-2 text-right">Amount</th><th className="py-2 text-right">Concession</th><th className="py-2 text-right">Paid</th><th className="py-2 text-right">Balance</th></tr></thead>
@@ -66,11 +66,11 @@ export function LiveFeesPanel({ fees, today = todayISO() }: { fees: LiveFees; to
   );
 }
 
-/** Split fee card: frosted surface with a gradient accent stripe and tabular amount. */
+/** Split fee card: flat surface with a coloured accent stripe and tabular amount. */
 function Amount({ label, value, warn, accent }: { label: string; value: string; warn?: boolean; accent: string }) {
   return (
-    <div className="solid-card spatial relative overflow-hidden p-4 pl-5 transition-transform duration-200 hover:-translate-y-0.5">
-      <span aria-hidden className={cn("absolute inset-y-3 left-0 w-1 rounded-r-full bg-gradient-to-b", accent)} />
+    <div className="solid-card spatial relative overflow-hidden p-4 pl-5 transition-transform duration-200">
+      <span aria-hidden className={cn("absolute inset-y-3 left-0 w-1 rounded-r-full", accent)} />
       <p className="text-[12px] font-medium uppercase tracking-wide text-ink-muted">{label}</p>
       <p className={cn("figures mt-1 text-lg font-bold", warn ? "text-plum" : "text-sapphire")}>{value}</p>
     </div>

@@ -86,7 +86,7 @@ export function ResultPill({ result }: { result: PassResult }) {
 export function CheckItem({ ok, children, detail }: { ok: boolean; children: ReactNode; detail?: ReactNode }) {
   return (
     <li className="flex items-start gap-2.5">
-      <span aria-hidden className={cn("mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full text-[11px] font-bold", ok ? "bg-gradient-to-br from-teal to-aqua text-white shadow-[0_2px_8px_-2px_rgb(var(--c-teal)/0.6)]" : "bg-gradient-to-br from-amber-300 to-rose-400 text-white")}>{ok ? "✓" : "!"}</span>
+      <span aria-hidden className={cn("mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full text-[11px] font-bold", ok ? "bg-primary text-white" : "bg-pd-warning text-white")}>{ok ? "✓" : "!"}</span>
       <span className="min-w-0 text-sm">
         <span className={cn("font-medium", ok ? "text-ink" : "text-plum")}>{children}</span>
         <span className="sr-only">{ok ? " — done" : " — needs attention"}</span>

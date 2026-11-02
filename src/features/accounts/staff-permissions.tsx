@@ -96,7 +96,7 @@ function StaffPermissionsBody() {
   if (rows === undefined) return <LoadingState variant="table" label="Loading staff" />;
   return (
     <div className="space-y-6">
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
         <Card className="overflow-hidden">
           <CardHeader title="Staff logins" description="Office (admin) and teacher logins. Students never get staff permissions." icon={<UserCog className="h-4 w-4" />} />
           <div className="space-y-3 p-5 pb-3">
@@ -198,7 +198,7 @@ function PermissionEditor({ row }: { row: StaffRow }) {
           <p className="text-[13px] text-ink-muted">A full administrator (Principal) can do everything in every enabled module, including managing accounts, permissions, settings and the audit log.</p>
         ) : (
           <>
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <FormField label="Start from a preset" hint="Pre-fills the table; adjust before saving.">
                 <Select disabled={readOnly} value="" onChange={(e) => { const p = GRANT_PRESETS.find((x) => x.key === e.target.value); if (p) setDraft({ ...draft, grants: normalizeGrants(p.grants), profile: draft.profile || p.label }); }}>
                   <option value="">Choose a preset…</option>
@@ -210,7 +210,7 @@ function PermissionEditor({ row }: { row: StaffRow }) {
               </FormField>
             </div>
 
-            <div className="overflow-x-auto rounded-xl border border-line/70">
+            <div className="relative overflow-x-auto rounded-xl border border-line/70">
               <table className="w-full min-w-[620px] text-sm">
                 <thead className="bg-teal-soft/30 text-[12px] uppercase tracking-wide text-ink-muted">
                   <tr><th className="px-3 py-2 text-left font-semibold">Module</th>{ACTIONS.map((a) => <th key={a} className="px-2 py-2 text-center font-semibold">{ACTION_LABELS[a]}</th>)}</tr>
@@ -253,7 +253,7 @@ function PermissionEditor({ row }: { row: StaffRow }) {
                 <p className="text-sm font-semibold text-ink">Limit Students / Attendance viewing to sections (optional)</p>
                 <p className="mb-3 text-[12px] text-ink-muted">With sections chosen, the view grants cover only these sections (plus the teacher&apos;s own classes) instead of the whole school. Other grants stay school-wide.</p>
                 {sections === undefined ? <LoadingState variant="inline" /> : (
-                  <div className="grid gap-2 sm:grid-cols-3">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                     {sections.map((s) => (
                       <Checkbox key={s._id} label={s.displayName} disabled={readOnly} checked={draft.sectionIds.includes(s._id)}
                         onChange={(e) => setDraft({ ...draft, sectionIds: e.target.checked ? [...draft.sectionIds, s._id] : draft.sectionIds.filter((x) => x !== s._id) })} />

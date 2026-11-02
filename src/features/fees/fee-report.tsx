@@ -214,7 +214,7 @@ export function FeeReport() {
     <QueryView query={queryState}>
       {(s) => (
         <div className="space-y-6">
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <StatCard
               label={hasActiveFilters ? "Filtered Net Fees" : "Net fees"}
               value={formatCurrency(hasActiveFilters ? filteredTotals.net : s.totals.net)}
@@ -243,7 +243,7 @@ export function FeeReport() {
             />
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <ChartCard title="Collected vs outstanding by class">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={s.byClass} margin={{ top: 8, right: 8, left: 4, bottom: 0 }}>

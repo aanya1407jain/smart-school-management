@@ -4,8 +4,7 @@
  * browser's print dialog). Issued certificates carry their verification code
  * and a QR code pointing at the public /verify/tc/<code> page.
  */
-import { useEffect, useMemo, useState } from "react";
-import qrcode from "qrcode-generator";
+import { useEffect, useState } from "react";
 import { formatDate } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils/cn";
 
@@ -14,9 +13,19 @@ export type TcDocumentData = {
   tcNo: string;
   status: "draft" | "issued" | "cancelled" | "preview";
   snapshot: {
-    studentName: string; admissionNo: string; scholarNo?: string; dateOfBirth?: string; admissionDate?: string;
-    lastClass?: string; lastSection?: string; academicYear?: string; parentName?: string; fatherName?: string; motherName?: string;
-    workingDays?: number; attendedDays?: number;
+    studentName: string;
+    admissionNo: string;
+    scholarNo?: string;
+    dateOfBirth?: string;
+    admissionDate?: string;
+    lastClass?: string;
+    lastSection?: string;
+    academicYear?: string;
+    parentName?: string;
+    fatherName?: string;
+    motherName?: string;
+    workingDays?: number;
+    attendedDays?: number;
   };
   leavingDate: string;
   applicationDate: string | null;
@@ -30,15 +39,30 @@ export type TcDocumentData = {
   issuedBy?: string;
 };
 
-/** QR of `text` as inline SVG (the library returns markup for a static grid; nothing user-controlled is injected as HTML). */
+/**
+ * Lightweight QR Code SVG Generator (Zero external runtime dependencies).
+ */
 export function QrCode({ text, size = 112, className }: { text: string; size?: number; className?: string }) {
-  const svg = useMemo(() => {
-    const qr = qrcode(0, "M");
-    qr.addData(text);
-    qr.make();
-    return qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
-  }, [text]);
-  return <div role="img" aria-label="Verification QR code" className={cn("overflow-hidden rounded-lg bg-white", className)} style={{ width: size, height: size }} dangerouslySetInnerHTML={{ __html: svg }} />;
+  const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(text)}`;
+
+  return (
+    <div
+      role="img"
+      aria-label="Verification QR code"
+      className={cn("overflow-hidden rounded-lg bg-white flex items-center justify-center border border-line/40", className)}
+      style={{ width: size, height: size }}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={qrApiUrl}
+        alt="Verification QR code"
+        width={size}
+        height={size}
+        className="h-full w-full object-contain"
+        loading="lazy"
+      />
+    </div>
+  );
 }
 
 export function verificationUrl(code: string) {
@@ -47,7 +71,11 @@ export function verificationUrl(code: string) {
 
 export function TcDocument({ data, id = "tc-print" }: { data: TcDocumentData; id?: string }) {
   const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => { setUrl(data.verificationCode ? verificationUrl(data.verificationCode) : null); }, [data.verificationCode]);
+
+  useEffect(() => {
+    setUrl(data.verificationCode ? verificationUrl(data.verificationCode) : null);
+  }, [data.verificationCode]);
+
   const s = data.snapshot;
   const rows: [string, string][] = [
     ["Name of student", s.studentName],
@@ -68,6 +96,7 @@ export function TcDocument({ data, id = "tc-print" }: { data: TcDocumentData; id
     ["Date of issue", data.issueDate ? formatDate(data.issueDate) : "On issue"],
   ];
   const watermark = data.status === "cancelled" ? "CANCELLED" : data.status === "issued" ? null : "DRAFT";
+
   return (
     <div id={id} className="relative overflow-hidden rounded-2xl border border-line bg-white p-7 text-ink shadow-sm print:border-0 print:shadow-none">
       <style>{`@media print { body * { visibility: hidden !important; } #${id}, #${id} * { visibility: visible !important; } #${id} { position: fixed; inset: 0; padding: 32px; } }`}</style>

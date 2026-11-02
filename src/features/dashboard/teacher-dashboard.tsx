@@ -42,14 +42,14 @@ export function TeacherDashboard() {
               </div>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
               {AC && <StatCard label={d.day.isToday ? "Classes today" : `Classes on ${WEEKDAY_NAMES[d.day.weekday]}`} value={d.classes.length} icon={<Presentation className="h-5 w-5" />} hint={d.classes[0] ? `First at ${formatClock(d.classes[0].startTime)}` : "No classes scheduled"} href="/teacher/timetable" />}
               {A && <StatCard label="Attendance to mark" value={pendingAttendance.length} icon={<CalendarCheck2 className="h-5 w-5" />} tone="purple" hint={!d.isSchoolDay ? "No school today" : pendingAttendance.length ? `For today, ${formatShortDate(todayISO())}` : "All registers are done"} href="/teacher/attendance" />}
               {AC && <StatCard label="Submissions to review" value={toReview} icon={<ClipboardList className="h-5 w-5" />} tone="sapphire" hint={`${d.homework.length} active homework`} href="/teacher/homework" />}
               <StatCard label="My students" value={d.studentCount} icon={<Users className="h-5 w-5" />} tone="lavender" hint={`${d.assignments.length} subject–class assignments`} href="/teacher/classes" />
             </div>
 
-            {(AC || A) && <div className="grid gap-4 lg:grid-cols-3">
+            {(AC || A) && <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
               {AC && <GlassCard className="lg:col-span-2">
                 <CardHeader
                   title={d.day.isToday ? "Today's classes" : `Next school day · ${formatDate(d.day.date)}`}
@@ -67,7 +67,7 @@ export function TeacherDashboard() {
                           <li key={c.id} className="relative flex items-center gap-4">
                             <span className={cn("w-[44px] shrink-0 text-right text-[12px] font-medium", done ? "text-ink-muted/60" : "text-ink-muted")}>{formatClock(c.startTime).replace(" ", " ")}</span>
                             <span className={cn("relative z-10 h-2.5 w-2.5 shrink-0 rounded-full ring-4 ring-alabaster", isNow ? "bg-teal" : done ? "bg-heather" : "bg-sapphire")} aria-hidden />
-                            <Link href={`/teacher/classes/${c.sectionId}`} className={cn("flex flex-1 items-center justify-between gap-3 rounded-xl border px-4 py-3 transition-colors", isNow ? "border-teal/40 bg-teal-soft/70" : "border-line/70 bg-white/70 hover:bg-white", done && "opacity-60")}>
+                            <Link href={`/teacher/classes/${c.sectionId}`} className={cn("flex flex-1 items-center justify-between gap-3 rounded-xl border px-4 py-3 transition-colors", isNow ? "border-teal/40 bg-teal-soft/70" : "border-line/70 bg-white hover:bg-white", done && "opacity-60")}>
                               <span>
                                 <span className="block text-sm font-semibold text-ink">{c.subject} · Class {c.sectionLabel}</span>
                                 <span className="block text-[12.5px] text-ink-muted">{formatClock(c.startTime)} – {formatClock(c.endTime)} · {c.room}</span>
@@ -87,7 +87,7 @@ export function TeacherDashboard() {
                 <ul className="space-y-2 p-5">
                   {d.attendanceTasks.map((t) => (
                     <li key={t.sectionId}>
-                      <Link href={`/teacher/attendance?section=${encodeURIComponent(t.label)}`} className="flex items-center justify-between gap-3 rounded-xl border border-line/70 bg-white/70 px-3.5 py-2.5 hover:bg-white">
+                      <Link href={`/teacher/attendance?section=${encodeURIComponent(t.label)}`} className="flex items-center justify-between gap-3 rounded-xl border border-line/70 bg-white px-3.5 py-2.5 hover:bg-white">
                         <span>
                           <span className="block text-sm font-semibold text-ink">Class {t.label}{t.isClassTeacher && <span className="ml-1.5 text-[11px] font-medium text-plum">Class teacher</span>}</span>
                           <span className="block text-[12px] text-ink-muted">{t.students} students</span>
@@ -104,7 +104,7 @@ export function TeacherDashboard() {
               </GlassCard>}
             </div>}
 
-            <div className="grid gap-4 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
               {AC && <Card>
                 <CardHeader title="Pending homework" description="Active assignments and submissions" icon={<ClipboardList className="h-4 w-4" />} action={<Link href="/teacher/homework" className="text-[13px] font-medium text-lagoon hover:underline">Manage</Link>} />
                 <ul className="space-y-3 p-5">

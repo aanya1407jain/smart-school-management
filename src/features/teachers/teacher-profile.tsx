@@ -31,7 +31,6 @@ function Body({ p, self, periods }: { p: TeacherProfile; self?: boolean; periods
   return (
     <div className="space-y-6">
       <GlassCard className="relative overflow-hidden p-6">
-        <div aria-hidden className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full bg-teal/20 blur-3xl" />
         <div className="relative flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-4">
             <Avatar name={p.name} size="xl" />
@@ -45,7 +44,7 @@ function Body({ p, self, periods }: { p: TeacherProfile; self?: boolean; periods
             {self ? <Button onClick={() => setLeaveOpen(true)}><Plus className="h-4 w-4" /> Apply for leave</Button> : <LinkButton href={`/admin/teachers/${t.id}/edit`}><Pencil className="h-4 w-4" /> Edit</LinkButton>}
           </div>
         </div>
-        <dl className="relative mt-6 grid grid-cols-2 gap-4 border-t border-white/70 pt-5 sm:grid-cols-4">
+        <dl className="relative mt-6 grid grid-cols-2 gap-4 border-t border-line pt-5 sm:grid-cols-4">
           <div><dt className="text-[12px] uppercase tracking-wide text-ink-muted">Assignments</dt><dd className="text-lg font-semibold text-sapphire">{p.assignments.length}</dd></div>
           <div><dt className="text-[12px] uppercase tracking-wide text-ink-muted">Periods / week</dt><dd className="text-lg font-semibold text-sapphire">{p.timetable.length}</dd></div>
           <div><dt className="text-[12px] uppercase tracking-wide text-ink-muted">Class teacher</dt><dd className="text-lg font-semibold text-sapphire">{p.classTeacherOf.map((c) => c.label).join(", ") || "—"}</dd></div>
@@ -58,7 +57,7 @@ function Body({ p, self, periods }: { p: TeacherProfile; self?: boolean; periods
         <TabsContent value="overview">
           <Card>
             <CardHeader title="Contact & employment" />
-            <dl className="grid gap-4 p-5 sm:grid-cols-2">
+            <dl className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-2">
               <Row icon={<Mail />} label="Email" value={t.email} />
               <Row icon={<Phone />} label="Phone" value={t.phone} />
               <Row icon={<GraduationCap />} label="Qualification" value={t.qualification} />
@@ -71,11 +70,11 @@ function Body({ p, self, periods }: { p: TeacherProfile; self?: boolean; periods
         </TabsContent>
         <TabsContent value="classes">
           {p.assignments.length === 0 ? <Card><EmptyState title="No classes assigned yet" description={self ? "The school office will assign your classes." : "Assign subjects and sections in Academics."} action={!self && <LinkButton href="/admin/academics?tab=assignments">Assign classes</LinkButton>} /></Card> : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {p.assignments.map((a) => {
                 const href = classHref(a.sectionId);
                 const body = (
-                  <Card className={cn("p-4", href && "transition-all hover:-translate-y-0.5 hover:shadow-lift")}>
+                  <Card className={cn("p-4", href && "transition-all hover:shadow-lift")}>
                     <p className="text-[12px] font-semibold uppercase tracking-wide text-plum">{a.subject}</p>
                     <p className="mt-1 text-lg font-semibold text-sapphire">Class {a.sectionLabel}</p>
                     <p className="text-[13px] text-ink-muted">{a.students} students</p>

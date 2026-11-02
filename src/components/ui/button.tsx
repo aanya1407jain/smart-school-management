@@ -7,28 +7,29 @@ type Variant = "primary" | "secondary" | "outline" | "ghost" | "danger" | "accen
 type Size = "sm" | "md" | "lg" | "icon" | "icon-sm";
 
 const variants: Record<Variant, string> = {
-  // Brand gradient (lagoon → teal) with a soft cyan glow on hover.
-  primary: "bg-gradient-to-br from-lagoon to-teal text-primary-fg shadow-soft hover:shadow-[0_8px_22px_-8px_rgb(var(--c-cyan)/0.6)] hover:brightness-110",
-  secondary: "bg-sapphire text-white shadow-soft hover:bg-sapphire/90",
-  accent: "bg-gradient-to-br from-teal to-aqua text-white shadow-soft hover:shadow-[0_8px_22px_-8px_rgb(var(--c-cyan)/0.6)] hover:brightness-105",
-  outline: "border border-line bg-white/70 text-ink backdrop-blur-md hover:border-teal/40 hover:bg-white hover:shadow-ambient",
+  // Solid accent for the main action (white on #0F766E: 5.5:1).
+  primary: "bg-primary text-primary-fg hover:bg-primary-hover",
+  secondary: "bg-sapphire text-white hover:bg-sapphire/90",
+  accent: "bg-primary text-primary-fg hover:bg-primary-hover",
+  outline: "border border-line bg-white text-ink hover:border-ink-muted/40 hover:bg-bg",
   ghost: "text-ink-soft hover:bg-teal-soft/60 hover:text-lagoon",
   soft: "bg-teal-soft text-lagoon hover:bg-teal/15",
-  danger: "bg-plum text-white shadow-soft hover:bg-plum/90",
+  // Destructive actions stay visibly distinct: semantic red (white on #B42318: 6.6:1).
+  danger: "bg-pd-danger text-white hover:bg-pd-danger/90",
 };
 const sizes: Record<Size, string> = {
-  sm: "h-8 px-3 text-[13px] gap-1.5 rounded-lg",
-  md: "h-10 px-4 text-sm gap-2 rounded-xl",
+  sm: "h-8 max-sm:h-9 px-3 text-[13px] gap-1.5 rounded-lg",
+  md: "h-10 max-sm:h-11 px-4 text-sm gap-2 rounded-xl",
   lg: "h-12 px-6 text-[15px] gap-2 rounded-xl",
-  icon: "h-10 w-10 rounded-xl",
-  "icon-sm": "h-8 w-8 rounded-lg",
+  icon: "h-10 w-10 max-sm:h-11 max-sm:w-11 rounded-xl",
+  "icon-sm": "h-8 w-8 max-sm:h-10 max-sm:w-10 rounded-lg",
 };
 
 export function buttonClass(variant: Variant = "primary", size: Size = "md", className?: string) {
   return cn(
-    // Tactile press (scale-95) with a springy ease back; glowing focus ring.
-    "inline-flex select-none items-center justify-center font-medium whitespace-nowrap transition-all duration-200 ease-[cubic-bezier(.34,1.56,.64,1)]",
-    "hover:-translate-y-px active:translate-y-0 active:scale-95 active:duration-75 disabled:pointer-events-none disabled:opacity-55 focus-visible:outline-none focus-visible:shadow-focus",
+    // Quiet colour transition and a slight press; clear focus ring.
+    "inline-flex select-none items-center justify-center font-medium whitespace-nowrap transition-[color,background-color,border-color,transform] duration-150",
+    "active:scale-[.98] disabled:pointer-events-none disabled:opacity-55 focus-visible:outline-none focus-visible:shadow-focus",
     variants[variant],
     sizes[size],
     className,

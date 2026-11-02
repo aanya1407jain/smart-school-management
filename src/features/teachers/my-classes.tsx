@@ -56,7 +56,7 @@ export function TeacherClassDetail({ sectionId }: { sectionId: string }) {
                   </div>
                 </div>
               </GlassCard>
-              <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
+              <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
                 <Card id="roster" className="scroll-mt-20 p-4 sm:p-5">
                   <div className="mb-4 flex items-center justify-between gap-3">
                     <h2 className="flex items-center gap-2 font-semibold text-sapphire"><Users className="h-4 w-4" /> Students</h2>

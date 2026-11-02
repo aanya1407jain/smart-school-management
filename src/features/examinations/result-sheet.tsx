@@ -16,7 +16,7 @@ export function ResultSheet({ examId, sectionId }: { examId: string; sectionId: 
             <Badge tone="sapphire">Class average {formatPercent(d.classAverage, 1)}</Badge>
             {d.subjectAverages.map((s) => <Badge key={s.subject} tone="outline">{s.subject}: {formatPercent(s.average)} {s.grade && `· ${s.grade}`}</Badge>)}
           </div>
-          <div className="overflow-x-auto">
+          <div className="relative overflow-x-auto">
             <table className="w-full min-w-[720px] text-sm">
               <caption className="sr-only">Result sheet for Class {d.sectionLabel}</caption>
               <thead>

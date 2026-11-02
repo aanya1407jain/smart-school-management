@@ -57,6 +57,8 @@ export interface StudentDashboardContribution {
 /** The admin dashboard's view model (live: reports.adminDashboard; demo: the demo dataset). */
 export type AdminDashboardVM = {
   school: { name: string };
+  /** The current academic year's name, when known. */
+  term?: string | null;
   stats: {
     students: number | null; sections: number; teachers: number; teachersOnLeave: number | null;
     attendance: { date: string; isToday: boolean; percentage: number | null; absent: number; marked: number; totalSections: number; delta: number | null };
@@ -73,17 +75,24 @@ export type AdminDashboardVM = {
 };
 export type AdminDashboardPartProps = { d: AdminDashboardVM; live: boolean };
 export type AdminFeesOnly = NonNullable<FunctionReturnType<typeof api.reports.adminDashboard>["fees"]>;
+/** A header button; Core shows at most two, in `order`, that the member is allowed to use. */
+export type AdminDashboardAction = { label: string; href: string; order: number; permission: Permission; Icon: ComponentType<{ className?: string; "aria-hidden"?: boolean }> };
+/** One actionable row of "Needs attention" (an existing workflow does the work; the dashboard only links to it). */
+export type AdminAttentionItem = { key: string; tone: "danger" | "warning"; title: ReactNode; detail?: ReactNode; href: string; action: string };
+/** One row of the upcoming schedule (exams, events, deadlines). `date` orders the list. */
+export type AdminAgendaItem = { key: string; date: string; when: string; title: string; meta?: string; status: string; tone?: "neutral" | "accent" | "warning"; href: string };
 export interface AdminDashboardContribution {
   module: ModuleKey;
   order: number;
-  HeaderActions?: ComponentType<AdminDashboardPartProps>;
-  Alerts?: ComponentType<AdminDashboardPartProps>;
-  Stats?: ComponentType<AdminDashboardPartProps>;
-  /** Panels in the two-column grid; `wide` spans both columns. */
-  panels?: { wide?: boolean; Panel: ComponentType<AdminDashboardPartProps> }[];
-  /** Full-width sections below the panels. */
-  Sections?: ComponentType<AdminDashboardPartProps>;
-  quickActions?: { label: string; href: string; Icon: ComponentType<{ className?: string; "aria-hidden"?: boolean }> }[];
+  headerActions?: AdminDashboardAction[];
+  /** One of the four key metrics (Core adds teaching staff after the negative orders). */
+  Metric?: ComponentType<AdminDashboardPartProps>;
+  attention?(d: AdminDashboardVM): AdminAttentionItem[];
+  /** A compact card in the school-overview row (attendance trend, fee summary). */
+  Overview?: ComponentType<AdminDashboardPartProps>;
+  agenda?(d: AdminDashboardVM): AdminAgendaItem[];
+  /** Lower-priority content, collapsed by default. */
+  Secondary?: ComponentType<AdminDashboardPartProps>;
   /** What a finance-only member (no school-wide reports) sees. */
   FinanceOnly?: ComponentType<{ fees: AdminFeesOnly }>;
 }

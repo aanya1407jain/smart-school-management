@@ -44,11 +44,11 @@ export function LiveTeacherDashboard() {
         <Card><EmptyState icon={<Users className="h-6 w-6" />} title="No classes assigned yet" description="Once the school office assigns you a section or subjects in Academics, your registers, lessons, homework and marks tasks appear here." /></Card>
       ) : null}
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {parts.map((c, i) => c.Stats && <c.Stats key={i} d={d} />)}
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         {parts.map((c, i) => c.Panels && <c.Panels key={i} d={d} />)}
       </div>
 

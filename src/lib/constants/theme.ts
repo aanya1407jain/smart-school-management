@@ -13,7 +13,7 @@ export const PALETTE = {
   mauve: "#BA88AE",
   purple: "#9E6899",
   plum: "#5B3765",
-  alabaster: "#F7F6F2",
+  alabaster: "#F6F7F9",
   heather: "#BCC5CC",
 } as const;
 
@@ -32,10 +32,9 @@ export const CHART = {
 } as const;
 
 /**
- * Gradient fills for bars (defined once in <ChartGradients />, mounted by the
- * app shell). Each role pairs a gradient with the solid colour used for the
- * tooltip/legend swatch. Fees use emerald → teal for money in and amber → rose
- * for money still owed.
+ * Chart colour roles. Bars are painted with `solid` (flat fills, see barProps);
+ * the gradient `fill`/`from`/`to` remain for <ChartGradients /> only. Fees use
+ * green for money in and amber for money still owed.
  */
 export const CHART_FILL = {
   primary: { fill: "url(#chart-g-primary)", solid: PALETTE.sapphire, from: "#1E4E7A", to: PALETTE.sapphire },
@@ -49,3 +48,11 @@ export const CHART_GRID = "rgba(188,197,204,0.55)";
 /** Muted dashed grid lines shared by every chart. */
 export const CHART_GRID_DASH = "3 3";
 export const CHART_AXIS = "#627282";
+
+/** Principal dashboard charts: flat fills matching the scoped --pd-* tokens in globals.css. */
+export const PD_CHART = {
+  accent: "#047857",
+  accentSoft: "#99D5CE",
+  grid: "#E3E8EF",
+  axis: "#526170",
+} as const;

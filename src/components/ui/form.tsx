@@ -5,14 +5,14 @@ import { DateInput } from "./date-input";
 
 /** Glass text controls: frosted fill, teal hover border, glowing focus ring. */
 const control =
-  "w-full rounded-xl border bg-white/80 px-3.5 text-sm text-ink placeholder:text-ink-muted/70 backdrop-blur-md " +
+  "w-full rounded-xl border bg-white px-3.5 text-sm max-sm:text-base text-ink placeholder:text-ink-muted/70 " +
   "shadow-[0_1px_2px_rgb(6_49_84_/_0.04)] transition-[border-color,box-shadow,background-color] duration-200 hover:border-teal/40 " +
   "focus:outline-none focus:border-teal focus:bg-white focus:shadow-focus disabled:cursor-not-allowed disabled:bg-alabaster disabled:text-ink-muted";
 
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean }>(function Input(
   { className, invalid, ...props }, ref,
 ) {
-  const cls = cn(control, "h-10", invalid ? "border-plum/60" : "border-line", className);
+  const cls = cn(control, "h-10 max-sm:h-11", invalid ? "border-plum/60" : "border-line", className);
   // Dates get the themed calendar flyout over the same native input (same value/onChange/ref).
   if (props.type === "date") return <DateInput ref={ref} aria-invalid={invalid || undefined} className={cls} {...props} />;
   return <input ref={ref} aria-invalid={invalid || undefined} className={cls} {...props} />;
@@ -75,13 +75,13 @@ export function FormField({
 
 export function FormSection({ title, description, children, className }: { title: string; description?: string; children: ReactNode; className?: string }) {
   return (
-    <fieldset className={cn("grid gap-4 border-t border-line/70 pt-5 first:border-t-0 first:pt-0 md:grid-cols-[220px_1fr] md:gap-8", className)}>
+    <fieldset className={cn("grid grid-cols-1 gap-4 border-t border-line/70 pt-5 first:border-t-0 first:pt-0 md:grid-cols-[220px_minmax(0,1fr)] md:gap-8", className)}>
       <legend className="sr-only">{title}</legend>
       <div>
         <h3 className="text-sm font-semibold text-ink">{title}</h3>
         {description && <p className="mt-1 text-[13px] leading-relaxed text-ink-muted">{description}</p>}
       </div>
-      <div className="grid gap-4 sm:grid-cols-2">{children}</div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">{children}</div>
     </fieldset>
   );
 }

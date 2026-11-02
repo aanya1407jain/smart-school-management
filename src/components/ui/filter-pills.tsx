@@ -17,7 +17,7 @@ export function FilterPills<T extends string>({
     <div
       role="tablist"
       aria-label={label}
-      className={cn("scrollbar-thin flex max-w-full gap-1 overflow-x-auto rounded-2xl bg-white/50 p-1 shadow-[inset_0_1px_2px_rgb(6_49_84/0.06)] ring-1 ring-inset ring-line/70 backdrop-blur-md sm:w-fit", className)}
+      className={cn("scrollbar-thin flex max-w-full gap-1 relative overflow-x-auto rounded-xl bg-bg p-1 ring-1 ring-inset ring-line sm:w-fit", className)}
     >
       {items.map((i) => {
         const active = i.value === value;
@@ -29,7 +29,7 @@ export function FilterPills<T extends string>({
             aria-selected={active}
             onClick={() => onChange(i.value)}
             className={cn(
-              "relative isolate flex shrink-0 items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-[13px] font-medium transition-colors duration-200 active:scale-95 focus-visible:outline-none focus-visible:shadow-focus",
+              "relative isolate flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-[13px] font-medium transition-colors duration-200 active:scale-95 focus-visible:outline-none focus-visible:shadow-focus",
               active ? "text-lagoon" : "text-ink-muted hover:bg-white/50 hover:text-ink",
             )}
           >
@@ -38,7 +38,7 @@ export function FilterPills<T extends string>({
                 aria-hidden
                 layoutId={`pills-${id}`}
                 transition={reduceMotion ? { duration: 0 } : { type: "spring", stiffness: 520, damping: 38, mass: 0.7 }}
-                className="absolute inset-0 -z-10 rounded-xl bg-white shadow-[0_2px_10px_-3px_rgb(var(--c-cyan)/0.45)] ring-1 ring-teal/20"
+                className="absolute inset-0 -z-10 rounded-lg bg-white shadow-[0_1px_2px_rgb(16_24_40/0.08)] ring-1 ring-line"
               />
             )}
             <span>{i.label}</span>

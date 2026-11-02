@@ -73,7 +73,7 @@ export function TeacherForm({ teacherId }: { teacherId?: string }) {
       <form onSubmit={handleSubmit(onSubmit)} noValidate>
         <Card className="space-y-7 p-5 sm:p-7">
           <FormSection title="Personal details">
-            <div className="grid grid-cols-[96px_1fr] gap-3 sm:col-span-2">
+            <div className="grid grid-cols-[96px_minmax(0,1fr)] gap-3 sm:col-span-2">
               <FormField label="Title"><Select {...register("title")}><option>Mr.</option><option>Ms.</option><option>Mrs.</option><option>Dr.</option></Select></FormField>
               <FormField label="First name" required error={errors.firstName?.message}><Input {...register("firstName")} /></FormField>
             </div>

@@ -73,7 +73,7 @@ export function PassOutTab() {
     <div className="space-y-4">
       <GlassCard className="spatial">
         <CardHeader title="Graduating cohort" description="Choose the final-year section. Clearance = result declared as passed and a zero fee balance for the year." icon={<GraduationCap className="h-4 w-4" />} />
-        <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
           <YearSectionPicker label="Cohort" value={sectionId} onChange={setSectionId} placeholder="Graduating section" />
           <FormField label="Pass-out date" hint={data ? `${data.section.year}: ${formatDate(data.section.yearStart)} – ${formatDate(data.section.yearEnd)}` : undefined}>
             <Input type="date" value={date} min={data?.section.yearStart} onChange={(e) => setDate(e.target.value)} />
@@ -94,7 +94,7 @@ export function PassOutTab() {
 
       {data && (
         <>
-          <div className="grid gap-4 md:grid-cols-[auto_1fr]">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-[auto_minmax(0,1fr)]">
             <GlassCard className="spatial flex items-center gap-5 p-5">
               <ProgressRing value={pct} size={92} sublabel="cleared" />
               <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
@@ -118,7 +118,7 @@ export function PassOutTab() {
               action={<Button size="sm" variant="outline" onClick={exportCsv} disabled={!rows.length}><Download className="h-4 w-4" /> Export no-dues report (CSV)</Button>}
             />
             {rows.length === 0 ? <EmptyState title="No students currently enrolled in this section" className="py-8" /> : (
-              <div className="scrollbar-thin overflow-x-auto">
+              <div className="scrollbar-thin relative overflow-x-auto">
                 <table className="w-full min-w-[760px] text-sm">
                   <caption className="sr-only">Clearance of {data.section.label}</caption>
                   <thead>
@@ -146,8 +146,8 @@ export function PassOutTab() {
                         <td className="px-2 py-2.5"><div className="flex flex-col items-start gap-1"><ResultPill result={r.result} />{r.percentage !== null && <span className="figures text-[12px] text-ink-muted">{r.percentage.toFixed(1)}%{r.grade ? ` · ${r.grade}` : ""}</span>}</div></td>
                         <td className="px-2 py-2.5">{r.outstandingMinor === null ? <Badge tone="neutral" dot>Not checked</Badge> : r.outstandingMinor === 0 ? <Badge tone="teal" dot>Zero balance</Badge> : <Badge tone="plum" dot className="figures">Pending dues · {rupees(r.outstandingMinor)}</Badge>}</td>
                         <td className="px-4 py-2.5">
-                          <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-bold ring-1 ring-inset", r.cleared ? "bg-gradient-to-r from-teal-soft to-cyan/10 text-lagoon ring-teal/25" : "bg-blush/40 text-plum ring-plum/20")}>
-                            <span aria-hidden className={cn("h-2 w-2 rounded-full", r.cleared ? "bg-teal shadow-[0_0_6px_rgb(var(--c-teal))]" : "bg-plum")} />
+                          <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-bold ring-1 ring-inset", r.cleared ? "bg-teal-soft text-lagoon ring-teal/25" : "bg-blush/40 text-plum ring-plum/20")}>
+                            <span aria-hidden className={cn("h-2 w-2 rounded-full", r.cleared ? "bg-teal" : "bg-plum")} />
                             {r.cleared ? "Cleared" : "Not cleared"}
                           </span>
                         </td>
@@ -158,7 +158,7 @@ export function PassOutTab() {
               </div>
             )}
             {error && <p role="alert" className="px-5 py-3 text-[13px] text-plum">{error}</p>}
-            <div className="flex flex-col gap-2 border-t border-line/60 bg-white/50 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-2 border-t border-line/60 bg-white px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between">
               <p className="figures text-[13px] text-ink-muted">{picked.size} selected{pickedBlocked.length ? ` · ${pickedBlocked.length} not cleared` : ""}</p>
               <Button disabled={!picked.size || !date} onClick={() => setConfirming(true)}><GraduationCap className="h-4 w-4" /> Graduate cohort to alumni</Button>
             </div>

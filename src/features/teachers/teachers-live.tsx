@@ -93,7 +93,7 @@ function EditTeacherModal({ teacher, onClose }: { teacher: Teacher; onClose: () 
   return (
     <Modal open onOpenChange={(o) => !o && onClose()} title={`Edit ${teacher.name}`} description={`Employee ID ${teacher.employeeId} (fixed)`} size="lg"
       footer={<><Button variant="outline" onClick={onClose}>Cancel</Button><Button loading={busy} onClick={save}>Save</Button></>}>
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <FormField label="Title"><Input value={f.title} onChange={set("title")} maxLength={20} placeholder="Mrs." /></FormField>
         <FormField label="First name" required><Input value={f.firstName} onChange={set("firstName")} maxLength={80} /></FormField>
         <FormField label="Last name" required><Input value={f.lastName} onChange={set("lastName")} maxLength={80} /></FormField>

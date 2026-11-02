@@ -121,7 +121,7 @@ describe("live admin / teacher sessions", () => {
     // Module entitlements: a real session always carries the school's modules (here: all five, an
     // unconfigured school). Module filtering itself is tested in module-entitlements.test.ts.
     const modules = [...MODULE_KEYS];
-    expect(liveNavItems({ role: "teacher", permissionSets: [], modules }).map((i) => i.href)).toEqual(["/teacher/dashboard", "/teacher/classes", "/teacher/attendance", "/teacher/homework", "/teacher/examinations", "/teacher/timetable", "/teacher/notices", "/teacher/notifications", "/teacher/profile"]);
+    expect(liveNavItems({ role: "teacher", permissionSets: [], modules }).map((i) => i.href)).toEqual(["/teacher/dashboard", "/teacher/classes", "/teacher/attendance", "/teacher/homework", "/teacher/examinations", "/teacher/timetable", "/teacher/notices", "/teacher/notifications", "/teacher/profile", "/teacher/settings"]);
     expect(liveNavItems({ role: "admin", permissionSets: [], modules }).map((i) => i.href)).toEqual(["/admin/dashboard", "/admin/students", "/admin/promotions", "/admin/academics", "/admin/teachers", "/admin/accounts", "/admin/permissions", "/admin/attendance", "/admin/fees", "/admin/examinations", "/admin/timetable", "/admin/notices", "/admin/notifications", "/admin/reports", "/admin/audit", "/admin/settings", "/admin/profile"]);
     // A restricted (accountant-only) admin sees finance pages only.
     expect(liveNavItems({ role: "admin", permissionSets: ["accountant"], modules }).map((i) => i.href)).toEqual(["/admin/dashboard", "/admin/students", "/admin/fees", "/admin/notifications", "/admin/reports", "/admin/profile"]);

@@ -1,7 +1,7 @@
 "use client";
 /**
  * LIVE profile for administrators and teachers (profile.mine / updateMine):
- * account details, password change, and — for teachers — their own record,
+ * account details (passwords are changed in Settings → Security), and — for teachers — their own record,
  * current-year duties, and module sections contributed by the build (Attendance:
  * leave applications). Editable fields follow the server rules: an administrator
  * can rename themself, a teacher can update their own phone number.
@@ -14,27 +14,32 @@ import { useSchoolMutation, useSchoolQuery } from "@/lib/convex/membership";
 import { errorMessage } from "@/lib/convex/errors";
 import { Avatar, Badge, Button, Card, CardHeader, FormField, Input, LoadingState, PageHeader, useToast } from "@/components/ui";
 import { formatDate } from "@/lib/utils/dates";
-import { PasswordCard } from "./password-card";
+import { PasswordSecurity } from "./password-card";
+import { cn } from "@/lib/utils/cn";
 import { useSession } from "@/features/auth/session-provider";
 import { contributionsTo } from "@/lib/contributions";
 
 export function LiveStaffProfile() {
   const p = useSchoolQuery(api.profile.mine, {});
   // Module sections (Attendance: leave applications) are contributed when shipped and enabled.
-  const parts = contributionsTo("staffProfile", useSession().hasModule);
+  const { user, hasModule, can } = useSession();
+  const parts = contributionsTo("staffProfile", hasModule);
+  // Passwords are changed in Settings → Security. Only an administrator who cannot open
+  // Settings (e.g. finance-only access) keeps the compact control here.
+  const passwordHere = user?.role === "admin" && !can("settings:manage");
   if (p === undefined) return <LoadingState />;
   return (
     <div className="space-y-6" data-testid="live-staff-profile">
-      <PageHeader title="Profile" description="Your account details and sign-in settings." />
-      <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
+      <PageHeader title="Profile" description={passwordHere ? "Your account details and sign-in settings." : "Your account details. Change your password in Settings → Security."} />
+      <div className={cn("grid grid-cols-1 gap-5", passwordHere && "lg:grid-cols-[minmax(0,1fr)_360px]")}>
         <AccountCard p={p} />
-        <PasswordCard />
+        {passwordHere && <PasswordSecurity />}
       </div>
       {p.teacher && (
-        <div className="grid gap-5 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
           <Card>
             <CardHeader title="Staff record" description="Kept by the school office." />
-            <dl className="grid gap-x-6 gap-y-3 p-5 text-sm sm:grid-cols-2">
+            <dl className="grid grid-cols-1 gap-x-6 gap-y-3 p-5 text-sm sm:grid-cols-2">
               <Field label="Employee ID" value={p.teacher.employeeId} mono />
               <Field label="Designation" value={p.teacher.designation} />
               <Field label="Qualification" value={p.teacher.qualification} />
@@ -98,7 +103,7 @@ function AccountCard({ p }: { p: FunctionReturnType<typeof api.profile.mine> }) 
             </div>
           </div>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <FormField label="Display name" hint={p.canRename ? undefined : "Managed by the school office."}><Input value={name} disabled={!p.canRename} onChange={(e) => setName(e.target.value)} maxLength={120} /></FormField>
           {p.canEditPhone && <FormField label="Phone"><Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} maxLength={30} /></FormField>}
           <FormField label="Login ID" hint="Issued by your school. Contact the office to change it." className="sm:col-span-2"><Input value={p.loginId ?? ""} disabled className="font-mono" /></FormField>

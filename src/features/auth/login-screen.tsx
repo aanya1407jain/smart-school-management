@@ -58,12 +58,9 @@ export function LoginScreen() {
   return (
     <main className="relative grid min-h-screen place-items-center overflow-hidden bg-bg px-4 py-10">
       {/* Very subtle ambient shapes */}
-      <div aria-hidden className="pointer-events-none absolute -left-32 -top-24 h-[420px] w-[420px] rounded-full bg-lavender/35 blur-[90px]" />
-      <div aria-hidden className="pointer-events-none absolute -right-24 top-1/4 h-[360px] w-[360px] rounded-full bg-blush/50 blur-[90px]" />
-      <div aria-hidden className="pointer-events-none absolute -bottom-32 left-1/3 h-[380px] w-[380px] rounded-full bg-teal/20 blur-[90px]" />
 
       <motion.div initial={{ opacity: 0, y: 14, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: 0.5, ease: [0.2, 0.7, 0.2, 1] }} className="relative w-full max-w-[460px]">
-        <div className="glass rounded-[28px] px-6 pb-7 pt-8 sm:px-9">
+        <div className="glass rounded-2xl px-6 pb-7 pt-8 sm:px-9">
           <div className="flex flex-col items-center text-center">
             <LogoMark size={56} />
             <p className="mt-4 font-display text-[15px] font-semibold uppercase tracking-[0.22em] text-sapphire">{school?.name ?? "\u00A0"}</p>
@@ -95,14 +92,14 @@ export function LoginScreen() {
               </div>
             )}
 
-            <Button type="submit" size="lg" className="w-full bg-gradient-to-r from-sapphire to-lagoon hover:from-sapphire hover:to-sapphire" loading={isSubmitting}>
+            <Button type="submit" size="lg" className="w-full" loading={isSubmitting}>
               {isSubmitting ? "Signing in…" : <>Sign in <ArrowRight className="h-4 w-4" /></>}
             </Button>
           </form>
         </div>
 
         {/* Development helper — lists the demo accounts documented in the README (internal builds only). */}
-        {demoRuntime() && <div className="mt-4 rounded-2xl border border-line/70 bg-white/50 backdrop-blur">
+        {demoRuntime() && <div className="mt-4 rounded-2xl border border-line/70 bg-white">
           <button type="button" onClick={() => setDemoOpen((o) => !o)} aria-expanded={demoOpen} className="flex w-full items-center justify-between px-4 py-3 text-[13px] font-medium text-ink-soft">
             Development demo accounts
             <ChevronDown className={cn("h-4 w-4 transition-transform", demoOpen && "rotate-180")} />

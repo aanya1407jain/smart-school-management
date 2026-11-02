@@ -6,7 +6,8 @@ import { Select } from "./form";
 export function FilterBar({ children, className, actions }: { children: ReactNode; className?: string; actions?: ReactNode }) {
   return (
     <div className={cn("flex flex-col gap-3 lg:flex-row lg:items-center", className)}>
-      <div className="grid flex-1 grid-cols-2 gap-2.5 sm:flex sm:flex-wrap sm:items-center">{children}</div>
+      {/* One column on the narrowest phones so dates and long option labels are not clipped. */}
+      <div className="grid flex-1 grid-cols-1 gap-2.5 max-[359px]:[&>*]:col-span-1 min-[360px]:grid-cols-2 sm:flex sm:flex-wrap sm:items-center">{children}</div>
       {actions && <div className="flex items-center gap-2">{actions}</div>}
     </div>
   );

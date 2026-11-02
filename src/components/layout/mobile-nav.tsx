@@ -13,8 +13,8 @@ export function MobileNav({ open, onOpenChange }: { open: boolean; onOpenChange:
           <Dialog.Title className="sr-only">Navigation menu</Dialog.Title>
           <Dialog.Description className="sr-only">Links to the sections of your workspace</Dialog.Description>
           <SidebarContent onNavigate={() => onOpenChange(false)} />
-          <Dialog.Close className="absolute right-3 top-6 grid h-8 w-8 place-items-center rounded-lg text-white/70 hover:bg-white/10 hover:text-white" aria-label="Close menu">
-            <X className="h-4 w-4" />
+          <Dialog.Close className="absolute right-2 top-3.5 grid h-11 w-11 place-items-center rounded-lg text-emerald-100 hover:bg-emerald-900/60 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-300" aria-label="Close menu">
+            <X className="h-5 w-5" />
           </Dialog.Close>
         </Dialog.Content>
       </Dialog.Portal>

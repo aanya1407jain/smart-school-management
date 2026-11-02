@@ -26,6 +26,8 @@ const config: Config = {
         plum: channel("c-plum"),
         alabaster: channel("c-alabaster"),
         heather: channel("c-heather"),
+        // Deep forest green for the navigation sidebar (#0A382C).
+        forest: channel("c-forest"),
 
         // Semantic tokens
         bg: channel("bg"),
@@ -37,23 +39,32 @@ const config: Config = {
         success: channel("success"),
         warning: channel("warning"),
         danger: channel("danger"),
+
+        // Principal dashboard (scoped tokens; see --pd-* in globals.css).
+        pd: {
+          bg: channel("pd-bg"), ink: channel("pd-ink"), muted: channel("pd-muted"), line: channel("pd-line"),
+          accent: channel("pd-accent"), "accent-hover": channel("pd-accent-hover"), "accent-soft": channel("pd-accent-soft"),
+          danger: channel("pd-danger"), "danger-soft": channel("pd-danger-soft"),
+          warning: channel("pd-warning"), "warning-soft": channel("pd-warning-soft"),
+          ok: channel("pd-ok"), "ok-soft": channel("pd-ok-soft"),
+        },
       },
       fontFamily: {
         sans: ["var(--font-sans)", "system-ui", "sans-serif"],
         display: ["var(--font-display)", "Georgia", "serif"],
       },
-      borderRadius: { xl: "0.875rem", "2xl": "1.125rem", "3xl": "1.5rem" },
+      // Moderate, consistent corners: 12px controls, 16px cards, 20px large overlays.
+      borderRadius: { xl: "0.75rem", "2xl": "1rem", "3xl": "1.25rem" },
+      // Restrained elevation: hairline shadows for surfaces, one soft shadow for overlays, no glows.
       boxShadow: {
-        glass: "0 1px 0 0 rgb(255 255 255 / 0.6) inset, 0 8px 32px -12px rgb(var(--c-sapphire) / 0.18)",
-        soft: "0 2px 12px -4px rgb(var(--c-sapphire) / 0.12)",
-        lift: "0 14px 40px -16px rgb(var(--c-sapphire) / 0.28)",
-        // Glow ring + soft halo used on focus (inputs, selects, search).
-        focus: "0 0 0 3px rgb(var(--c-teal) / 0.22), 0 0 18px -2px rgb(var(--c-cyan) / 0.35)",
-        // Multi-layer ambient shadow for glass surfaces (no harsh borders).
-        ambient: "0 8px 30px rgb(0 0 0 / 0.04), 0 1px 2px rgb(var(--c-sapphire) / 0.05)",
-        "ambient-lg": "0 18px 44px -12px rgb(var(--c-sapphire) / 0.16), 0 2px 6px rgb(0 0 0 / 0.04)",
-        // Accent glow around icon containers on hover.
-        glow: "0 0 0 4px rgb(var(--c-teal) / 0.10), 0 8px 22px -6px rgb(var(--c-cyan) / 0.45)",
+        glass: "0 1px 2px rgb(16 24 40 / 0.04)",
+        soft: "0 1px 3px rgb(16 24 40 / 0.08)",
+        lift: "0 12px 32px -12px rgb(16 24 40 / 0.18)",
+        // Focus ring for inputs, selects and search.
+        focus: "0 0 0 3px rgb(var(--primary) / 0.18)",
+        ambient: "0 1px 2px rgb(16 24 40 / 0.04)",
+        "ambient-lg": "0 2px 8px -2px rgb(16 24 40 / 0.08)",
+        glow: "0 0 0 3px rgb(var(--primary) / 0.1)",
       },
       keyframes: {
         "fade-up": { from: { opacity: "0", transform: "translateY(6px)" }, to: { opacity: "1", transform: "none" } },

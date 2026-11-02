@@ -24,7 +24,7 @@ import {
   vAcademicYearStatus, vAttendanceStatus, vAudience, vConcessionKind, vEnrollmentStatus, vEntityRef, vEventKind,
   vExamStatus, vFileKind, vFileOwnerType, vGender, vHomeworkStatus, vLeaveStatus, vLeaveType, vMembershipStatus, vNoticeStatus,
   vNoticeType, vNotificationType, vPaymentMethod, vPaymentStatus, vPermissionSet, vPersonStatus, vPriority, vRole, vSchoolStatus,
-  vStaffAttendanceStatus, vStaffStatus, vSubmissionStatus, vAction,
+  vStaffAttendanceStatus, vStaffStatus, vSubmissionStatus, vAction, vPreviousSchool,
 } from "./core/validators";
 
 export default defineSchema({
@@ -325,6 +325,8 @@ export default defineSchema({
     admissionNo: v.string(),
     firstName: v.string(),
     lastName: v.string(),
+    /** Normalized lowercase last name for case-insensitive duplicate matching (BUG-005). */
+    lastNameKey: v.optional(v.string()),
     gender: v.optional(vGender),
     dateOfBirth: v.optional(v.string()),
     admissionDate: v.optional(v.string()),
@@ -342,10 +344,13 @@ export default defineSchema({
      */
     scholarNo: v.optional(v.string()),
     scholarNoKey: v.optional(v.string()),
+    /** Admitted from another school: previous school and its incoming transfer certificate. */
+    previousSchool: v.optional(vPreviousSchool),
   })
     .index("by_school_admission", ["schoolId", "admissionNo"])
     .index("by_school_status_name", ["schoolId", "status", "lastName"])
-    .index("by_school_scholar", ["schoolId", "scholarNoKey"]),
+    .index("by_school_scholar", ["schoolId", "scholarNoKey"])
+    .index("by_school_lastNameKey_dob", ["schoolId", "lastNameKey", "dateOfBirth"]),
 
   /**
    * Admission register (CSR / scholar register) — SCHOOL-DEFINED extra columns.
@@ -798,6 +803,8 @@ export default defineSchema({
     publishDate: v.string(),
     expiresOn: v.optional(v.string()),
     eventDate: v.optional(v.string()),
+    /** Last day of a multi-day event or holiday (`eventDate` is the first day). */
+    endDate: v.optional(v.string()),
     createdByUserId: v.id("users"),
     /** Set when the notice is first published (ms). Lets an archived notice be restored to the state it had. */
     publishedAt: v.optional(v.number()),
@@ -849,7 +856,6 @@ export default defineSchema({
     key: v.string(),
     value: v.number(), // last number handed out
   }).index("by_school_key", ["schoolId", "key"]),
-
 
   /**
    * A bulk student-account run (Admin → Accounts & Import). The scope is

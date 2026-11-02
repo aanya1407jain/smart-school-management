@@ -226,7 +226,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
         onClick={() => (open ? close() : openMenu())}
         onKeyDown={onKeyDown}
         className={cn(
-          "group relative flex h-10 w-full items-center gap-2 rounded-xl border bg-white/80 pl-3.5 pr-9 text-left text-sm text-ink backdrop-blur-md",
+          "group relative flex h-10 max-sm:h-11 w-full items-center gap-2 rounded-xl border bg-white pl-3.5 pr-9 text-left text-sm max-sm:text-base text-ink",
           "shadow-[0_1px_2px_rgb(6_49_84_/_0.04)] transition-[border-color,box-shadow,background-color] duration-200",
           "hover:border-teal/40 hover:bg-white focus:outline-none focus-visible:border-teal focus-visible:shadow-focus",
           open && "border-teal/60 bg-white shadow-focus",
@@ -262,7 +262,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
               ...(fixed && anchor ? { left: anchor.left, minWidth: anchor.width, ...(dropUp ? { bottom: window.innerHeight - anchor.top + 6 } : { top: anchor.bottom + 6 }) } : {}),
             }}
             className={cn(
-              "glass-strong spatial scrollbar-thin max-h-72 overflow-auto rounded-xl bg-white/[0.97] p-1.5 backdrop-blur-xl",
+              "glass-strong scrollbar-thin max-h-72 overflow-auto rounded-xl p-1.5",
               fixed ? "fixed z-[60]" : cn("absolute left-0 z-50 min-w-full", dropUp ? "bottom-full mb-1.5" : "top-full mt-1.5"),
             )}
           >
@@ -281,8 +281,8 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
                   onPointerMove={() => !o.disabled && setActive(i)}
                   onClick={() => choose(o)}
                   className={cn(
-                    "relative flex cursor-pointer select-none items-center gap-2 rounded-lg py-2 pl-3 pr-8 text-sm transition-colors duration-150",
-                    isActive && !o.disabled && "bg-gradient-to-r from-teal/15 via-cyan/10 to-transparent text-ink",
+                    "relative flex cursor-pointer select-none items-center gap-2 rounded-lg py-2 max-sm:py-2.5 pl-3 pr-8 text-sm max-sm:text-base transition-colors duration-150",
+                    isActive && !o.disabled && "bg-teal-soft/70 text-ink",
                     isSelected ? "font-semibold text-lagoon" : "text-ink-soft",
                     o.disabled && "cursor-not-allowed opacity-45",
                   )}

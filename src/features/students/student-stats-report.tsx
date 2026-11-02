@@ -42,12 +42,12 @@ export function StudentStats() {
     <QueryView query={queryState}>
       {(d) => (
         <div className="space-y-5">
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <StatCard label="Enrolled students" value={d.total} icon={<GraduationCap className="h-5 w-5" />} hint={`${d.status?.active ?? d.total} active`} />
             <StatCard label="Sections" value={d.bySection.length} icon={<Users className="h-5 w-5" />} tone="sapphire" hint={`Avg ${(d.total / Math.max(1, d.bySection.length)).toFixed(1)} per section`} />
             <StatCard label="Parent contacts" value={d.parentContacts} icon={<Users className="h-5 w-5" />} tone="purple" hint="Contact records linked to enrolled students" />
           </div>
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <ChartCard title="Students by class" description="Split by gender">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={d.byClass} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>

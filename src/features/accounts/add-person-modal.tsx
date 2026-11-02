@@ -81,12 +81,12 @@ export function AddPersonModal({
         </>
       }
     >
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {fields.filter((f) => f.key !== "loginId").map((f) => (
           <FieldInput key={f.key} field={f} value={values[f.key] ?? ""} error={errorFor(f.key)} onChange={(v) => setValues((s) => ({ ...s, [f.key]: v }))} />
         ))}
       </div>
-      <div className="mt-5 space-y-3 rounded-xl border border-line/80 bg-white/60 p-4">
+      <div className="mt-5 space-y-3 rounded-xl border border-line/80 bg-white p-4">
         <Checkbox
           checked={createAccount}
           onChange={(e) => setCreateAccount(e.target.checked)}

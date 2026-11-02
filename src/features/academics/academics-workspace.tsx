@@ -258,7 +258,7 @@ function ClassesTab({ year, classes, sections, teachers, autoOpen = false }: { y
       {sorted.length === 0 ? (
         <Card><EmptyState title="No classes yet" description="Create classes to start setting up this academic year." action={<Button onClick={() => setClassOpen(true)}>Add class</Button>} /></Card>
       ) : (
-        <div className="grid gap-4 xl:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           {sorted.map((c) => {
             const classSections = sections.filter((s) => s.classId === c._id);
             return (
@@ -273,7 +273,7 @@ function ClassesTab({ year, classes, sections, teachers, autoOpen = false }: { y
                     </div>
                   }
                 />
-                <ul className="grid gap-2.5 p-5 sm:grid-cols-2">
+                <ul className="grid grid-cols-1 gap-2.5 p-5 sm:grid-cols-2">
                   {classSections.map((s) => (
                     <li key={s._id} className="rounded-xl border border-line/70 bg-alabaster/50 p-3.5">
                       <p className="text-lg font-semibold text-sapphire">{s.displayName}</p>
@@ -285,7 +285,7 @@ function ClassesTab({ year, classes, sections, teachers, autoOpen = false }: { y
                       </Select>
                     </li>
                   ))}
-                  {classSections.length === 0 && <li className="col-span-2 py-2 text-center text-sm text-ink-muted">No sections yet in this class for {year.name}.</li>}
+                  {classSections.length === 0 && <li className="col-span-full py-2 text-center text-sm text-ink-muted">No sections yet in this class for {year.name}.</li>}
                 </ul>
               </Card>
             );
