@@ -10,7 +10,6 @@
 
 import type * as academicYearMaintenance from "../academicYearMaintenance.js";
 import type * as academics from "../academics.js";
-import type * as account from "../account.js";
 import type * as accounts from "../accounts.js";
 import type * as admissionRegister from "../admissionRegister.js";
 import type * as attendance from "../attendance.js";
@@ -31,6 +30,7 @@ import type * as core_modules from "../core/modules.js";
 import type * as core_permissions from "../core/permissions.js";
 import type * as core_registry from "../core/registry.js";
 import type * as core_validators from "../core/validators.js";
+import type * as credentials from "../credentials.js";
 import type * as crons from "../crons.js";
 import type * as dashboards from "../dashboards.js";
 import type * as events from "../events.js";
@@ -52,6 +52,7 @@ import type * as model_attendanceRecords from "../model/attendanceRecords.js";
 import type * as model_audit from "../model/audit.js";
 import type * as model_calendar from "../model/calendar.js";
 import type * as model_counters from "../model/counters.js";
+import type * as model_email from "../model/email.js";
 import type * as model_examRecords from "../model/examRecords.js";
 import type * as model_feeData from "../model/feeData.js";
 import type * as model_feeMath from "../model/feeMath.js";
@@ -106,7 +107,6 @@ import type {
 declare const fullApi: ApiFromModules<{
   academicYearMaintenance: typeof academicYearMaintenance;
   academics: typeof academics;
-  account: typeof account;
   accounts: typeof accounts;
   admissionRegister: typeof admissionRegister;
   attendance: typeof attendance;
@@ -127,6 +127,7 @@ declare const fullApi: ApiFromModules<{
   "core/permissions": typeof core_permissions;
   "core/registry": typeof core_registry;
   "core/validators": typeof core_validators;
+  credentials: typeof credentials;
   crons: typeof crons;
   dashboards: typeof dashboards;
   events: typeof events;
@@ -148,6 +149,7 @@ declare const fullApi: ApiFromModules<{
   "model/audit": typeof model_audit;
   "model/calendar": typeof model_calendar;
   "model/counters": typeof model_counters;
+  "model/email": typeof model_email;
   "model/examRecords": typeof model_examRecords;
   "model/feeData": typeof model_feeData;
   "model/feeMath": typeof model_feeMath;

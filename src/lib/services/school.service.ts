@@ -90,7 +90,7 @@ export const mockSchoolService = {
     });
   },
 
-  // Password changes are handled by Convex Auth (convex/account.ts → changePassword).
+  // Passwords are set only by administrators (convex/credentials.ts); there is no self-service change.
 };
 
 export type SchoolService = typeof mockSchoolService;

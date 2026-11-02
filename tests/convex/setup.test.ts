@@ -26,19 +26,13 @@ describe("setup:initSchool", () => {
     }));
     expect(state.school).toMatchObject({ code: "GVS", slug: "green-valley", status: "active" });
     expect(state.years).toHaveLength(1);
-    expect(state.user).toMatchObject({ mustChangePassword: true });
+    expect(state.user?.mustChangePassword).toBeUndefined();
     expect(state.membership).toMatchObject({ role: "admin", status: "active", schoolId: r.schoolId, userId: state.user!._id });
 
-    // The temporary password is real (verified by Convex Auth) and can be replaced.
+    // The first admin works straight away (no forced password change).
     const admin = await as(t, state.user!._id);
-    expect(state.user?.temporaryPasswordIssuedAt).toBeGreaterThan(0);
-    // Until the temporary password is replaced the first admin can only reach the session and the password change.
-    const before = await admin.query(api.users.session, {});
-    expect(before.status === "signedIn" && before.viewer.mustChangePassword).toBe(true);
-    expect(await errorCode(admin.query(api.accounts.listPeople, { kind: "teacher", paginationOpts: { numItems: 5, cursor: null } }))).toBe("PASSWORD_CHANGE_REQUIRED");
-    await admin.action(api.account.changePassword, { currentPassword: r.temporaryPassword, newPassword: "Principal2026" });
     const s = await admin.query(api.users.session, {});
-    expect(s.status === "signedIn" && s.viewer.role === "admin" && s.viewer.school.slug === "green-valley" && !s.viewer.mustChangePassword).toBe(true);
+    expect(s.status === "signedIn" && s.viewer.role === "admin" && s.viewer.school.slug === "green-valley").toBe(true);
     expect((await admin.query(api.accounts.listPeople, { kind: "teacher", paginationOpts: { numItems: 5, cursor: null } })).page).toHaveLength(0);
 
     expect(await errorCode(t.action(internal.setup.initSchool, { ...input, school: { ...input.school, slug: "other" } }))).toBe("CONFLICT");

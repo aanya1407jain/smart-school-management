@@ -409,7 +409,7 @@ describe("source inventory: every public function is classified", () => {
   // The module portal queries moved to their modules (timetable.myStudentTimetable, homework.myHomework, exams.myResults, fees.myFees).
   const PORTAL: Record<string, ModuleKey | "core"> = { myProfile: "core", myCertificates: "students", myNotices: "administration" };
   // Core files: no module (mixed views gate their parts inside: files.ts by kind, dashboards.ts by panel).
-  const CORE_FILES = ["academics.ts", "teachers.ts", "reports.ts", "account.ts", "accounts.ts", "audit.ts", "bulkAccounts.ts", "dashboards.ts", "files.ts", "memberships.ts", "notifications.ts", "profile.ts", "schools.ts", "tcVerification.ts", "users.ts"];
+  const CORE_FILES = ["academics.ts", "teachers.ts", "reports.ts", "accounts.ts", "audit.ts", "bulkAccounts.ts", "credentials.ts", "dashboards.ts", "files.ts", "memberships.ts", "notifications.ts", "profile.ts", "schools.ts", "tcVerification.ts", "users.ts"];
 
   const dir = join(__dirname, "../../convex");
   const files = readdirSync(dir).filter((f) => f.endsWith(".ts"));

@@ -24,7 +24,7 @@ export const core: CoreContributions = {
     "_storage", "users", "authAccounts", "authSessions", "authRefreshTokens", "authVerificationCodes", "authVerifiers", "authRateLimits",
     "schools", "schoolSettings", "schoolModules", "schoolMemberships", "teachers",
     "academicYears", "classes", "sections",
-    "counters", "auditLogs", "files", "notifications", "notices", "events", "bulkAccountJobs", "bulkAccountJobItems",
+    "counters", "auditLogs", "files", "notifications", "notices", "events", "bulkAccountJobs", "bulkAccountJobItems", "credentialOtps",
   ],
   routes: [
     page("/", [], [], "Entry point; redirects to sign-in or the user's workspace."),
@@ -39,6 +39,8 @@ export const core: CoreContributions = {
     page("/admin/teachers/[id]/edit", ["staff:manage"], ["admin"]),
     page("/admin/accounts", ["users:manage", "students:write", "staff:manage"], ["admin"]),
     page("/admin/permissions", ["users:manage"], ["admin"]),
+    // Sign-in credential lookup and OTP-authorized password reset (convex/credentials.ts: admin role + users:manage).
+    page("/admin/credentials", ["users:manage"], ["admin"]),
     { ...page("/admin/notices", ["notices:manage"], ["admin"]), entitlementKey: "administration" },
     page("/admin/notifications", ["notifications:read"], ["admin"]),
     { ...page("/admin/reports", ["reports:read", "reports:finance"], ["admin"]), entitlementKey: "administration" },
@@ -50,13 +52,10 @@ export const core: CoreContributions = {
     { ...page("/teacher/notices", ["notices:read"], ["teacher"]), entitlementKey: "administration" },
     page("/teacher/notifications", ["notifications:read"], ["teacher"]),
     page("/teacher/profile", ["profile:read:own"], ["teacher"]),
-    // Personal account settings (password & security) — same access as the own profile.
-    page("/teacher/settings", ["profile:read:own"], ["teacher"]),
     // Remarks & Incidents (Trisha, Oct 31): runs on sample data, offered to demo personas only.
     page("/teacher/remarks", ["area:teacher"], ["teacher"]),
     page("/student", ["area:student"], ["student"]),
     page("/student/notifications", ["notifications:read"], ["student"]),
-    page("/student/settings", ["profile:read:own"], ["student"]),
   ],
   nav: [
     { role: "admin", group: "Overview", label: "Dashboard", href: "/admin/dashboard", icon: "dashboard", anyOf: ["reports:read", "fees:manage"], order: 0 },
@@ -64,6 +63,7 @@ export const core: CoreContributions = {
     { role: "admin", group: "People & academics", label: "Teachers & Staff", href: "/admin/teachers", icon: "teachers", anyOf: ["staff:manage"], order: 13 },
     { role: "admin", group: "People & academics", label: "Accounts & Import", href: "/admin/accounts", icon: "accounts", anyOf: ["users:manage", "students:write", "staff:manage"], order: 14 },
     { role: "admin", group: "People & academics", label: "Staff & Permissions", href: "/admin/permissions", icon: "settings", anyOf: ["users:manage"], order: 15 },
+    { role: "admin", group: "People & academics", label: "Credentials", href: "/admin/credentials", icon: "accounts", anyOf: ["users:manage"], order: 16 },
     { role: "admin", group: "Communication & insight", label: "Notices & Events", href: "/admin/notices", icon: "notices", anyOf: ["notices:manage"], order: 30, entitlementKey: "administration" },
     { role: "admin", group: "Communication & insight", label: "Notifications", href: "/admin/notifications", icon: "notifications", anyOf: ["notifications:read"], order: 31 },
     { role: "admin", group: "Communication & insight", label: "Reports", href: "/admin/reports", icon: "reports", anyOf: ["reports:read", "reports:finance"], order: 32, entitlementKey: "administration" },
@@ -75,9 +75,7 @@ export const core: CoreContributions = {
     { role: "teacher", group: "Updates", label: "Notices", href: "/teacher/notices", icon: "notices", anyOf: ["notices:read"], order: 30, entitlementKey: "administration" },
     { role: "teacher", group: "Updates", label: "Notifications", href: "/teacher/notifications", icon: "notifications", anyOf: ["notifications:read"], order: 31 },
     { role: "teacher", group: "Updates", label: "Profile", href: "/teacher/profile", icon: "profile", anyOf: ["profile:read:own"], order: 32 },
-    { role: "teacher", group: "Updates", label: "Settings", href: "/teacher/settings", icon: "settings", anyOf: ["profile:read:own"], order: 33 },
     { role: "student", group: "Updates", label: "Notifications", href: "/student/notifications", icon: "notifications", anyOf: ["notifications:read"], order: 31 },
-    { role: "student", group: "Updates", label: "Settings", href: "/student/settings", icon: "settings", anyOf: ["profile:read:own"], order: 33 },
   ],
   crons: [],
 };

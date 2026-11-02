@@ -8,27 +8,19 @@ import { useActiveStudentId, useSession } from "@/features/auth/session-provider
 import { Avatar, Badge, Button, Card, CardHeader, FormField, Input, PageHeader, QueryView, useToast } from "@/components/ui";
 import { ROLE_LABELS } from "@/lib/permissions";
 import { TeacherProfileView } from "@/features/teachers/teacher-profile";
-import { cn } from "@/lib/utils/cn";
-import { PasswordSecurity } from "./password-card";
 import { StudentProfileView } from "@/features/students/student-profile";
 
 export function ProfilePage() {
-  const { user, viewer, can } = useSession();
+  const { user, viewer } = useSession();
   const studentId = useActiveStudentId();
-  // Passwords are changed in Settings → Security. Only an administrator who cannot open
-  // Settings (e.g. finance-only access) keeps the compact control here.
-  const passwordHere = user?.role === "admin" && !can("settings:manage");
   const q = useQuery(() => services.school.getMyProfile(studentId ?? undefined), [studentId]);
   if (!user) return null;
   return (
     <div className="space-y-6">
-      <PageHeader title="Profile" description={passwordHere ? "Your account details and sign-in settings." : "Your account details. Change your password in Settings → Security."} />
+      <PageHeader title="Profile" description="Your account details. Passwords are managed by your school's administrators — contact the school office to change yours." />
       <QueryView query={q}>
         {(p) => (
-          <div className={cn("grid grid-cols-1 gap-5", passwordHere && "lg:grid-cols-[minmax(0,1fr)_360px]")}>
-            <AccountCard displayName={p.displayName} loginId={viewer?.loginId ?? "—"} email={p.email} phone={p.phone} roleLabel={p.title ?? ROLE_LABELS[p.role]} canRename={p.role === "admin"} />
-            {passwordHere && <PasswordSecurity />}
-          </div>
+          <AccountCard displayName={p.displayName} loginId={viewer?.loginId ?? "—"} email={p.email} phone={p.phone} roleLabel={p.title ?? ROLE_LABELS[p.role]} canRename={p.role === "admin"} />
         )}
       </QueryView>
       {user.role === "teacher" && user.teacherId && <TeacherProfileView teacherId={user.teacherId} self />}

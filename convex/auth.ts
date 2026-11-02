@@ -11,15 +11,17 @@
  *    email format is required while verify/reset are not configured. We set it
  *    to the CANONICAL Login ID (convex/model/loginIds.ts). Hashing (Scrypt),
  *    session issuance and the built-in failed-sign-in rate limit are unchanged.
- *  - There is NO self-registration. `validatePasswordRequirements` is only
- *    invoked for client flows that would set a password (signUp,
- *    reset-verification); it always refuses. Accounts are created exclusively
- *    server-side (convex/model/accounts.ts → createAccount) by an authorized
- *    admin action, a data import, the deployment setup or the demo seed, and
- *    `createOrUpdateUser` additionally requires a reserved membership.
+ *  - There is NO self-registration and NO self-service password change or
+ *    recovery: the provider has no `reset`/`verify` email configured, and
+ *    `validatePasswordRequirements` — invoked only for client flows that would
+ *    set a password (signUp, reset-verification) — always refuses. Accounts
+ *    are created exclusively server-side (convex/model/accounts.ts →
+ *    createAccount) by an authorized admin action, a data import, the
+ *    deployment setup or the demo seed, and `createOrUpdateUser` additionally
+ *    requires a reserved membership. Only administrators change passwords
+ *    (convex/credentials.ts, authorized by an emailed one-time code).
  *  - A session is only created for an enabled user with at least one ACTIVE
- *    membership in an ACTIVE school, and never with an expired temporary
- *    password (model/accounts.ts TEMPORARY_PASSWORD_TTL_MS).
+ *    membership in an ACTIVE school.
  *
  * Client usage: `useAuthActions().signIn("password", { loginId, password, flow: "signIn" })`.
  */
@@ -31,7 +33,7 @@ import { AppError, invalid } from "./core/errors";
 import { canonicalLoginId } from "./model/loginIds";
 import { activatePendingAccount, assertSessionAllowed } from "./model/accounts";
 
-/** Password policy for school accounts (used by account.changePassword and temporary passwords). */
+/** Password policy for administrator-set passwords (credentials.verifyOtpAndSetPassword). */
 export function validatePassword(password: string) {
   if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
     throw invalid("Use at least 8 characters, including a letter and a number.", { password: "Too weak" });
@@ -72,17 +74,17 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
       }
       const loginId = canonicalLoginId(args.profile.loginId);
       if (!loginId) throw new AppError("FORBIDDEN", "Accounts are created by your school.");
-      return await activatePendingAccount(ctx, { loginId, mustChangePassword: args.profile.mustChangePassword === true, defaultPassword: args.profile.defaultPassword === true });
+      return await activatePendingAccount(ctx, { loginId, defaultPassword: args.profile.defaultPassword === true });
     },
 
     /**
      * Gate every new session (runs after the password was verified):
-     * disabled users, users without an active membership in an active school,
-     * and expired temporary passwords get no session.
+     * disabled users and users without an active membership in an active
+     * school get no session.
      */
     async beforeSessionCreation(rawCtx, { userId }) {
       const ctx = rawCtx as unknown as MutationCtx;
-      await assertSessionAllowed(ctx, userId as Id<"users">, Date.now());
+      await assertSessionAllowed(ctx, userId as Id<"users">);
     },
   },
 });

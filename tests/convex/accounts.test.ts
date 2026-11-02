@@ -1,15 +1,16 @@
 /**
  * Admin account management (convex/accounts.ts) and the Login ID identity model.
- * Sign-in itself (Convex Auth HTTP flow) is covered by the integration suite;
- * here a temporary password is proven valid by using it with
- * account.changePassword, which verifies it through Convex Auth.
+ * Passwords are proven valid with a real Convex Auth sign-in (fixtures.signInResult).
+ * Password overwrites (OTP-gated) are covered in credentials.test.ts.
  */
-import { describe, expect, test } from "vitest";
+import { beforeAll, describe, expect, test } from "vitest";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { as, createSchool, errorCode, makeTest, type T } from "./fixtures";
+import { as, createSchool, enableSignIn, errorCode, makeTest, overwritePassword, signInResult, type T } from "./fixtures";
 import { canonicalLoginId, formatLoginId, parseGeneratedLoginId } from "../../convex/model/loginIds";
 import { STUDENT_DEFAULT_PASSWORD } from "../../convex/model/accounts";
+
+beforeAll(() => enableSignIn());
 
 async function setup() {
   const t = makeTest();
@@ -55,8 +56,9 @@ describe("accounts.create", () => {
     const { m, user, account } = await memberFor(t, r.membershipId);
     expect(m).toMatchObject({ schoolId: A.schoolId, role: "student", status: "active", studentId: A.studentB, loginId: r.loginId });
     expect(m.teacherId).toBeUndefined();
-    // Must change it at first sign-in; the student default never expires.
-    expect(user).toMatchObject({ loginId: r.loginId, mustChangePassword: true, defaultPassword: true });
+    // Marked as the school default; nothing forces a change (only administrators change passwords).
+    expect(user).toMatchObject({ loginId: r.loginId, defaultPassword: true });
+    expect(user?.mustChangePassword).toBeUndefined();
     // A student without a scholar number cannot get an account; a typed Login ID is refused.
     const other = await t.run((ctx) => ctx.db.insert("students", { schoolId: A.schoolId, admissionNo: "X-1", firstName: "No", lastName: "Scholar", status: "active" }));
     expect(await errorCode(admin.action(api.accounts.create, { person: { kind: "student", studentId: other } }))).toBe("INVALID_ARGUMENT");
@@ -80,14 +82,13 @@ describe("accounts.create", () => {
     expect((await admin.action(api.accounts.create, { person: { kind: "teacher", teacherId: t2 } })).loginId).toBe("TCH-00125");
   });
 
-  test("the temporary password works (verified by Convex Auth) and the user can replace it", async () => {
+  test("the issued password works (verified by Convex Auth) and the account is usable right away", async () => {
     const { t, A } = await setup();
     const r = await (await as(t, A.users.admin)).action(api.accounts.create, { person: { kind: "student", studentId: A.studentB } });
     const { m } = await memberFor(t, r.membershipId);
+    expect(await signInResult(t, r.loginId, "wrong-pass-1")).toMatch(/InvalidSecret/);
+    expect(await signInResult(t, r.loginId, r.temporaryPassword)).toBe("OK");
     const student = await as(t, m.userId!);
-    expect(await errorCode(student.action(api.account.changePassword, { currentPassword: "wrong-pass-1", newPassword: "MyNewPass9" }))).toBe("INVALID_ARGUMENT");
-    await student.action(api.account.changePassword, { currentPassword: r.temporaryPassword, newPassword: "MyNewPass9" });
-    expect((await memberFor(t, r.membershipId)).user?.mustChangePassword).toBeUndefined();
     const s = await student.query(api.users.session, {});
     expect(s.status === "signedIn" && s.viewer.loginId === r.loginId && s.viewer.role === "student").toBe(true);
   });
@@ -133,25 +134,21 @@ describe("disable / enable / reset", () => {
     expect(await errorCode(student.query(api.attendance.studentHistory, { studentId: A.studentB }))).toBe("UNAUTHENTICATED");
     // Even a fresh session (had one been created) has no school access while disabled.
     expect(await errorCode((await as(t, userId)).query(api.attendance.studentHistory, { studentId: A.studentB }))).toBe("NO_SCHOOL_ACCESS");
-    expect(await errorCode(admin.action(api.accounts.issueTemporaryPassword, { targetMembershipId: r.membershipId }))).toBe("INVALID_ARGUMENT");
+    expect(await errorCode(admin.action(api.credentials.requestPasswordOverwriteOtp, { targetMembershipId: r.membershipId }))).toBe("INVALID_ARGUMENT");
     await admin.action(api.accounts.setStatus, { targetMembershipId: r.membershipId, status: "active" });
     expect((await (await as(t, userId)).query(api.users.session, {})).status).toBe("signedIn");
     expect(await errorCode(admin.action(api.accounts.setStatus, { targetMembershipId: A.memberships.admin, status: "suspended" }))).toBe("FORBIDDEN");
     expect(await errorCode((await as(t, A.users.classTeacher)).action(api.accounts.setStatus, { targetMembershipId: r.membershipId, status: "suspended" }))).toBe("FORBIDDEN");
   });
 
-  test("a reset issues a new working temporary password and requires a change again", async () => {
+  test("an administrator's (OTP-authorized) reset replaces the password", async () => {
     const { t, A } = await setup();
     const admin = await as(t, A.users.admin);
     const r = await admin.action(api.accounts.create, { person: { kind: "student", studentId: A.studentB } });
-    const userId = (await memberFor(t, r.membershipId)).m.userId!;
-    await (await as(t, userId)).action(api.account.changePassword, { currentPassword: r.temporaryPassword, newPassword: "Chosen123" });
-    const reset = await admin.action(api.accounts.issueTemporaryPassword, { targetMembershipId: r.membershipId });
+    const reset = await overwritePassword(admin, r.membershipId, "Chosen123");
     expect(reset.loginId).toBe(r.loginId);
-    expect((await memberFor(t, r.membershipId)).user?.mustChangePassword).toBe(true);
-    const fresh = await as(t, userId);
-    expect(await errorCode(fresh.action(api.account.changePassword, { currentPassword: "Chosen123", newPassword: "Another123" }))).toBe("INVALID_ARGUMENT");
-    await fresh.action(api.account.changePassword, { currentPassword: reset.temporaryPassword, newPassword: "Another123" });
+    expect(await signInResult(t, r.loginId, r.temporaryPassword)).toMatch(/InvalidSecret/);
+    expect(await signInResult(t, r.loginId, "Chosen123")).toBe("OK");
   });
 
   test("listPeople shows account state per person (admin only)", async () => {

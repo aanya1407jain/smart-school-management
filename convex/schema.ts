@@ -53,14 +53,16 @@ export default defineSchema({
      * Also the Convex Auth account id of the "password" provider. Unique.
      */
     loginId: v.optional(v.string()),
-    /** Set when an administrator issued a temporary password; cleared by account.changePassword. */
+    /**
+     * LEGACY (no longer read or written): the removed self-service "change your
+     * temporary password" flow. Only administrators set passwords now; an
+     * administrator password overwrite clears both fields.
+     */
     mustChangePassword: v.optional(v.boolean()),
-    /** Server time the current temporary password was issued (expiry: model/accounts.ts). */
     temporaryPasswordIssuedAt: v.optional(v.number()),
     /**
      * The current password is the school's student default (STUDENT_DEFAULT_PASSWORD).
-     * It must still be changed at first sign-in, but it does not expire. Cleared
-     * together with mustChangePassword.
+     * Shown to administrators on Credentials; cleared when an administrator sets a password.
      */
     defaultPassword: v.optional(v.boolean()),
   })
@@ -915,6 +917,28 @@ export default defineSchema({
     .index("by_job_student", ["jobId", "studentId"]),
 
   /** Append-only trail of important actions. Written via convex/audit/log.ts. */
+  /**
+   * One-time codes that authorize an administrator's password overwrite
+   * (convex/credentials.ts). The code is emailed to the ADMINISTRATOR's own
+   * address and only its salted SHA-256 hash is stored. A challenge is bound to
+   * one administrator membership and one target account, expires after
+   * OTP_TTL_MS, allows OTP_MAX_ATTEMPTS wrong guesses and is consumed on
+   * success. The new password is never stored here.
+   */
+  credentialOtps: defineTable({
+    schoolId: v.id("schools"),
+    adminUserId: v.id("users"),
+    adminMembershipId: v.id("schoolMemberships"),
+    targetMembershipId: v.id("schoolMemberships"),
+    codeHash: v.string(),
+    salt: v.string(),
+    expiresAt: v.number(),
+    attempts: v.number(),
+    /** Set once: verified (consumed), replaced by a newer request, too many attempts, or email failed. */
+    closedAt: v.optional(v.number()),
+    closedReason: v.optional(v.union(v.literal("used"), v.literal("replaced"), v.literal("locked"), v.literal("undelivered"))),
+  }).index("by_admin", ["adminMembershipId"]),
+
   auditLogs: defineTable({
     schoolId: v.id("schools"),
     /** WHO performed the operation; absent for system jobs (seed, migrations). */

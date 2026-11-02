@@ -179,8 +179,6 @@ describe("student portal modules (live accounts)", () => {
     const res = await admin.action(api.bulkAccounts.processBatch, { jobId });
     const userId = await t.run(async (ctx) => (await ctx.db.query("schoolMemberships").withIndex("by_student", (q) => q.eq("studentId", sid)).unique())!.userId!);
     const me = await as(t, userId);
-    expect(await errorCode(me.query(api.timetable.myStudentTimetable, {}))).toBe("PASSWORD_CHANGE_REQUIRED");
-    await me.action(api.account.changePassword, { currentPassword: res.credentials[0].temporaryPassword, newPassword: "Kabir#2026x" });
     const tt = await me.query(api.timetable.myStudentTimetable, {});
     expect(tt.state === "ok" && tt.section === "8-B" && tt.lessons.length === 1).toBe(true); // 8-B's real timetable
     const hw = await me.query(api.homework.myHomework, {});

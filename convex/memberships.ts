@@ -59,8 +59,8 @@ export const updateAccess = schoolMutation({
     if (target._id === ctx.actor.membershipId) throw forbidden("You cannot change your own access.");
     if (status === "invited") throw invalid("Status can only be set to active or suspended.");
     if (target.guardianId) throw invalid("This sign-in type no longer exists; accounts are for administrators, teachers and students only.");
-    if (status && target.status === "invited") throw invalid("This account has no credentials yet. Issue a temporary password first.");
-    if (status === "active" && !target.userId) throw invalid("This account has no credentials yet. Issue a temporary password first.");
+    if (status && target.status === "invited") throw invalid("This account has no credentials yet. Issue a password first.");
+    if (status === "active" && !target.userId) throw invalid("This account has no credentials yet. Issue a password first.");
     if (permissionSets && target.role !== "admin") throw invalid("Permission sets can only be added to administrative memberships.");
     // "Accountant only" is stored as the Accountant grants preset (core/grants.ts), not the legacy
     // permission set; any other permission-set change (e.g. [] = full administrator) clears grants.

@@ -3,6 +3,8 @@
  * schools with the same shape so tests can prove tenant isolation.
  */
 import { convexTest } from "convex-test";
+import { vi } from "vitest";
+import { api } from "../../convex/_generated/api";
 import schema from "../../convex/schema";
 import type { Id } from "../../convex/_generated/dataModel";
 
@@ -104,5 +106,78 @@ export async function errorCode(p: Promise<unknown>): Promise<string> {
   } catch (e) {
     const data = (e as { data?: { code?: string } }).data;
     return data?.code ?? `THROWN: ${(e as Error).message}`;
+  }
+}
+
+// ---------------------------------------------------------------- credentials (OTP-gated overwrite, sign-in)
+
+export type SentEmail = { to: string; subject: string; text: string };
+
+/**
+ * Route convex/model/email.ts through a stubbed Resend endpoint and collect
+ * every message. `fail: true` makes delivery fail (HTTP 500). Call restore().
+ */
+export function captureEmails(options: { fail?: boolean } = {}) {
+  const sent: SentEmail[] = [];
+  const prev = { key: process.env.RESEND_API_KEY, from: process.env.EMAIL_FROM };
+  process.env.RESEND_API_KEY = "test-only-key";
+  process.env.EMAIL_FROM = "School <no-reply@school.test>";
+  vi.stubGlobal("fetch", async (_url: string, init: { body: string }) => {
+    const body = JSON.parse(init.body) as { to: string[]; subject: string; text: string };
+    sent.push({ to: body.to[0], subject: body.subject, text: body.text });
+    return new Response("{}", { status: options.fail ? 500 : 200 });
+  });
+  return {
+    sent,
+    /** The 6-digit code in the latest email. */
+    lastCode: () => /code is (\d{6})/.exec(sent[sent.length - 1]?.text ?? "")?.[1] ?? "",
+    restore() {
+      vi.unstubAllGlobals();
+      if (prev.key === undefined) delete process.env.RESEND_API_KEY; else process.env.RESEND_API_KEY = prev.key;
+      if (prev.from === undefined) delete process.env.EMAIL_FROM; else process.env.EMAIL_FROM = prev.from;
+    },
+  };
+}
+
+type Caller = Awaited<ReturnType<typeof as>>;
+
+/** An administrator overwrites a password through the OTP-gated flow (code read from the captured email). */
+export async function overwritePassword(admin: Caller, targetMembershipId: Id<"schoolMemberships">, newPassword: string) {
+  const mail = captureEmails();
+  try {
+    const { challengeId } = await admin.action(api.credentials.requestPasswordOverwriteOtp, { targetMembershipId });
+    return await admin.action(api.credentials.verifyOtpAndSetPassword, { challengeId, code: mail.lastCode(), newPassword });
+  } finally {
+    mail.restore();
+  }
+}
+
+let signInKeyReady: Promise<void> | null = null;
+/** Test-only RS256 key so Convex Auth can issue tokens (never a real key). */
+export function enableSignIn(): Promise<void> {
+  signInKeyReady ??= (async () => {
+    const pair = (await crypto.subtle.generateKey(
+      { name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
+      true,
+      ["sign", "verify"],
+    )) as CryptoKeyPair;
+    const pkcs8 = new Uint8Array(await crypto.subtle.exportKey("pkcs8", pair.privateKey));
+    let bin = "";
+    for (const b of pkcs8) bin += String.fromCharCode(b);
+    const b64 = btoa(bin).replace(/(.{64})/g, "$1\n");
+    process.env.JWT_PRIVATE_KEY = `-----BEGIN PRIVATE KEY-----\n${b64}\n-----END PRIVATE KEY-----`;
+    process.env.CONVEX_SITE_URL = "http://127.0.0.1:3211";
+  })();
+  return signInKeyReady;
+}
+
+/** Real Convex Auth sign-in with a Login ID: "OK", or the error code / message. Call enableSignIn() first. */
+export async function signInResult(t: T, loginId: string, password: string): Promise<string> {
+  try {
+    const r = (await t.action(api.auth.signIn, { provider: "password", params: { flow: "signIn", loginId, password } })) as { tokens?: { token: string } | null };
+    return r.tokens?.token ? "OK" : "NO_TOKEN";
+  } catch (e) {
+    const data = (e as { data?: { code?: string } }).data;
+    return data?.code ?? (e instanceof Error ? e.message : String(e));
   }
 }

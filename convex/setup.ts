@@ -18,13 +18,16 @@
  * changed later with `schoolModules:setSchoolModules`.
  *
  * → returns the first administrator's Login ID (ADMIN-001 unless given) and a
- *   one-time temporary password. Everything else (classes, sections,
+ *   random password (shown once; hand it over privately). Pass `admin.email`:
+ *   administrators need an email address to confirm password resets of other
+ *   accounts (convex/credentials.ts). Everything else (classes, sections,
  *   subjects, teachers, students, accounts) is then done by that admin in the
  *   app — manually or by import. Nothing here depends on demo data; the demo
  *   seed (convex/seed.ts) is a separate, development-only path.
  *
  * Break-glass (operator only): `setup:addAdministrator` and
- * `setup:issueTemporaryPassword` (e.g. the only admin forgot their password).
+ * `setup:issueTemporaryPassword` (e.g. the only admin forgot their password —
+ * administrators cannot reset their own password in the app).
  */
 import { v } from "convex/values";
 import { invalidateSessions, modifyAccountCredentials } from "@convex-dev/auth/server";
@@ -33,7 +36,7 @@ import type { Id } from "./_generated/dataModel";
 import { internalAction, internalMutation, type MutationCtx } from "./_generated/server";
 import { conflict, invalid, notFound } from "./core/errors";
 import { assertIsoDate, assertNonEmpty } from "./core/validators";
-import { generateTemporaryPassword, PASSWORD_PROVIDER, provisionAccount, reserveAccount, temporaryPasswordFields } from "./model/accounts";
+import { generateSecurePassword, PASSWORD_PROVIDER, passwordIssuedFields, provisionAccount, reserveAccount } from "./model/accounts";
 import { canonicalLoginId } from "./model/loginIds";
 import { vModuleKey } from "./core/modules";
 import { applyModuleSelection } from "./model/modules";
@@ -118,8 +121,8 @@ export const initSchool = internalAction({
   args: { school: vSchoolInput, academicYear: v.object({ name: v.string(), startDate: v.string(), endDate: v.string() }), settings: vSettingsInput, admin: vAdminInput, modules: vModulesInput },
   handler: async (ctx, args): Promise<{ schoolId: Id<"schools">; adminLoginId: string; temporaryPassword: string }> => {
     const { schoolId, loginId }: { schoolId: Id<"schools">; loginId: string } = await ctx.runMutation(internal.setup.createSchoolAndAdmin, args);
-    const temporaryPassword = generateTemporaryPassword();
-    await provisionAccount(ctx, { loginId, password: temporaryPassword, mustChangePassword: true });
+    const temporaryPassword = generateSecurePassword();
+    await provisionAccount(ctx, { loginId, password: temporaryPassword });
     return { schoolId, adminLoginId: loginId, temporaryPassword };
   },
 });
@@ -140,8 +143,8 @@ export const addAdministrator = internalAction({
   args: { admin: vAdminInput },
   handler: async (ctx, { admin }): Promise<{ loginId: string; temporaryPassword: string }> => {
     const { loginId }: { loginId: string } = await ctx.runMutation(internal.setup.reserveAdministrator, { admin });
-    const temporaryPassword = generateTemporaryPassword();
-    await provisionAccount(ctx, { loginId, password: temporaryPassword, mustChangePassword: true });
+    const temporaryPassword = generateSecurePassword();
+    await provisionAccount(ctx, { loginId, password: temporaryPassword });
     return { loginId, temporaryPassword };
   },
 });
@@ -153,17 +156,17 @@ export const userForLoginId = internalMutation({
     if (!id) throw invalid("Invalid Login ID.");
     const user = await ctx.db.query("users").withIndex("by_login_id", (q) => q.eq("loginId", id)).first();
     if (!user) throw notFound("Account");
-    await ctx.db.patch(user._id, temporaryPasswordFields(Date.now()));
+    await ctx.db.patch(user._id, passwordIssuedFields());
     return { userId: user._id, loginId: id };
   },
 });
 
-/** Operator break-glass: new temporary password for any account (signs it out everywhere). */
+/** Operator break-glass: new random password for any account (signs it out everywhere). */
 export const issueTemporaryPassword = internalAction({
   args: { loginId: v.string() },
   handler: async (ctx, { loginId }): Promise<{ loginId: string; temporaryPassword: string }> => {
     const { userId, loginId: id }: { userId: Id<"users">; loginId: string } = await ctx.runMutation(internal.setup.userForLoginId, { loginId });
-    const temporaryPassword = generateTemporaryPassword();
+    const temporaryPassword = generateSecurePassword();
     await modifyAccountCredentials(ctx, { provider: PASSWORD_PROVIDER, account: { id, secret: temporaryPassword } });
     await invalidateSessions(ctx, { userId });
     return { loginId: id, temporaryPassword };
