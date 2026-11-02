@@ -20,6 +20,7 @@ import { formatDate } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils/cn";
 import { SyllabusProgressTracker } from "./syllabus-tracker";
 import { SetupCockpit, type CockpitStep } from "./setup-cockpit";
+import { ClassChips, ClassFilter, KindBadge } from "./curriculum-ui";
 
 type Overview = AcademicsOverview;
 
@@ -42,8 +43,8 @@ export function DemoAcademicsWorkspace() {
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Academic Operations & Curriculum"
-        description="Manage class structures, teacher assignments, and real-time curriculum pacing."
+        title="Academics"
+        description="Classes, sections, subjects, teacher assignments and curriculum pacing for the academic year."
         actions={q.data && (
           <div className="flex flex-wrap items-center gap-2">
             <Select aria-label="Academic year" title="Academic year" value={q.data.year.id} onChange={(e) => setYearId(e.target.value)} className="w-56">
@@ -67,12 +68,15 @@ export function DemoAcademicsWorkspace() {
             <SetupCockpit
               steps={setupSteps(d)}
               onStep={(t) => openTab(t)}
-              coverage={{ pct: d.progress.sections ? d.progress.assignmentCoverage : null, caption: d.progress.openSlots ? `${d.progress.openSlots} subject slot${d.progress.openSlots === 1 ? "" : "s"} still need a teacher` : `All ${d.progress.sections} sections fully assigned` }}
-              enrollment={{ enrolled: d.progress.enrolled, active: d.progress.activeStudents, caption: d.unenrolled.length ? `${d.unenrolled.length} active student${d.unenrolled.length === 1 ? " is" : "s are"} not enrolled in ${d.year.name}` : `${d.progress.activeStudents ? Math.round((d.progress.enrolled / d.progress.activeStudents) * 100) : 0}% of the active roster mapped` }}
+              classes={d.classes.length}
+              sections={d.progress.sections}
+              yearName={d.year.name}
+              coverage={{ assigned: d.classes.flatMap((c) => c.sections).filter((s) => s.classTeacherId).length, total: d.progress.sections }}
+              enrollment={{ enrolled: d.progress.enrolled, active: d.progress.activeStudents }}
             />
             <div id="academics-tabs" className="scroll-mt-20">
               <Tabs value={tab} onValueChange={(t) => changeTab(t)}>
-                <TabsList items={[
+                <TabsList variant="underline" items={[
                   { value: "setup", label: "Overview" },
                   { value: "years", label: "Academic years", count: d.years.length },
                   { value: "classes", label: "Classes & sections", count: d.progress.sections },
@@ -179,6 +183,9 @@ function ClassesTab({ d, autoOpen = false }: { d: Overview; autoOpen?: boolean }
               description={`${c.sections.length} sections · ${c.sections.reduce((a, s) => a + s.studentCount, 0)} students · ${c.subjects.length} subjects`}
               action={<div className="flex gap-1.5"><Button size="sm" variant="ghost" onClick={() => setSubjectsFor(c)}>Subjects</Button><Button size="sm" variant="soft" onClick={() => setSectionFor(c.id)}><Plus className="h-3.5 w-3.5" /> Section</Button></div>}
             />
+            <div className="border-b border-line px-5 py-3">
+              <ClassChips items={c.subjects.map((sub) => ({ id: sub.id, name: sub.name, elective: sub.type === "elective" }))} empty="No subjects yet" />
+            </div>
             <ul className="grid grid-cols-1 gap-2.5 p-5 sm:grid-cols-3">
               {c.sections.map((s) => {
                 const open = s.subjectCoverage.filter((x) => !x.teacherId).length;
@@ -286,26 +293,68 @@ function SubjectsTab({ d, autoOpen = false }: { d: Overview; autoOpen?: boolean 
   const { toast } = useToast();
   const [open, setOpen] = useState(autoOpen);
   useEffect(() => { if (autoOpen) setOpen(true); }, [autoOpen]);
+  const [filter, setFilter] = useState("all");
+  const [editing, setEditing] = useState<Overview["subjects"][number] | null>(null);
+  const [subjectsFor, setSubjectsFor] = useState<Overview["classes"][number] | null>(null);
+  const klass = d.classes.find((c) => c.id === filter) ?? null;
   const [form, setForm] = useState({ name: "", code: "", type: "elective" as "core" | "language" | "elective", classIds: [] as string[] });
+  // Opening "Add subject" while a class is selected pre-ticks that class.
+  useEffect(() => { if (open) setForm((f) => ({ ...f, classIds: klass ? [klass.id] : [] })); }, [open, klass]);
   const m = useMutation(services.academics.createSubject);
+  const classesOf = (subjectId: string) => d.classes.filter((c) => c.subjectIds.includes(subjectId)).map((c) => ({ id: c.id, name: c.name }));
+  const typeOrder = { core: 0, language: 1, elective: 2 } as const;
+  const classSubjects = klass ? [...klass.subjects].sort((a, b) => typeOrder[a.type] - typeOrder[b.type] || a.name.localeCompare(b.name)) : [];
+  const allChecked = d.classes.length > 0 && d.classes.every((c) => form.classIds.includes(c.id));
+  const typeLabel = (t: "core" | "language" | "elective") => (t === "core" ? "Core" : t === "language" ? "Language" : "Elective");
+
   return (
     <Card>
-      <CardHeader title="Subjects" description="Subjects offered across the school" action={<Button size="sm" onClick={() => setOpen(true)}><Plus className="h-4 w-4" /> Add subject</Button>} />
+      <CardHeader title="Subjects" description={`What each class studies in ${d.year.name}. Choose a class to see its curriculum.`} action={<Button size="sm" onClick={() => setOpen(true)}><Plus className="h-4 w-4" /> Add subject</Button>} />
+      {d.classes.length > 0 && (
+        <div className="border-b border-line px-5 pb-3">
+          <ClassFilter classes={d.classes.map((c) => ({ id: c.id, name: c.name }))} value={filter} onChange={setFilter} />
+        </div>
+      )}
       <div className="p-5">
-        <DataTable
-          rows={d.subjects}
-          getRowId={(s) => s.id}
-          columns={[
-            { key: "name", header: "Subject", primary: true, cell: (s) => <span className="font-semibold text-ink">{s.name}</span> },
-            { key: "code", header: "Code", cell: (s) => <span className="font-mono">{s.code}</span> },
-            { key: "type", header: "Type", cell: (s) => <Badge tone={s.type === "core" ? "sapphire" : s.type === "language" ? "lavender" : "teal"}>{s.type}</Badge> },
-            { key: "classes", header: "Classes", cell: (s) => `${s.classCount} classes` },
-            { key: "teachers", header: "Teachers", cell: (s) => `${s.teacherCount} teachers` },
-          ]}
-        />
+        {klass ? (
+          <>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <p className="figures text-[13px] text-ink-muted"><b className="font-semibold text-ink">{klass.name}</b> · {classSubjects.length} subjects · {klass.sections.length} sections</p>
+              <Button size="sm" variant="outline" onClick={() => setSubjectsFor(klass)}><Pencil className="h-3.5 w-3.5" /> Edit {klass.name} subjects</Button>
+            </div>
+            <DataTable
+              rows={classSubjects}
+              getRowId={(s) => s.id}
+              empty={<EmptyState title={`${klass.name} has no subjects yet`} action={<Button onClick={() => setSubjectsFor(klass)}>Choose subjects</Button>} />}
+              columns={[
+                { key: "name", header: "Subject", primary: true, cell: (s) => <span className="font-semibold text-ink">{s.name} <span className="ml-1 font-mono text-[12px] font-normal text-ink-muted">{s.code}</span></span> },
+                { key: "type", header: "Type", cell: (s) => <KindBadge elective={s.type === "elective"} label={typeLabel(s.type)} /> },
+                {
+                  key: "teachers", header: "Teachers", cell: (s) => {
+                    const assigned = klass.sections.filter((sec) => sec.subjectCoverage.some((x) => x.subjectId === s.id && x.teacherId)).length;
+                    return <span className={cn("figures", assigned < klass.sections.length && "text-amber-700")}>{assigned}/{klass.sections.length} sections</span>;
+                  },
+                },
+              ]}
+            />
+          </>
+        ) : (
+          <DataTable
+            rows={d.subjects}
+            getRowId={(s) => s.id}
+            columns={[
+              { key: "name", header: "Subject", primary: true, cell: (s) => <span className="font-semibold text-ink">{s.name}</span> },
+              { key: "code", header: "Code", cell: (s) => <span className="font-mono">{s.code}</span> },
+              { key: "type", header: "Type", cell: (s) => <KindBadge elective={s.type === "elective"} label={typeLabel(s.type)} /> },
+              { key: "classes", header: "Classes", cell: (s) => <ClassChips items={classesOf(s.id)} /> },
+              { key: "teachers", header: "Teachers", cell: (s) => <span className="figures">{s.teacherCount}</span> },
+            ]}
+            rowActions={(s) => <Button size="sm" variant="ghost" onClick={() => setEditing(s)}><Pencil className="h-3.5 w-3.5" /> Classes</Button>}
+          />
+        )}
       </div>
-      <Modal open={open} onOpenChange={setOpen} title="Add subject" size="sm"
-        footer={<><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button loading={m.isPending} onClick={async () => { if (await m.mutate(form)) { toast({ title: "Subject added", description: "Assign teachers to it under Teacher assignments." }); setOpen(false); setForm({ name: "", code: "", type: "elective", classIds: [] }); } }}>Add subject</Button></>}>
+      <Modal open={open} onOpenChange={setOpen} title="Add subject" description={`Classes are for ${d.year.name}.`} size="md"
+        footer={<><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button loading={m.isPending} onClick={async () => { if (await m.mutate(form)) { toast({ title: "Subject added", description: form.classIds.length ? `Offered in ${form.classIds.length} class${form.classIds.length === 1 ? "" : "es"}. Assign teachers under Teacher assignments.` : "Add it to classes from the Subjects tab." }); setOpen(false); setForm({ name: "", code: "", type: "elective", classIds: [] }); } }}>Add subject</Button></>}>
         <div className="space-y-4">
           <div className="grid grid-cols-3 gap-3">
             <FormField label="Name" required error={m.fieldErrors.name} className="col-span-2"><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Sanskrit" /></FormField>
@@ -313,13 +362,43 @@ function SubjectsTab({ d, autoOpen = false }: { d: Overview; autoOpen?: boolean 
           </div>
           <FormField label="Type"><Select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as typeof form.type })}><option value="core">Core</option><option value="language">Language</option><option value="elective">Elective</option></Select></FormField>
           <fieldset>
-            <legend className="mb-2 text-[13px] font-medium text-ink-soft">Offer in classes</legend>
-            <div className="grid grid-cols-3 gap-2">{d.classes.map((c) => <Checkbox key={c.id} label={c.name} checked={form.classIds.includes(c.id)} onChange={(e) => setForm({ ...form, classIds: e.target.checked ? [...form.classIds, c.id] : form.classIds.filter((x) => x !== c.id) })} />)}</div>
+            <div className="mb-2 flex items-center justify-between">
+              <legend className="text-[13px] font-medium text-ink-soft">Applicable classes</legend>
+              <button type="button" className="text-[12.5px] font-semibold text-emerald-800 hover:underline" onClick={() => setForm({ ...form, classIds: allChecked ? [] : d.classes.map((c) => c.id) })}>{allChecked ? "Clear" : "Select all"}</button>
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">{d.classes.map((c) => <Checkbox key={c.id} label={c.name} checked={form.classIds.includes(c.id)} onChange={(e) => setForm({ ...form, classIds: e.target.checked ? [...form.classIds, c.id] : form.classIds.filter((x) => x !== c.id) })} />)}</div>
           </fieldset>
           <FormError error={m.error} />
         </div>
       </Modal>
+      {editing && <SubjectClassesModal subject={editing} d={d} onClose={() => setEditing(null)} />}
+      {subjectsFor && <ClassSubjectsModal cls={subjectsFor} d={d} onClose={() => setSubjectsFor(null)} />}
     </Card>
+  );
+}
+
+/** Edit which of the year's classes study a subject. */
+function SubjectClassesModal({ subject, d, onClose }: { subject: Overview["subjects"][number]; d: Overview; onClose: () => void }) {
+  const { toast } = useToast();
+  const [ids, setIds] = useState<string[]>(() => d.classes.filter((c) => c.subjectIds.includes(subject.id)).map((c) => c.id));
+  const m = useMutation(services.academics.setSubjectClasses);
+  const save = async () => {
+    const r = await m.mutate({ subjectId: subject.id, academicYearId: d.year.id, classIds: ids });
+    if (r) {
+      toast({ title: `${subject.name} classes saved`, description: `${r.added} added · ${r.removed} removed` });
+      onClose();
+    }
+  };
+  return (
+    <Modal open onOpenChange={(o) => !o && onClose()} title={`${subject.name} · classes`} description={`Which classes study ${subject.name} in ${d.year.name}. A class that still has a teacher for it cannot be removed.`} size="md"
+      footer={<><Button variant="outline" onClick={onClose}>Cancel</Button><Button loading={m.isPending} onClick={save}>Save</Button></>}>
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {d.classes.map((c) => <Checkbox key={c.id} label={c.name} checked={ids.includes(c.id)} onChange={(e) => setIds(e.target.checked ? [...ids, c.id] : ids.filter((x) => x !== c.id))} />)}
+        </div>
+        <FormError error={m.error} />
+      </div>
+    </Modal>
   );
 }
 

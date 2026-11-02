@@ -264,6 +264,13 @@ export default defineSchema({
     academicYearId: v.id("academicYears"),
     classId: v.id("classes"),
     subjectId: v.id("subjects"),
+    // How the class studies it (all optional; existing rows read as a core subject for every stream, unweighted).
+    /** Students choose it (optional / elective) rather than everyone taking it. */
+    elective: v.optional(v.boolean()),
+    /** Senior-grade stream it belongs to, e.g. "PCM", "Commerce"; omitted = every stream. */
+    stream: v.optional(v.string()),
+    /** Credit weight of the subject in this class; omitted = unweighted. */
+    credits: v.optional(v.number()),
   })
     .index("by_class_year_subject", ["classId", "academicYearId", "subjectId"])
     .index("by_school_year", ["schoolId", "academicYearId"]),

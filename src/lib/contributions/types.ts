@@ -107,6 +107,7 @@ export interface ReportTabsContribution {
 /** What a contributed Academics-setup tab receives (Core records of the selected year). */
 export type AcademicsSetupCtx = {
   year: FunctionReturnType<typeof api.academics.listAcademicYears>[number] | null;
+  classes: FunctionReturnType<typeof api.academics.listClasses>;
   sections: FunctionReturnType<typeof api.academics.listSections>;
   teachers: FunctionReturnType<typeof api.academics.listTeachers>;
   action: string | null;
@@ -118,6 +119,8 @@ export interface AcademicsSetupContribution {
   tabs: { value: string; label: string; order: number; Content: ComponentType<{ ctx: AcademicsSetupCtx }> }[];
   /** An action on each class card (e.g. its curriculum). */
   ClassAction?: ComponentType<{ year: NonNullable<AcademicsSetupCtx["year"]>; klass: FunctionReturnType<typeof api.academics.listClasses>[number] }>;
+  /** A strip on each class card under its header (e.g. the subjects the class studies). */
+  ClassSummary?: ComponentType<{ year: NonNullable<AcademicsSetupCtx["year"]>; klass: FunctionReturnType<typeof api.academics.listClasses>[number] }>;
 }
 
 /** Extra tabs of the Core Teachers & Staff workspace. */

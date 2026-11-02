@@ -97,14 +97,14 @@ function LiveAcademicsWorkspace() {
     ...(enrollment && has("enrollments") ? [{ tab: "enrollments", key: "enrollments", title: "Enrollments", metric: String(enrollment.enrolled), detail: "Students placed in sections; roll numbers follow automatically", done: enrollment.enrolled > 0 && enrollment.notEnrolled === 0 }] : []),
     { tab: has("assignments") ? "assignments" : "classes", key: "assignments", title: has("assignments") ? "Teacher assignments" : "Class teachers", metric: sectionList.length ? `${Math.round((assigned / sectionList.length) * 100)}%` : null, detail: has("assignments") ? "Class teachers and subject teachers" : "A class teacher for every section", done: sectionList.length > 0 && assigned === sectionList.length },
   ];
-  const ctx: AcademicsSetupCtx = { year: activeYear, sections: sectionList, teachers, action };
+  const ctx: AcademicsSetupCtx = { year: activeYear, classes, sections: sectionList, teachers, action };
   const Current = tabs.find((t) => t.value === current)!;
 
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Academic Operations & Curriculum"
-        description="Manage class structures, teacher assignments, and real-time curriculum pacing."
+        title="Academics"
+        description="Classes, sections, subjects, teacher assignments and curriculum pacing for the academic year."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {years.length > 0 && (
@@ -127,7 +127,7 @@ function LiveAcademicsWorkspace() {
       />
 
       {!activeYear && (
-        <div role="status" className="rounded-xl border border-blush bg-blush/30 px-4 py-3 text-[13px] text-plum">
+        <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-900">
           {years.length === 0
             ? "No academic year exists yet. Create one in Academic years and make it current to start setting up classes and sections."
             : "The school has no current academic year. Choose a year above, or make one current in Academic years."}
@@ -137,16 +137,16 @@ function LiveAcademicsWorkspace() {
       <SetupCockpit
         steps={steps}
         onStep={(t) => openTab(t)}
-        coverage={{
-          pct: sectionList.length ? (assigned / sectionList.length) * 100 : null,
-          caption: sectionList.length === 0 ? "No sections yet" : assigned === sectionList.length ? `All ${sectionList.length} sections have a class teacher` : `${assigned} of ${sectionList.length} sections have a class teacher`,
-        }}
-        enrollment={enrollment ? { enrolled: enrollment.enrolled, active: enrollment.activeRecords, caption: `${enrollment.activeRecords ? Math.round((enrollment.enrolled / enrollment.activeRecords) * 100) : 0}% of active students placed in ${enrollment.academicYear}` } : null}
+        classes={classes.length}
+        sections={sectionList.length}
+        yearName={activeYear?.name ?? null}
+        coverage={{ assigned, total: sectionList.length }}
+        enrollment={enrollment ? { enrolled: enrollment.enrolled, active: enrollment.activeRecords } : null}
       />
 
       <div id="academics-tabs" className="scroll-mt-20">
         <Tabs value={current} onValueChange={(t) => changeTab(t)}>
-          <TabsList items={tabs.map(({ value, label, count }) => ({ value, label, ...(count !== undefined ? { count } : {}) }))} />
+          <TabsList variant="underline" items={tabs.map(({ value, label, count }) => ({ value, label, ...(count !== undefined ? { count } : {}) }))} />
           <TabsContent value={current}><Current.Content ctx={ctx} /></TabsContent>
         </Tabs>
       </div>
@@ -240,6 +240,7 @@ function ClassesTab({ year, classes, sections, teachers, autoOpen = false }: { y
   // Class actions contributed by modules (Academics: the class curriculum).
   const { hasModule } = useSession();
   const classActions = contributionsTo("academicsSetup", hasModule).flatMap((c) => (c.ClassAction ? [c.ClassAction] : []));
+  const classSummaries = contributionsTo("academicsSetup", hasModule).flatMap((c) => (c.ClassSummary ? [c.ClassSummary] : []));
   const setClassTeacher = useSchoolMutation(api.academics.setClassTeacher);
   const sorted = [...classes].sort((a, b) => a.level - b.level);
 
@@ -273,6 +274,7 @@ function ClassesTab({ year, classes, sections, teachers, autoOpen = false }: { y
                     </div>
                   }
                 />
+                {classSummaries.map((S, i) => <S key={i} year={year} klass={c} />)}
                 <ul className="grid grid-cols-1 gap-2.5 p-5 sm:grid-cols-2">
                   {classSections.map((s) => (
                     <li key={s._id} className="rounded-xl border border-line/70 bg-alabaster/50 p-3.5">
@@ -362,5 +364,3 @@ function AddSectionModal({ year, klass, onClose }: { year: Year; klass: Klass; o
     </Modal>
   );
 }
-
-/** The subjects a class studies in the selected year (classSubjects). Subject teachers can only be assigned to these. */
