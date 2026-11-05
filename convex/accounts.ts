@@ -20,7 +20,7 @@
  */
 import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
-import { invalidateSessions } from "@convex-dev/auth/server";
+import { invalidateSessions, modifyAccountCredentials } from "@convex-dev/auth/server";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalAction, internalMutation, type ActionCtx, type MutationCtx, type QueryCtx } from "./_generated/server";
@@ -31,7 +31,7 @@ import { AppError, forbidden, invalid } from "./core/errors";
 import { assertNonEmpty } from "./core/validators";
 import { ACCOUNTANT_ACCESS, describeAccess, isAccountantGrants } from "./core/grants";
 import { fullName, teacherDisplayName } from "./model/academics";
-import { initialPasswordFor, passwordIssuedFields, provisionAccount, renameLoginId, reserveAccount, STUDENT_DEFAULT_PASSWORD, studentLoginId } from "./model/accounts";
+import { initialPasswordFor, PASSWORD_PROVIDER, passwordIssuedFields, provisionAccount, renameLoginId, reserveAccount, studentLoginId } from "./model/accounts";
 import type { Role } from "./core/permissions";
 import { accountTarget, writeAudit } from "./model/audit";
 import { MAX_SECTION_ROSTER } from "./model/rollNumbers";
@@ -107,17 +107,30 @@ export async function credentialTarget(ctx: MutationCtx, actor: Actor, targetMem
     await renameLoginId(ctx, target, loginId);
   }
   const user = target.userId ? await ctx.db.get(target.userId) : null;
-  return { membership: target, loginId, userId: target.userId ?? null, displayName: target.displayName, role: target.role, defaultPassword: user?.defaultPassword === true };
+  return {
+    membership: target, loginId, userId: target.userId ?? null, displayName: target.displayName, role: target.role,
+    defaultPassword: user?.defaultPassword === true,
+    /** Still on a password someone else issued (the owner never set their own). */
+    unclaimedTemporaryPassword: user?.requiresPasswordChange === true,
+  };
 }
 
-/** Authorize issuing FIRST credentials (or re-showing the unchanged student default) for an account of the caller's school. */
+/**
+ * Authorize issuing FIRST credentials for an account of the caller's school,
+ * or ROTATING an account whose owner never set their own password (SEC-01):
+ *  - a student still on the former shared default (that password is public), or
+ *  - an account still on an issued temporary password (e.g. a bulk run whose
+ *    passwords were never delivered) — the administrators issued it anyway.
+ * Neither needs the emailed code; any password the OWNER chose does.
+ */
 export const targetForCredentials = internalMutation({
   args: { callerMembershipId: v.optional(v.id("schoolMemberships")), targetMembershipId: v.id("schoolMemberships") },
   handler: async (ctx, { callerMembershipId, targetMembershipId }) => {
     const actor = await requireActor(ctx, callerMembershipId);
     requirePermission(actor, "users:manage");
     const { membership: _m, ...target } = await credentialTarget(ctx, actor, targetMembershipId);
-    if (target.userId && !(target.role === "student" && target.defaultPassword)) {
+    const rotatable = (target.role === "student" && target.defaultPassword) || target.unclaimedTemporaryPassword;
+    if (target.userId && !rotatable) {
       throw new AppError("CONFLICT", `${target.displayName} already has a password. Use “Reset password” — it is confirmed with a one-time code sent to your email.`);
     }
     return target;
@@ -125,17 +138,20 @@ export const targetForCredentials = internalMutation({
 });
 
 export const recordCredentialsIssued = internalMutation({
-  args: { callerMembershipId: v.optional(v.id("schoolMemberships")), targetMembershipId: v.id("schoolMemberships"), userId: v.optional(v.id("users")), defaultPassword: v.optional(v.boolean()) },
-  handler: async (ctx, { callerMembershipId, targetMembershipId, userId, defaultPassword }) => {
+  args: { callerMembershipId: v.optional(v.id("schoolMemberships")), targetMembershipId: v.id("schoolMemberships"), userId: v.optional(v.id("users")), rotatedLegacyDefault: v.optional(v.boolean()) },
+  handler: async (ctx, { callerMembershipId, targetMembershipId, userId, rotatedLegacyDefault }) => {
     const actor = await requireActor(ctx, callerMembershipId);
     requirePermission(actor, "users:manage");
     const target = await getInSchool({ ...ctx, actor }, "schoolMemberships", targetMembershipId, "Account");
-    if (userId) await ctx.db.patch(userId, passwordIssuedFields(defaultPassword === true));
+    // New accounts get the flag from activatePendingAccount; a rotated account is patched here.
+    if (userId) await ctx.db.patch(userId, passwordIssuedFields({ requiresPasswordChange: true }));
     await writeAudit(ctx, {
       schoolId: actor.schoolId, actor, action: "account.credentials_issued",
       entity: { table: "schoolMemberships", id: target._id },
-      summary: defaultPassword ? `Issued the default student password for ${target.loginId} (${target.displayName})` : `Issued a password for ${target.loginId} (${target.displayName})`,
-      metadata: { ...accountTarget(target), defaultPassword: defaultPassword === true },
+      summary: rotatedLegacyDefault
+        ? `Replaced the former default password of ${target.loginId} (${target.displayName}) with a temporary password`
+        : `Issued a temporary password for ${target.loginId} (${target.displayName})`,
+      metadata: { ...accountTarget(target), rotatedLegacyDefault: rotatedLegacyDefault === true, requiresPasswordChange: true },
     });
   },
 });
@@ -181,28 +197,26 @@ type IssuedCredentials = { membershipId: Id<"schoolMemberships">; loginId: strin
 /**
  * Create the sign-in account for a student or teacher record, or an office
  * (admin-portal) login. Admin, teacher and student are the only account roles.
- * Returns the Login ID and the first password: for STUDENTS the Login ID is the
- * scholar number and the password the school default (model/accounts.ts
- * STUDENT_DEFAULT_PASSWORD); others get a random password. Shown once.
+ * Returns the Login ID (for STUDENTS: the scholar number) and a random
+ * temporary password, shown once; the owner must change it at first sign-in.
  */
 export const create = schoolAction({
   args: { person: vPersonRef, loginId: v.optional(v.string()) },
   handler: async (ctx, { person, loginId }): Promise<IssuedCredentials> => {
     const reserved: { membershipId: Id<"schoolMemberships">; loginId: string; displayName: string } =
       await ctx.runMutation(internal.accounts.reserveForPerson, { callerMembershipId: ctx.membershipId, person, loginId });
-    const { password, defaultPassword } = initialPasswordFor(person.kind === "student" ? "student" : person.kind === "teacher" ? "teacher" : "admin");
-    await provisionAccount(ctx, { loginId: reserved.loginId, password, defaultPassword });
+    const { password, requiresPasswordChange } = initialPasswordFor(person.kind === "student" ? "student" : person.kind === "teacher" ? "teacher" : "admin");
+    await provisionAccount(ctx, { loginId: reserved.loginId, password, requiresPasswordChange });
     return { ...reserved, temporaryPassword: password };
   },
 });
 
 /**
  * Issue FIRST credentials for pending accounts (created without a password,
- * e.g. by an import), or re-show the student default password of student
- * accounts that still use it (a bulk run whose passwords were not delivered)
- * — neither changes an existing password. Any other account with a password
- * is refused (CONFLICT): overwriting a password is credentials.ts's
- * OTP-authorized reset. Max 50 per call.
+ * e.g. by an import), or replace the former shared default password of student
+ * accounts that still use it (SEC-01) with a random temporary one (signing
+ * them out). Any other account with a password is refused (CONFLICT):
+ * overwriting a password is credentials.ts's OTP-authorized reset. Max 50 per call.
  */
 export const issuePendingCredentials = schoolAction({
   args: { targetMembershipIds: v.array(v.id("schoolMemberships")) },
@@ -226,16 +240,19 @@ async function issueFor(
   callerMembershipId: Id<"schoolMemberships"> | undefined,
   targetMembershipId: Id<"schoolMemberships">,
 ): Promise<IssuedCredentials> {
-  const target: { loginId: string; userId: Id<"users"> | null; displayName: string; role: Role } =
+  const target: { loginId: string; userId: Id<"users"> | null; displayName: string; role: Role; defaultPassword: boolean } =
     await ctx.runMutation(internal.accounts.targetForCredentials, { callerMembershipId, targetMembershipId });
+  const { password, requiresPasswordChange } = initialPasswordFor(target.role);
   if (target.userId) {
-    // A student still on the school default: the password is unchanged, only shown again.
-    await ctx.runMutation(internal.accounts.recordCredentialsIssued, { callerMembershipId, targetMembershipId, userId: target.userId, defaultPassword: true });
-    return { membershipId: targetMembershipId, loginId: target.loginId, displayName: target.displayName, temporaryPassword: STUDENT_DEFAULT_PASSWORD };
+    // The owner never set their own password (targetForCredentials allows only that): replace the
+    // former shared default or the undelivered temporary password with a new one; end their sessions.
+    await modifyAccountCredentials(ctx, { provider: PASSWORD_PROVIDER, account: { id: target.loginId, secret: password } });
+    await invalidateSessions(ctx, { userId: target.userId });
+    await ctx.runMutation(internal.accounts.recordCredentialsIssued, { callerMembershipId, targetMembershipId, userId: target.userId, rotatedLegacyDefault: target.defaultPassword });
+    return { membershipId: targetMembershipId, loginId: target.loginId, displayName: target.displayName, temporaryPassword: password };
   }
-  const { password, defaultPassword } = initialPasswordFor(target.role);
-  await provisionAccount(ctx, { loginId: target.loginId, password, defaultPassword });
-  await ctx.runMutation(internal.accounts.recordCredentialsIssued, { callerMembershipId, targetMembershipId, defaultPassword });
+  await provisionAccount(ctx, { loginId: target.loginId, password, requiresPasswordChange });
+  await ctx.runMutation(internal.accounts.recordCredentialsIssued, { callerMembershipId, targetMembershipId });
   return { membershipId: targetMembershipId, loginId: target.loginId, displayName: target.displayName, temporaryPassword: password };
 }
 

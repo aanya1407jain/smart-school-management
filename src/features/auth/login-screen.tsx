@@ -8,8 +8,8 @@ import { AlertCircle, Eye, EyeOff, ChevronDown, ArrowRight } from "lucide-react"
 import { LogoMark } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
 import { Checkbox, FormField, Input } from "@/components/ui/form";
-import { useSession } from "./session-provider";
-import { canAccessRoute, landingRouteFor } from "@/lib/permissions";
+import { SET_PASSWORD_ROUTE, useSession } from "./session-provider";
+import { canAccessRoute, landingRouteFor, safeInternalPath } from "@/lib/permissions";
 import { loginFormSchema, type LoginFormValues } from "./login-form";
 import { cn } from "@/lib/utils/cn";
 import { demoRuntime } from "@/lib/demo/runtime";
@@ -35,18 +35,24 @@ export function LoginScreen() {
 
   // Already signed in → straight to the right workspace.
   useEffect(() => {
-    if (status === "authenticated" && user) router.replace(landingRouteFor(user));
+    if (status === "passwordChange") router.replace(SET_PASSWORD_ROUTE);
+    else if (status === "authenticated" && user) router.replace(landingRouteFor(user));
   }, [status, user, router]);
 
   const onSubmit = async (values: FormValues) => {
     setError(null);
     try {
       const u = await login({ loginId: values.loginId, password: values.password });
+      if (u === "passwordChange") {
+        router.replace(SET_PASSWORD_ROUTE); // temporary password: must be replaced first
+        return;
+      }
       if (!u) {
         router.replace("/account"); // valid account without portal data yet
         return;
       }
-      const next = params.get("next");
+      // SEC-05: only same-origin paths; anything else falls back to the role's dashboard.
+      const next = safeInternalPath(params.get("next"));
       router.replace(next && canAccessRoute(u, next) === "allowed" ? next : landingRouteFor(u));
     } catch (e) {
       setError((e as Error).message);

@@ -439,9 +439,9 @@ export const processBatch = schoolAction({
     for (const { itemId } of claim.items) {
       const begin: Infer<typeof vBegin> = await ctx.runMutation(internal.bulkAccounts.beginItem, { callerMembershipId: ctx.membershipId, itemId });
       if (!begin.provision) continue;
-      const { password: temporaryPassword, defaultPassword } = initialPasswordFor("student");
+      const { password: temporaryPassword, requiresPasswordChange } = initialPasswordFor("student");
       try {
-        await provisionAccount(ctx, { loginId: begin.loginId, password: temporaryPassword, defaultPassword });
+        await provisionAccount(ctx, { loginId: begin.loginId, password: temporaryPassword, requiresPasswordChange });
       } catch (e) {
         const msg = e instanceof Error && /already exists/i.test(e.message) ? "A sign-in account with this Login ID already exists" : "Could not create the account — retry later";
         await ctx.runMutation(internal.bulkAccounts.finishItem, { callerMembershipId: ctx.membershipId, itemId, ok: false, reason: msg });

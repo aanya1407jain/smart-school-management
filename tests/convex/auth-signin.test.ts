@@ -8,7 +8,7 @@
 import { beforeAll, describe, expect, test } from "vitest";
 import { api, internal } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { as, createSchool, errorCode, makeTest, overwritePassword, type T } from "./fixtures";
+import { as, changeOwnPassword, createSchool, errorCode, makeTest, OWN_PASSWORD, overwritePassword, type T } from "./fixtures";
 
 /** Test-only RS256 key so Convex Auth can issue tokens (never a real key). */
 beforeAll(async () => {
@@ -85,16 +85,19 @@ describe("accounts provisioned through Accounts & Import", () => {
     return { t, A, B, admin };
   }
 
-  test("a provisioned student signs in with their scholar number + the default password; an administrator's reset replaces it", async () => {
+  test("a provisioned student signs in with their scholar number + a temporary password, must change it; an administrator's reset replaces it", async () => {
     const { t, A, admin } = await setup();
     const acc = await admin.action(api.accounts.create, { person: { kind: "student", studentId: A.studentB } });
     expect(acc.loginId).toBe("ALPHABALA"); // scholar number
-    expect(acc.temporaryPassword).toBe("Aster@123");
-    expect((await signIn(t, { loginId: "alphabala", password: "Aster@123" })).tokens?.token).toBeTruthy();
+    expect(acc.temporaryPassword).not.toBe("Aster@123"); // SEC-01: no shared default
+    expect(await failure(signIn(t, { loginId: "alphabala", password: "Aster@123" }))).toMatch(/InvalidSecret/);
+    expect((await signIn(t, { loginId: "alphabala", password: acc.temporaryPassword })).tokens?.token).toBeTruthy();
     const userId = await latestSessionUser(t);
-    const me = await as(t, userId);
-    // No forced change: the account reaches its own data straight away.
+    // Forced change: no school data until the student replaces the temporary password.
+    expect(await errorCode((await as(t, userId)).query(api.attendance.studentHistory, { studentId: A.studentB }))).toBe("PASSWORD_CHANGE_REQUIRED");
+    const me = await changeOwnPassword(t, userId, acc.temporaryPassword);
     expect((await me.query(api.attendance.studentHistory, { studentId: A.studentB })).studentId).toBe(A.studentB);
+    expect((await signIn(t, { loginId: acc.loginId, password: OWN_PASSWORD })).tokens?.token).toBeTruthy();
     await overwritePassword(admin, acc.membershipId, "Bala#2026x");
     expect(await failure(signIn(t, { loginId: acc.loginId, password: acc.temporaryPassword }))).toMatch(/InvalidSecret/);
     expect((await signIn(t, { loginId: acc.loginId, password: "Bala#2026x" })).tokens?.token).toBeTruthy();

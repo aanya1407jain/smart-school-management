@@ -1,14 +1,13 @@
 /**
- * Students sign in with their SCHOLAR NUMBER and start with the school default
- * password (model/accounts.ts STUDENT_DEFAULT_PASSWORD), which must be changed
- * at first sign-in and does not expire. Covers: Login ID follows scholar-number
- * edits, the one-off migration of existing student accounts, and that renaming
- * never touches another person's sign-in.
+ * Students sign in with their SCHOLAR NUMBER and start with a random temporary
+ * password (SEC-01: the shared school default was removed), which must be
+ * changed at first sign-in. Covers: Login ID follows scholar-number edits, the
+ * one-off migration of existing student accounts, and that renaming never
+ * touches another person's sign-in.
  */
 import { beforeAll, describe, expect, test } from "vitest";
 import { api, internal } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { STUDENT_DEFAULT_PASSWORD } from "../../convex/model/accounts";
 import { as, createSchool, enableSignIn, errorCode, makeTest, overwritePassword, signInResult, type T } from "./fixtures";
 
 const memberOf = (t: T, id: Id<"schoolMemberships">) => t.run(async (ctx) => {
@@ -48,38 +47,38 @@ describe("Login ID follows the scholar number", () => {
     expect([m.loginId, user?.loginId, account?.providerAccountId]).toEqual(["0246CBSE0042", "0246CBSE0042", "0246CBSE0042"]);
     // The password still works under the new Login ID.
     expect(user?._id).toBeDefined();
-    expect(await signInResult(t, "0246CBSE0042", STUDENT_DEFAULT_PASSWORD)).toBe("OK");
+    expect(await signInResult(t, "0246CBSE0042", r.temporaryPassword)).toBe("OK");
 
     expect(await errorCode(admin.mutation(api.students.updateStudentProfile, { studentId: A.studentB, scholarNo: "" }))).toBe("INVALID_ARGUMENT");
     expect(await errorCode(admin.mutation(api.students.updateStudentProfile, { studentId: A.studentB, scholarNo: "SR/1" }))).toBe("INVALID_ARGUMENT"); // not usable to sign in
   });
 
-  test("an administrator can set the student's password back to the default (OTP-authorized)", async () => {
+  test("an OTP-authorized administrator reset replaces the student's password (the old shared default never works)", async () => {
     const t = makeTest();
     const A = await createSchool(t, "alpha");
     const admin = await as(t, A.users.admin);
     const r = await admin.action(api.accounts.create, { person: { kind: "student", studentId: A.studentB } });
+    expect(await signInResult(t, r.loginId, "Aster@123")).toMatch(/InvalidSecret/);
     await overwritePassword(admin, r.membershipId, "Bala#2026x");
     expect((await memberOf(t, r.membershipId)).user?.defaultPassword).toBeUndefined();
-    expect(await signInResult(t, r.loginId, STUDENT_DEFAULT_PASSWORD)).toMatch(/InvalidSecret/);
-    await overwritePassword(admin, r.membershipId, STUDENT_DEFAULT_PASSWORD);
-    expect(await signInResult(t, r.loginId, STUDENT_DEFAULT_PASSWORD)).toBe("OK");
+    expect(await signInResult(t, r.loginId, r.temporaryPassword)).toMatch(/InvalidSecret/);
+    expect(await signInResult(t, r.loginId, "Bala#2026x")).toBe("OK");
   });
 
-  test("teachers and office logins keep random one-time passwords", async () => {
+  test("teachers and office logins get random one-time passwords too", async () => {
     const t = makeTest();
     const A = await createSchool(t, "alpha");
     const admin = await as(t, A.users.admin);
     const teacherId = await t.run((ctx) => ctx.db.insert("teachers", { schoolId: A.schoolId, employeeId: "E-1", firstName: "Nina", lastName: "Rao", specializationSubjectIds: [], status: "active" }));
     const r = await admin.action(api.accounts.create, { person: { kind: "teacher", teacherId } });
-    expect(r.temporaryPassword).not.toBe(STUDENT_DEFAULT_PASSWORD);
+    expect(r.temporaryPassword).not.toBe("Aster@123");
     expect(r.temporaryPassword).toMatch(/^[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}$/);
     expect((await memberOf(t, r.membershipId)).user?.defaultPassword).toBeUndefined();
   });
 });
 
 describe("migration of existing student accounts (studentLoginMigration)", () => {
-  test("dry run changes nothing; the run moves Login IDs to scholar numbers and resets passwords to the default", async () => {
+  test("dry run changes nothing; the run moves Login IDs to scholar numbers and resets passwords to random temporary ones", async () => {
     const t = makeTest();
     const A = await createSchool(t, "alpha");
     const admin = await as(t, A.users.admin);
@@ -97,10 +96,13 @@ describe("migration of existing student accounts (studentLoginMigration)", () =>
     expect(run).toMatchObject({ toConvert: 1, converted: 1, failed: [] });
     const { m, user, account } = await memberOf(t, legacy.membershipId);
     expect([m.loginId, user?.loginId, account?.providerAccountId]).toEqual(["ALPHABALA", "ALPHABALA", "ALPHABALA"]);
-    expect(user).toMatchObject({ defaultPassword: true });
-    // Old password gone, default works.
+    expect(user).toMatchObject({ requiresPasswordChange: true });
+    expect(user?.defaultPassword).toBeUndefined();
+    // Old password gone; the temporary one (returned once to the operator) works; no shared default.
+    expect(run.credentials).toEqual([{ name: expect.any(String), loginId: "ALPHABALA", temporaryPassword: expect.stringMatching(/^[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}$/) }]);
     expect(await signInResult(t, "ALPHABALA", "Chosen#2026")).toMatch(/InvalidSecret/);
-    expect(await signInResult(t, "ALPHABALA", STUDENT_DEFAULT_PASSWORD)).toBe("OK");
+    expect(await signInResult(t, "ALPHABALA", "Aster@123")).toMatch(/InvalidSecret/);
+    expect(await signInResult(t, "ALPHABALA", run.credentials[0].temporaryPassword)).toBe("OK");
     // Re-running converts nothing more.
     expect(await t.action(internal.studentLoginMigration.run, { schoolSlug: "alpha" })).toMatchObject({ toConvert: 0, converted: 0 });
   });

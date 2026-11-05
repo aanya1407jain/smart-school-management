@@ -61,10 +61,19 @@ export default defineSchema({
     mustChangePassword: v.optional(v.boolean()),
     temporaryPasswordIssuedAt: v.optional(v.number()),
     /**
-     * The current password is the school's student default (STUDENT_DEFAULT_PASSWORD).
-     * Shown to administrators on Credentials; cleared when an administrator sets a password.
+     * LEGACY (SEC-01): the password is the former shared student default, which
+     * is no longer issued. Still read so these accounts are forced to change it
+     * (core/actor.ts passwordChangePending) and so administrators can spot and
+     * rotate them on Credentials. Cleared whenever a new password is set.
      */
     defaultPassword: v.optional(v.boolean()),
+    /**
+     * The current password was issued by someone else (account creation, setup)
+     * and must be replaced by the owner before any school data is available:
+     * every school function refuses with PASSWORD_CHANGE_REQUIRED and the UI
+     * sends the person to /set-password (convex/account.ts changePassword).
+     */
+    requiresPasswordChange: v.optional(v.boolean()),
   })
     .index("email", ["email"])
     .index("phone", ["phone"])

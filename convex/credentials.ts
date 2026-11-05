@@ -244,7 +244,8 @@ export const recordOverwrite = internalMutation({
     const c = await ownChallenge(ctx, actor, challengeId);
     if (c.closedReason !== "used") throw forbidden("This code was not verified.");
     const m = await getInSchool({ ...ctx, actor }, "schoolMemberships", c.targetMembershipId, "Account");
-    if (m.userId) await ctx.db.patch(m.userId, passwordIssuedFields(false));
+    // Unchanged behaviour: an OTP-authorized overwrite is not forced to change (SEC-06 is a separate follow-up).
+    if (m.userId) await ctx.db.patch(m.userId, passwordIssuedFields({ requiresPasswordChange: false }));
     await writeAudit(ctx, {
       schoolId: actor.schoolId, actor, action: PASSWORD_OVERWRITE,
       entity: { table: "schoolMemberships", id: m._id },

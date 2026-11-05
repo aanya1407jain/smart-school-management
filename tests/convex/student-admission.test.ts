@@ -7,7 +7,7 @@
 import { describe, expect, test } from "vitest";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { as, createSchool, errorCode, makeTest, type T } from "./fixtures";
+import { as, changeOwnPassword, createSchool, errorCode, makeTest, type T } from "./fixtures";
 
 type School = Awaited<ReturnType<typeof createSchool>>;
 
@@ -128,7 +128,7 @@ describe("createStudentWithEnrollment", () => {
     const acc = await admin.action(api.accounts.create, { person: { kind: "student", studentId: r.studentId } });
     const m = await t.run((ctx) => ctx.db.get(acc.membershipId));
     expect(m).toMatchObject({ role: "student", studentId: r.studentId, loginId: "SR501" }); // Login ID = scholar number
-    const me = await as(t, m!.userId!);
+    const me = await changeOwnPassword(t, m!.userId!, acc.temporaryPassword); // SEC-01: first sign-in sets their own password
     const p = await me.query(api.studentPortal.myProfile, {});
     expect(p.state === "ok" && p.student.studentId === r.studentId && p.enrollment?.sectionDisplayName === "8-A").toBe(true);
     expect(await count(t, "students")).toBe(students);

@@ -19,6 +19,7 @@ export type AppErrorCode =
   | "CONFLICT" // uniqueness / state conflict
   | "EMAIL_UNAVAILABLE" // a one-time code could not be emailed (no email address, or delivery not configured/failed)
   | "LOGIN_ID_REQUIRED" // a sign-in request without a Login ID (e.g. an outdated email-based sign-in page)
+  | "PASSWORD_CHANGE_REQUIRED" // signed in with an issued password that the owner must replace first (convex/account.ts)
   | "MODULE_DISABLED"; // the school is not entitled to the module this function belongs to (fields.module = its key)
 
 export type AppErrorData = {
@@ -42,3 +43,5 @@ export const notFound = (what = "Record") => new AppError("NOT_FOUND", `${what} 
 export const invalid = (message: string, fields?: Record<string, string>) => new AppError("INVALID_ARGUMENT", message, fields);
 export const invalidRelationship = (message: string) => new AppError("INVALID_RELATIONSHIP", message);
 export const conflict = (message: string) => new AppError("CONFLICT", message);
+export const passwordChangeRequired = () =>
+  new AppError("PASSWORD_CHANGE_REQUIRED", "Set a new password before continuing.");

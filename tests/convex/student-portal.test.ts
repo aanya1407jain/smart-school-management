@@ -6,7 +6,7 @@
 import { describe, expect, test } from "vitest";
 import { api, internal } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { as, createSchool, errorCode, makeTest, type T } from "./fixtures";
+import { as, changeOwnPassword, createSchool, errorCode, makeTest, type T } from "./fixtures";
 import { liveStudentPortalUser } from "../../src/features/auth/live-user";
 
 
@@ -26,9 +26,16 @@ async function setup() {
 
 const userOf = (t: T, membershipId: Id<"schoolMemberships">) => t.run(async (ctx) => (await ctx.db.get(membershipId))!.userId! as Id<"users">);
 
-/** Sign in as the new account (usable straight away: no forced password change). */
-async function firstLogin(t: T, userId: Id<"users">, _issuedPassword: string) {
-  const me = await as(t, userId);
+/**
+ * Sign in as the new account: the issued password is temporary (SEC-01), so
+ * the session first reports passwordChangeRequired and school data is refused;
+ * after the owner changes it the portal is available.
+ */
+async function firstLogin(t: T, userId: Id<"users">, issuedPassword: string) {
+  const pending = await as(t, userId);
+  expect((await pending.query(api.users.session, {})).status).toBe("passwordChangeRequired");
+  expect(await errorCode(pending.query(api.studentPortal.myProfile, {}))).toBe("PASSWORD_CHANGE_REQUIRED");
+  const me = await changeOwnPassword(t, userId, issuedPassword);
   expect((await me.query(api.users.session, {})).status).toBe("signedIn");
   return me;
 }

@@ -2,8 +2,8 @@
 /**
  * /account — the signed-in person's own account: Login ID, school and access.
  * Works for every valid account, including ones whose portal data is not
- * available in this build yet. Passwords are set only by the school's
- * administrators (no self-service change). Protected by src/proxy.ts.
+ * available in this build yet. Links to /set-password to change the
+ * password. Protected by src/proxy.ts.
  */
 import { useEffect } from "react";
 import Link from "next/link";
@@ -11,7 +11,7 @@ import { useRouter } from "next/navigation";
 import { ArrowRight, KeyRound, LogOut } from "lucide-react";
 import { LogoMark } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
-import { useSession } from "@/features/auth/session-provider";
+import { SET_PASSWORD_ROUTE, useSession } from "@/features/auth/session-provider";
 import { landingRouteFor } from "@/lib/permissions";
 
 export function AccountPage() {
@@ -20,9 +20,10 @@ export function AccountPage() {
 
   useEffect(() => {
     if (status === "unauthenticated") router.replace("/login?next=/account");
+    else if (status === "passwordChange") router.replace(SET_PASSWORD_ROUTE);
   }, [status, router]);
 
-  if (status === "loading" || status === "unauthenticated") {
+  if (status === "loading" || status === "unauthenticated" || status === "passwordChange") {
     return (
       <div className="grid min-h-screen place-items-center bg-bg" role="status" aria-label="Checking your session">
         <LogoMark size={44} className="animate-pulse" />
@@ -61,7 +62,10 @@ export function AccountPage() {
 
         <div className="flex items-start gap-2.5 rounded-xl border border-line bg-white px-4 py-3 text-[13px] text-ink-muted">
           <KeyRound className="mt-0.5 h-4 w-4 shrink-0 text-lagoon" aria-hidden />
-          <span>Your password is managed by your school&apos;s administrators. To change it, contact the school office.</span>
+          <span>
+            <Link href={SET_PASSWORD_ROUTE} className="font-medium text-lagoon hover:text-sapphire">Change your password</Link>
+            {" "}— you&apos;ll need your current one. Forgot it? Contact the school office.
+          </span>
         </div>
 
         {status === "unavailable" && (

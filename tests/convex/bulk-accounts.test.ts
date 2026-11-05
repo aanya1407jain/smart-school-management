@@ -4,7 +4,7 @@
 import { describe, expect, test } from "vitest";
 import { api, internal } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { as, createSchool, errorCode, makeTest, type T } from "./fixtures";
+import { as, changeOwnPassword, createSchool, errorCode, makeTest, type T } from "./fixtures";
 import { BULK_BATCH_SIZE, PREPARE_PAGE, STALE_CLAIM_MS } from "../../convex/bulkAccounts";
 import { toCsv } from "../../src/features/imports/spreadsheet";
 
@@ -65,21 +65,23 @@ describe("bulk account creation", () => {
     expect(job).toMatchObject({ status: "completed", created: 3, skipped: 1, failed: 0, delivered: 3, undelivered: 0 });
     expect(creds.map((c) => c.admissionNo).sort()).toEqual(["Stu-0", "Stu-1", "Stu-2"]);
     expect(new Set(creds.map((c) => c.loginId)).size).toBe(3);
-    // Login ID = scholar number (canonical), first password = the school default.
+    // Login ID = scholar number (canonical); first password = random and different per account (SEC-01).
     expect(creds.map((c) => c.loginId).sort()).toEqual(["STU-0", "STU-1", "STU-2"]);
-    expect(creds.every((c) => c.temporaryPassword === "Aster@123")).toBe(true);
+    expect(creds.every((c) => /^[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}$/.test(c.temporaryPassword))).toBe(true);
+    expect(new Set(creds.map((c) => c.temporaryPassword)).size).toBe(3);
 
     const state = await t.run(async (ctx) => {
       const users = [];
       for (const c of creds) users.push(await ctx.db.query("users").withIndex("by_login_id", (q) => q.eq("loginId", c.loginId)).unique());
       return { users, rolls: (await ctx.db.query("enrollments").collect()).map((e) => [e._id, e.rollNo]), items: await ctx.db.query("bulkAccountJobItems").collect() };
     });
-    expect(state.users.every((u) => u?.defaultPassword === true && u.mustChangePassword === undefined)).toBe(true);
+    expect(state.users.every((u) => u?.requiresPasswordChange === true && u.defaultPassword === undefined && u.mustChangePassword === undefined)).toBe(true);
     expect(state.rolls).toEqual(rollsBefore); // creating accounts never touches enrollments
     expect(JSON.stringify(state.items)).not.toMatch(/[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}/); // no password stored
-    // The account is usable straight away (no forced password change).
+    // The temporary password must be changed first; then the account is usable.
     const u0 = state.users[0]!;
-    const student = await as(t, u0._id);
+    expect(await errorCode((await as(t, u0._id)).query(api.users.viewer, {}))).toBe("PASSWORD_CHANGE_REQUIRED");
+    const student = await changeOwnPassword(t, u0._id, creds.find((c) => c.loginId === u0.loginId)!.temporaryPassword);
     expect((await student.query(api.users.viewer, {})).role).toBe("student");
     // Audit: start + completion, without passwords.
     const audit = await t.run(async (ctx) => (await ctx.db.query("auditLogs").collect()).filter((a) => a.action.startsWith("accounts.bulk_")));

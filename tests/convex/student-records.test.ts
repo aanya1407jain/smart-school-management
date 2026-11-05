@@ -9,7 +9,7 @@
 import { describe, expect, test } from "vitest";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { as, createSchool, errorCode, makeTest, type T } from "./fixtures";
+import { as, changeOwnPassword, createSchool, errorCode, makeTest, type T } from "./fixtures";
 
 type School = Awaited<ReturnType<typeof createSchool>>;
 const TODAY = "2026-07-15";
@@ -178,7 +178,7 @@ describe("student portal modules (live accounts)", () => {
     await admin.mutation(api.bulkAccounts.startJob, { jobId });
     const res = await admin.action(api.bulkAccounts.processBatch, { jobId });
     const userId = await t.run(async (ctx) => (await ctx.db.query("schoolMemberships").withIndex("by_student", (q) => q.eq("studentId", sid)).unique())!.userId!);
-    const me = await as(t, userId);
+    const me = await changeOwnPassword(t, userId, res.credentials[0].temporaryPassword); // SEC-01: first sign-in replaces the temporary password
     const tt = await me.query(api.timetable.myStudentTimetable, {});
     expect(tt.state === "ok" && tt.section === "8-B" && tt.lessons.length === 1).toBe(true); // 8-B's real timetable
     const hw = await me.query(api.homework.myHomework, {});

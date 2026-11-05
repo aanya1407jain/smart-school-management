@@ -2,7 +2,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useSession } from "@/features/auth/session-provider";
+import { SET_PASSWORD_ROUTE, useSession } from "@/features/auth/session-provider";
 import { canAccessRoute, landingRouteFor, routeRuleFor } from "@/lib/permissions";
 import { MODULES } from "@convex/core/modules";
 import { MODULES_UNCONFIRMED_MESSAGE } from "@/features/auth/session-modules";
@@ -23,6 +23,8 @@ const COLLAPSE_KEY = `${STORAGE_NAMESPACE}-sidebar-collapsed`;
  * signed-out visitors out of /admin, /teacher and /student on the server; this
  * guard handles in-app navigation, sign-out and the role check.
  *  - not signed in      → redirect to /login (with ?next=)
+ *  - signed in with a temporary password → redirect to /set-password; no portal
+ *    page renders (the server refuses school data too: PASSWORD_CHANGE_REQUIRED)
  *  - signed in, nothing to open (no school access) → explanation + sign out
  *  - signed in, no access → Unauthorized page inside the user's OWN shell
  *  - the school does not have the page's module → "not enabled" page; the page
@@ -49,11 +51,12 @@ export function AppShell({ children }: { children: ReactNode }) {
     });
   };
 
-  const access = status === "loading" || status === "unavailable" ? null : canAccessRoute(user, pathname);
+  const access = status === "loading" || status === "unavailable" || status === "passwordChange" ? null : canAccessRoute(user, pathname);
 
   useEffect(() => {
-    if (access === "unauthenticated") router.replace(`/login?next=${encodeURIComponent(pathname)}`);
-  }, [access, pathname, router]);
+    if (status === "passwordChange") router.replace(SET_PASSWORD_ROUTE);
+    else if (access === "unauthenticated") router.replace(`/login?next=${encodeURIComponent(pathname)}`);
+  }, [status, access, pathname, router]);
 
   useEffect(() => setMobileOpen(false), [pathname]);
 

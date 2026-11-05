@@ -11,14 +11,16 @@
  *    email format is required while verify/reset are not configured. We set it
  *    to the CANONICAL Login ID (convex/model/loginIds.ts). Hashing (Scrypt),
  *    session issuance and the built-in failed-sign-in rate limit are unchanged.
- *  - There is NO self-registration and NO self-service password change or
- *    recovery: the provider has no `reset`/`verify` email configured, and
- *    `validatePasswordRequirements` — invoked only for client flows that would
- *    set a password (signUp, reset-verification) — always refuses. Accounts
- *    are created exclusively server-side (convex/model/accounts.ts →
- *    createAccount) by an authorized admin action, a data import, the
- *    deployment setup or the demo seed, and `createOrUpdateUser` additionally
- *    requires a reserved membership. Only administrators change passwords
+ *  - There is NO self-registration and NO self-service recovery: the provider
+ *    has no `reset`/`verify` email configured, and `validatePasswordRequirements`
+ *    — invoked only for client flows that would set a password (signUp,
+ *    reset-verification) — always refuses. Accounts are created exclusively
+ *    server-side (convex/model/accounts.ts → createAccount) by an authorized
+ *    admin action, a data import, the deployment setup or the demo seed, and
+ *    `createOrUpdateUser` additionally requires a reserved membership.
+ *  - Issued passwords are temporary: a signed-in person replaces their own
+ *    password with convex/account.ts changePassword (current password
+ *    required). Administrators overwrite forgotten passwords
  *    (convex/credentials.ts, authorized by an emailed one-time code).
  *  - A session is only created for an enabled user with at least one ACTIVE
  *    membership in an ACTIVE school.
@@ -38,6 +40,27 @@ export function validatePassword(password: string) {
   if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
     throw invalid("Use at least 8 characters, including a letter and a number.", { password: "Too weak" });
   }
+}
+
+export const OWN_PASSWORD_RULE = "Use at least 8 characters with a letter, a number and a symbol.";
+/** Most characters a password may have (bounds the Scrypt work per request). */
+export const MAX_PASSWORD_LENGTH = 128;
+
+/**
+ * Password policy for a password the owner chooses (passwords.changePassword):
+ * at least 8 characters with a letter, a digit and a symbol; not the Login ID.
+ * Mirrored in the browser by src/features/auth/set-password-form.ts.
+ */
+export function validateOwnPassword(password: string, loginId: string | null) {
+  const problem =
+    password.length < 8 ? "Too short"
+      : password.length > MAX_PASSWORD_LENGTH ? "Too long"
+        : !/[A-Za-z]/.test(password) ? "Add a letter"
+          : !/\d/.test(password) ? "Add a number"
+            : !/[^A-Za-z0-9\s]/.test(password) ? "Add a symbol"
+              : loginId && password.toLowerCase().includes(loginId.toLowerCase()) ? "Must not contain your Login ID"
+                : null;
+  if (problem) throw invalid(OWN_PASSWORD_RULE, { newPassword: problem });
 }
 
 const LoginIdPassword = Password({
@@ -74,7 +97,7 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
       }
       const loginId = canonicalLoginId(args.profile.loginId);
       if (!loginId) throw new AppError("FORBIDDEN", "Accounts are created by your school.");
-      return await activatePendingAccount(ctx, { loginId, defaultPassword: args.profile.defaultPassword === true });
+      return await activatePendingAccount(ctx, { loginId, requiresPasswordChange: args.profile.requiresPasswordChange === true });
     },
 
     /**

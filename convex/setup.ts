@@ -122,7 +122,7 @@ export const initSchool = internalAction({
   handler: async (ctx, args): Promise<{ schoolId: Id<"schools">; adminLoginId: string; temporaryPassword: string }> => {
     const { schoolId, loginId }: { schoolId: Id<"schools">; loginId: string } = await ctx.runMutation(internal.setup.createSchoolAndAdmin, args);
     const temporaryPassword = generateSecurePassword();
-    await provisionAccount(ctx, { loginId, password: temporaryPassword });
+    await provisionAccount(ctx, { loginId, password: temporaryPassword, requiresPasswordChange: true });
     return { schoolId, adminLoginId: loginId, temporaryPassword };
   },
 });
@@ -144,7 +144,7 @@ export const addAdministrator = internalAction({
   handler: async (ctx, { admin }): Promise<{ loginId: string; temporaryPassword: string }> => {
     const { loginId }: { loginId: string } = await ctx.runMutation(internal.setup.reserveAdministrator, { admin });
     const temporaryPassword = generateSecurePassword();
-    await provisionAccount(ctx, { loginId, password: temporaryPassword });
+    await provisionAccount(ctx, { loginId, password: temporaryPassword, requiresPasswordChange: true });
     return { loginId, temporaryPassword };
   },
 });
@@ -156,7 +156,7 @@ export const userForLoginId = internalMutation({
     if (!id) throw invalid("Invalid Login ID.");
     const user = await ctx.db.query("users").withIndex("by_login_id", (q) => q.eq("loginId", id)).first();
     if (!user) throw notFound("Account");
-    await ctx.db.patch(user._id, passwordIssuedFields());
+    await ctx.db.patch(user._id, passwordIssuedFields({ requiresPasswordChange: true }));
     return { userId: user._id, loginId: id };
   },
 });
