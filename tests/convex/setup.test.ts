@@ -4,7 +4,7 @@
  */
 import { describe, expect, test } from "vitest";
 import { api, internal } from "../../convex/_generated/api";
-import { as, errorCode, makeTest } from "./fixtures";
+import { as, changeOwnPassword, errorCode, makeTest } from "./fixtures";
 
 const input = {
   school: { name: "Green Valley School", shortName: "Green Valley", code: "gvs", slug: "green-valley", timezone: "Asia/Kolkata", locale: "en-IN", currency: "INR" },
@@ -27,10 +27,12 @@ describe("setup:initSchool", () => {
     expect(state.school).toMatchObject({ code: "GVS", slug: "green-valley", status: "active" });
     expect(state.years).toHaveLength(1);
     expect(state.user?.mustChangePassword).toBeUndefined();
+    expect(state.user?.requiresPasswordChange).toBe(true); // SEC-01: the operator-issued password is temporary
     expect(state.membership).toMatchObject({ role: "admin", status: "active", schoolId: r.schoolId, userId: state.user!._id });
 
-    // The first admin works straight away (no forced password change).
-    const admin = await as(t, state.user!._id);
+    // The first admin must replace the temporary password, then has full access.
+    expect((await (await as(t, state.user!._id)).query(api.users.session, {})).status).toBe("passwordChangeRequired");
+    const admin = await changeOwnPassword(t, state.user!._id, r.temporaryPassword);
     const s = await admin.query(api.users.session, {});
     expect(s.status === "signedIn" && s.viewer.role === "admin" && s.viewer.school.slug === "green-valley").toBe(true);
     expect((await admin.query(api.accounts.listPeople, { kind: "teacher", paginationOpts: { numItems: 5, cursor: null } })).page).toHaveLength(0);

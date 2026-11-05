@@ -11,7 +11,7 @@
 import { getAuthSessionId, getAuthUserId } from "@convex-dev/auth/server";
 import type { QueryCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
-import { noSchoolAccess, schoolSelectionRequired, unauthenticated } from "./errors";
+import { noSchoolAccess, passwordChangeRequired, schoolSelectionRequired, unauthenticated } from "./errors";
 import { resolvePermissions, type Permission, type Role } from "./permissions";
 import { grantsAccess } from "../model/memberships";
 
@@ -58,6 +58,15 @@ export async function getCurrentUser(ctx: QueryCtx): Promise<Doc<"users"> | null
   return user;
 }
 
+/**
+ * The signed-in person must replace their password before using any school
+ * data (SEC-01): it was issued by someone else (`requiresPasswordChange`) or
+ * is the former shared student default (`defaultPassword`).
+ */
+export function passwordChangePending(user: Pick<Doc<"users">, "requiresPasswordChange" | "defaultPassword">): boolean {
+  return user.requiresPasswordChange === true || user.defaultPassword === true;
+}
+
 export async function requireAuthenticatedUser(ctx: QueryCtx): Promise<Doc<"users">> {
   const user = await getCurrentUser(ctx);
   if (!user) throw unauthenticated();
@@ -99,10 +108,17 @@ export function actorFromMembership(user: Doc<"users">, m: Doc<"schoolMembership
 
 /**
  * Resolve the actor for a school-scoped function.
- * Throws UNAUTHENTICATED / NO_SCHOOL_ACCESS / SCHOOL_SELECTION_REQUIRED.
+ * Throws UNAUTHENTICATED / PASSWORD_CHANGE_REQUIRED / NO_SCHOOL_ACCESS / SCHOOL_SELECTION_REQUIRED.
+ * `allowPendingPasswordChange` is only for users.session, which must still
+ * describe the session while the person is on /set-password.
  */
-export async function requireActor(ctx: QueryCtx, membershipId?: Id<"schoolMemberships">): Promise<Actor> {
+export async function requireActor(
+  ctx: QueryCtx,
+  membershipId?: Id<"schoolMemberships">,
+  opts: { allowPendingPasswordChange?: boolean } = {},
+): Promise<Actor> {
   const user = await requireAuthenticatedUser(ctx);
+  if (!opts.allowPendingPasswordChange && passwordChangePending(user)) throw passwordChangeRequired();
   const memberships = await activeMembershipsOf(ctx, user._id);
   if (memberships.length === 0) throw noSchoolAccess();
 

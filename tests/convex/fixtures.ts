@@ -99,6 +99,20 @@ export function pastMonday(): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** A password that meets the owner policy (convex/auth.ts validateOwnPassword). */
+export const OWN_PASSWORD = "My#Own-Pass1";
+
+/**
+ * First sign-in of an account with an issued temporary password (SEC-01):
+ * the owner replaces it through the real convex/account.ts changePassword,
+ * as the UI forces on /set-password. Returns a caller with full access.
+ */
+export async function changeOwnPassword(t: T, userId: Id<"users">, currentPassword: string, newPassword = OWN_PASSWORD) {
+  const me = await as(t, userId);
+  await me.action(api.account.changePassword, { currentPassword, newPassword });
+  return me;
+}
+
 export async function errorCode(p: Promise<unknown>): Promise<string> {
   try {
     await p;

@@ -20,11 +20,11 @@
  * If step 2 fails, the membership simply stays "pending" (invited, no user)
  * and the admin can issue credentials again; nothing half-created can sign in.
  *
- * Credentials are managed ONLY by administrators: there is no self-service
- * password change or recovery. A password an administrator issues stays the
- * account's password until an administrator overwrites it
- * (convex/credentials.ts, authorized by a one-time code emailed to that
- * administrator).
+ * Every issued password is random and TEMPORARY (`users.requiresPasswordChange`):
+ * the owner must replace it (convex/account.ts changePassword) before any
+ * school data is available. There is no self-service recovery: a forgotten
+ * password is overwritten by an administrator (convex/credentials.ts,
+ * authorized by a one-time code emailed to that administrator).
  */
 import { createAccount } from "@convex-dev/auth/server";
 import type { ActionCtx, MutationCtx, QueryCtx } from "../_generated/server";
@@ -40,13 +40,10 @@ import { accountTarget, roleInSchool, writeAudit } from "./audit";
 
 export const PASSWORD_PROVIDER = "password";
 
-/**
- * STUDENT accounts: the Login ID is the student's scholar number and the first
- * password is this school default (hashed by Convex Auth like any password),
- * marked `users.defaultPassword` so administrators can see who still uses it.
- * Teachers and office logins get a random password.
- */
-export const STUDENT_DEFAULT_PASSWORD = "Aster@123";
+// SEC-01: the shared student default password (STUDENT_DEFAULT_PASSWORD) was
+// removed. Every account — student, teacher or office login — now gets its own
+// random first password and must change it at first sign-in. Accounts still on
+// the old default carry `users.defaultPassword` and are forced to change too.
 
 /**
  * The session gate (Convex Auth `beforeSessionCreation`, after the password
@@ -59,17 +56,22 @@ export async function assertSessionAllowed(ctx: QueryCtx, userId: Id<"users">) {
 }
 
 /**
- * User fields after an administrator (or operator) sets a password: the
- * student-default marker when that is what was set, and the legacy
- * temporary-password flags cleared.
+ * User fields after a password is set: `requiresPasswordChange` when someone
+ * other than the owner chose it (issued / temporary), and the legacy markers
+ * (shared student default, old temporary-password flow) always cleared.
  */
-export function passwordIssuedFields(defaultPassword = false) {
-  return { mustChangePassword: undefined, temporaryPasswordIssuedAt: undefined, defaultPassword: defaultPassword ? (true as const) : undefined };
+export function passwordIssuedFields(opts: { requiresPasswordChange: boolean }) {
+  return {
+    requiresPasswordChange: opts.requiresPasswordChange ? (true as const) : undefined,
+    defaultPassword: undefined,
+    mustChangePassword: undefined,
+    temporaryPasswordIssuedAt: undefined,
+  };
 }
 
-/** The first password for a new account of this role: the student default, or a random one. Actions only. */
-export function initialPasswordFor(role: Role): { password: string; defaultPassword: boolean } {
-  return role === "student" ? { password: STUDENT_DEFAULT_PASSWORD, defaultPassword: true } : { password: generateSecurePassword(), defaultPassword: false };
+/** The first password for a new account (any role): random, shown once, to be changed at first sign-in. Actions only. */
+export function initialPasswordFor(_role: Role): { password: string; requiresPasswordChange: true } {
+  return { password: generateSecurePassword(), requiresPasswordChange: true };
 }
 
 /** A student's Login ID: their scholar number (canonical). Throws when they have none or it cannot be a Login ID. */
@@ -215,7 +217,7 @@ export async function reserveAccount(ctx: MutationCtx, input: ReserveAccountInpu
  * password account is created server-side (step 2). Creates the identity and
  * activates every reserved membership for that Login ID.
  */
-export async function activatePendingAccount(ctx: MutationCtx, args: { loginId: string; defaultPassword?: boolean }): Promise<Id<"users">> {
+export async function activatePendingAccount(ctx: MutationCtx, args: { loginId: string; requiresPasswordChange?: boolean }): Promise<Id<"users">> {
   const pending = (await ctx.db.query("schoolMemberships").withIndex("by_login_id", (q) => q.eq("loginId", args.loginId)).collect())
     .filter((m) => m.status === "invited" && !m.userId && !m.guardianId); // legacy guardian sign-ins are never activated
   if (pending.length === 0) throw new AppError("FORBIDDEN", "Accounts are created by your school.");
@@ -228,7 +230,7 @@ export async function activatePendingAccount(ctx: MutationCtx, args: { loginId: 
     loginId: args.loginId,
     name: first.displayName,
     ...(first.email ? { email: first.email } : {}),
-    ...(args.defaultPassword ? { defaultPassword: true } : {}),
+    ...(args.requiresPasswordChange ? { requiresPasswordChange: true } : {}),
   });
   for (const m of pending) {
     await ctx.db.patch(m._id, { userId, status: "active", activatedAt: now });
@@ -271,10 +273,10 @@ export function generateSecurePassword(): string {
  * Step 2: create the Convex Auth password account for a reserved Login ID.
  * The secret is hashed by the provider (Scrypt); only the hash is stored.
  */
-export async function provisionAccount(ctx: ActionCtx, args: { loginId: string; password: string; defaultPassword?: boolean }) {
+export async function provisionAccount(ctx: ActionCtx, args: { loginId: string; password: string; requiresPasswordChange?: boolean }) {
   return await createAccount(ctx, {
     provider: PASSWORD_PROVIDER,
     account: { id: args.loginId, secret: args.password },
-    profile: { loginId: args.loginId, ...(args.defaultPassword ? { defaultPassword: true } : {}) },
+    profile: { loginId: args.loginId, ...(args.requiresPasswordChange ? { requiresPasswordChange: true } : {}) },
   });
 }

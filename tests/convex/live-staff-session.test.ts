@@ -6,14 +6,15 @@
 import { describe, expect, test } from "vitest";
 import { api, internal } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { as, createSchool, errorCode, makeTest, type T } from "./fixtures";
+import { as, changeOwnPassword, createSchool, errorCode, makeTest, type T } from "./fixtures";
 import { liveStaffUser, liveWorkspaceUser } from "../../src/features/auth/live-user";
 import { isLiveRoute, liveNavItems } from "../../src/lib/permissions/navigation";
 import { MODULE_KEYS } from "../../convex/core/modules";
 
-async function signedIn(t: T, membershipId: Id<"schoolMemberships">) {
+/** Sign in as a provisioned account and replace its temporary password (SEC-01), as the UI forces. */
+async function signedIn(t: T, membershipId: Id<"schoolMemberships">, issuedPassword: string) {
   const m = (await t.run((ctx) => ctx.db.get(membershipId)))!;
-  return { me: await as(t, m.userId!), userId: m.userId! };
+  return { me: await changeOwnPassword(t, m.userId!, issuedPassword), userId: m.userId! };
 }
 
 describe("live admin / teacher sessions", () => {
@@ -25,7 +26,7 @@ describe("live admin / teacher sessions", () => {
     const teacherId = await t.run((ctx) => ctx.db.insert("teachers", { schoolId: A.schoolId, employeeId: "E-77", firstName: "Nina", lastName: "Rao", specializationSubjectIds: [], status: "active" }));
     await t.run((ctx) => ctx.db.patch(A.sectionB, { classTeacherId: teacherId }));
     const acc = await admin.action(api.accounts.create, { person: { kind: "teacher", teacherId } });
-    const { me } = await signedIn(t, acc.membershipId);
+    const { me } = await signedIn(t, acc.membershipId, acc.temporaryPassword);
 
     const s = await me.query(api.users.session, {});
     expect(s.status).toBe("signedIn");
@@ -52,7 +53,7 @@ describe("live admin / teacher sessions", () => {
     const A = await createSchool(t, "solo");
     const r = await t.action(internal.setup.addAdministrator, { admin: { displayName: "Second Admin" } });
     const membership = await t.run(async (ctx) => (await ctx.db.query("schoolMemberships").withIndex("by_login_id", (q) => q.eq("loginId", r.loginId)).unique())!);
-    const { me } = await signedIn(t, membership._id);
+    const { me } = await signedIn(t, membership._id, r.temporaryPassword);
     const s = await me.query(api.users.session, {});
     if (s.status !== "signedIn") throw new Error(s.status);
     expect(s.viewer).toMatchObject({ role: "admin", loginId: r.loginId, teacher: null, students: [] });
@@ -63,14 +64,19 @@ describe("live admin / teacher sessions", () => {
     expect(Array.isArray(await me.query(api.attendance.dailyOverview, { date: "2026-07-01" }))).toBe(true);
   });
 
-  test("a newly issued password gives full access straight away (no forced change)", async () => {
+  test("a newly issued password is temporary: no school data until the owner changes it (SEC-01)", async () => {
     const t = makeTest();
     const A = await createSchool(t, "alpha");
     const admin = await as(t, A.users.admin);
     const teacherId = await t.run((ctx) => ctx.db.insert("teachers", { schoolId: A.schoolId, employeeId: "E-78", firstName: "Om", lastName: "K", specializationSubjectIds: [], status: "active" }));
     const acc = await admin.action(api.accounts.create, { person: { kind: "teacher", teacherId } });
     const m = (await t.run((ctx) => ctx.db.get(acc.membershipId)))!;
-    const me = await as(t, m.userId!);
+    const pending = await as(t, m.userId!);
+    const before = await pending.query(api.users.session, {});
+    expect(before).toMatchObject({ status: "passwordChangeRequired", loginId: acc.loginId, schoolName: "School alpha" });
+    expect("viewer" in before).toBe(false); // no permissions or school data before the change
+    expect(await errorCode(pending.query(api.users.viewer, {}))).toBe("PASSWORD_CHANGE_REQUIRED");
+    const me = await changeOwnPassword(t, m.userId!, acc.temporaryPassword);
     const s = await me.query(api.users.session, {});
     expect(s.status === "signedIn" && s.viewer.role === "teacher").toBe(true);
     expect((await me.query(api.users.viewer, {})).role).toBe("teacher");

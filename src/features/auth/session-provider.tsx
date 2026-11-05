@@ -47,9 +47,18 @@ export { liveStudentPortalUser };
  *                     demo-data record yet (viewer set: the account is valid
  *                     and can still use /account, e.g. to change its password)
  *                     (no active school membership, or no demo-data record yet)
+ *  passwordChange   → signed in with an issued/temporary password (SEC-01): the
+ *                     ONLY page available is /set-password; the server refuses
+ *                     every school function until it is changed
  *  authenticated    → signed in with a resolved role
  */
-type Status = "loading" | "authenticated" | "unauthenticated" | "unavailable";
+type Status = "loading" | "authenticated" | "unauthenticated" | "unavailable" | "passwordChange";
+
+/** The only page a session in the "passwordChange" state may open. */
+export const SET_PASSWORD_ROUTE = "/set-password";
+
+/** Who must change their password (only set in the "passwordChange" state). */
+export type PendingPasswordChange = { loginId: string | null; displayName: string; schoolName: string | null };
 
 /** Where the portal's domain data comes from for this session (see the header). */
 export type DataSource = "demo" | "live";
@@ -84,8 +93,14 @@ interface SessionContextValue {
    */
   modulesStatus: SessionModulesStatus | null;
   hasModule: (module: ModuleKey) => boolean;
-  /** Resolves to the portal user, or null when the account is valid but has no portal data yet (go to /account). */
-  login: (input: LoginInput) => Promise<CurrentUser | null>;
+  /** Set only in the "passwordChange" state. */
+  passwordChange: PendingPasswordChange | null;
+  /**
+   * Resolves to the portal user, null when the account is valid but has no
+   * portal data yet (go to /account), or "passwordChange" when the password
+   * must be replaced first (go to SET_PASSWORD_ROUTE).
+   */
+  login: (input: LoginInput) => Promise<CurrentUser | null | "passwordChange">;
   logout: () => Promise<void>;
 }
 
@@ -100,7 +115,7 @@ function UnconfiguredSessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => { demoRuntime()?.purgeLegacyStorage(); demoRuntime()?.auth.clearIdentity(); }, []);
   const value = useMemo<SessionContextValue>(() => ({
     status: "unauthenticated", user: null, viewer: null, notice: null, activeStudentId: null, dataSource: null,
-    can: () => false, modules: [], modulesStatus: null, hasModule: () => false,
+    can: () => false, modules: [], modulesStatus: null, hasModule: () => false, passwordChange: null,
     login: async () => { throw new Error("Sign-in is not available: the school backend is not configured for this deployment."); },
     logout: async () => {},
   }), []);
@@ -108,7 +123,7 @@ function UnconfiguredSessionProvider({ children }: { children: ReactNode }) {
 }
 
 // ------------------------------------------------------------------ Convex Auth
-type PendingLogin = { resolve: (u: CurrentUser | null) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> };
+type PendingLogin = { resolve: (u: CurrentUser | null | "passwordChange") => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> };
 
 function ConvexSessionProvider({ children }: { children: ReactNode }) {
   const { signIn, signOut } = useAuthActions();
@@ -147,12 +162,15 @@ function ConvexSessionProvider({ children }: { children: ReactNode }) {
 
   const base = useMemo(() => {
     void tick;
-    const none = { notice: null, user: null, activeStudentId: null, viewer: null, dataSource: null };
+    const none = { notice: null, user: null, activeStudentId: null, viewer: null, dataSource: null, passwordChange: null as PendingPasswordChange | null };
     if (authLoading) return { status: "loading" as Status, ...none };
     if (!isAuthenticated) return { status: "unauthenticated" as Status, ...none };
     if (session === undefined) return { status: "loading" as Status, ...none };
     if (session.status === "signedOut") return { status: "unauthenticated" as Status, ...none };
     if (session.status === "noSchool") return { status: "unavailable" as Status, ...none, notice: session.message };
+    if (session.status === "passwordChangeRequired") {
+      return { status: "passwordChange" as Status, ...none, passwordChange: { loginId: session.loginId, displayName: session.displayName, schoolName: session.schoolName } };
+    }
     if (!bound || bound.viewer !== session.viewer) return { status: "loading" as Status, ...none };
     if (!bound.result.ok) {
       // Accounts created by the school (no demo persona): the live (Convex) workspace for
@@ -185,6 +203,9 @@ function ConvexSessionProvider({ children }: { children: ReactNode }) {
     if (!p) return;
     if (base.status === "authenticated" && base.user) {
       finishPending()?.resolve(base.user);
+    } else if (base.status === "passwordChange") {
+      // Signed in with a temporary password: the caller sends the person to /set-password.
+      finishPending()?.resolve("passwordChange");
     } else if (base.status === "unavailable" && base.viewer) {
       // Valid account without portal data yet: signed in, sent to /account.
       finishPending()?.resolve(null);
@@ -194,7 +215,7 @@ function ConvexSessionProvider({ children }: { children: ReactNode }) {
     }
   }, [base, signOut, finishPending]);
 
-  const login = useCallback(async ({ loginId, password }: LoginInput): Promise<CurrentUser | null> => {
+  const login = useCallback(async ({ loginId, password }: LoginInput): Promise<CurrentUser | null | "passwordChange"> => {
     if (pending.current) throw new Error("A sign-in is already in progress.");
     setVerifying(true);
     try {
@@ -204,7 +225,7 @@ function ConvexSessionProvider({ children }: { children: ReactNode }) {
       setVerifying(false);
       throw new Error(signInErrorMessage(e));
     }
-    return await new Promise<CurrentUser | null>((resolve, reject) => {
+    return await new Promise<CurrentUser | null | "passwordChange">((resolve, reject) => {
       const timer = setTimeout(() => {
         if (pending.current?.timer !== timer) return;
         void signOut().finally(() => finishPending()?.reject(new Error("Signing in is taking longer than expected. Please try again.")));
@@ -236,6 +257,7 @@ function ConvexSessionProvider({ children }: { children: ReactNode }) {
       modules,
       modulesStatus,
       hasModule: (m) => modules.includes(m),
+      passwordChange: verifying ? null : (("passwordChange" in base && base.passwordChange) || null),
       login,
       logout,
     };

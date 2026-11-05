@@ -509,24 +509,22 @@ async function serverAnswer(ctx, path) {
   await page.getByTestId("issued-login-id").first().waitFor();
   const newId = (await page.getByTestId("issued-login-id").first().innerText()).trim();
   const tempPw = (await page.getByTestId("issued-password").first().innerText()).trim();
-  check("ACC Admin creates an account: Login ID = scholar number, default password shown", /^[A-Z0-9][A-Z0-9._-]+$/.test(newId) && !/^STU-/.test(newId) && tempPw === "Aster@123", `${personName} ${newId}`);
+  check("ACC Admin creates an account: Login ID = scholar number, random temporary password shown", /^[A-Z0-9][A-Z0-9._-]+$/.test(newId) && !/^STU-/.test(newId) && /^[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}$/.test(tempPw), `${personName} ${newId}`);
   await page.getByRole("button", { name: /^done$/i }).click();
   const personRow = page.locator("tr", { hasText: personName });
   check("ACC Account shows as Active with its Login ID", await personRow.getByText("Active").first().waitFor().then(() => true, () => false) && (await personRow.innerText()).includes(newId));
   await logout(page);
 
   await login(page, newId.toLowerCase(), tempPw, false);
-  await page.waitForURL(/\/account/);
+  await page.waitForURL(/\/set-password/);
   check("ACC New account signs in and must change the temporary password", await waitText(page, /temporary password/i) && await waitText(page, new RegExp(newId)));
   await page.goto(BASE + "/student/dashboard");
-  await page.waitForURL(/\/account/);
-  check("ACC Portal pages send a temporary-password account back to /account", page.url().includes("/account") && !(await page.getByRole("link", { name: /go to my portal/i }).count()));
-  await page.getByLabel(/^current password/i).fill(tempPw);
+  await page.waitForURL(/\/set-password/);
+  check("ACC Portal pages send a temporary-password account back to /set-password", page.url().includes("/set-password"));
+  await page.getByLabel(/^temporary password/i).fill(tempPw);
   await page.getByLabel(/^new password/i).fill("Chosen#2026");
   await page.getByLabel(/^confirm new password/i).fill("Chosen#2026");
-  await page.getByRole("button", { name: /^change password$/i }).click();
-  check("ACC Password changed", await waitText(page, /Password changed/));
-  check("ACC Temporary-password notice disappears", await page.getByText(/You signed in with a temporary password/).waitFor({ state: "detached" }).then(() => true, () => false));
+  await page.getByRole("button", { name: /^save password$/i }).click();
   // LIVE student portal: the school-created account opens ITS OWN record from Convex (no "preview" dead end).
   check("LIVE After the password change the student lands on the student dashboard", await page.waitForURL(/\/student\/dashboard/).then(() => true, () => false), page.url());
   await page.getByTestId("live-student-dashboard").waitFor();
@@ -620,7 +618,7 @@ async function serverAnswer(ctx, path) {
   check("BULK Run completes with an accurate summary", /2 accounts created · 0 skipped · 0 failed/.test(await page.getByTestId("bulk-summary").innerText()));
   const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: /download 2 credentials/i }).click()]);
   const csvText = await (await download.createReadStream()).toArray().then((chunks) => Buffer.concat(chunks).toString("utf8"));
-  check("BULK Credential CSV lists exactly the new accounts", csvText.split(/\r?\n/).length === 3 && csvText.includes(IRA) && csvText.includes("Aster@123") && !/STU-\d{4}-\d{5}/.test(csvText));
+  check("BULK Credential CSV lists exactly the new accounts", csvText.split(/\r?\n/).length === 3 && csvText.includes(IRA) && /[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}/.test(csvText) && !csvText.includes("Aster@123") && !/STU-\d{4}-\d{5}/.test(csvText));
   await page.getByRole("dialog").getByRole("button", { name: /^close$/i }).click();
   check("BULK Selected students now show Active accounts", await page.locator("tr", { hasText: IRA }).getByText("Active").waitFor().then(() => true, () => false));
   // Cross-page selection: "select all matching" covers every student without an account (server-side), and a filter change clears it.

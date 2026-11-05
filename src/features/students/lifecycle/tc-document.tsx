@@ -4,7 +4,8 @@
  * browser's print dialog). Issued certificates carry their verification code
  * and a QR code pointing at the public /verify/tc/<code> page.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import qrcode from "qrcode-generator";
 import { formatDate } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils/cn";
 
@@ -39,28 +40,50 @@ export type TcDocumentData = {
   issuedBy?: string;
 };
 
+/** Quiet zone around the symbol, in modules (the QR spec asks for 4; 2 is plenty on a white card). */
+const QR_QUIET_ZONE = 2;
+
 /**
- * Lightweight QR Code SVG Generator (Zero external runtime dependencies).
+ * The QR matrix of `text` as one SVG path ("M x,y h1 v1 h-1 z" per dark
+ * module), generated entirely in the browser with `qrcode-generator`.
+ * SEC-04: nothing is sent to a third party — the verification URL (and its
+ * code) never leaves the page, and no outside service decides what the
+ * printed QR points to.
  */
+export function qrSvgPath(text: string): { modules: number; d: string } {
+  const qr = qrcode(0, "M"); // type 0 = smallest version that fits; M = ~15% error correction
+  qr.addData(text);
+  qr.make();
+  const modules = qr.getModuleCount();
+  let d = "";
+  for (let row = 0; row < modules; row++) {
+    for (let col = 0; col < modules; col++) if (qr.isDark(row, col)) d += `M${col},${row}h1v1h-1z`;
+  }
+  return { modules, d };
+}
+
+/** Verification QR code, rendered as inline SVG (no network request, no injected HTML). */
 export function QrCode({ text, size = 112, className }: { text: string; size?: number; className?: string }) {
-  const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(text)}`;
+  const { modules, d } = useMemo(() => qrSvgPath(text), [text]);
+  const extent = modules + QR_QUIET_ZONE * 2;
 
   return (
     <div
-      role="img"
-      aria-label="Verification QR code"
       className={cn("overflow-hidden rounded-lg bg-white flex items-center justify-center border border-line/40", className)}
       style={{ width: size, height: size }}
     >
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={qrApiUrl}
-        alt="Verification QR code"
+      <svg
+        role="img"
+        aria-label="Verification QR code"
+        viewBox={`${-QR_QUIET_ZONE} ${-QR_QUIET_ZONE} ${extent} ${extent}`}
         width={size}
         height={size}
-        className="h-full w-full object-contain"
-        loading="lazy"
-      />
+        shapeRendering="crispEdges"
+        className="h-full w-full"
+      >
+        <rect x={-QR_QUIET_ZONE} y={-QR_QUIET_ZONE} width={extent} height={extent} fill="#ffffff" />
+        <path d={d} fill="#000000" />
+      </svg>
     </div>
   );
 }

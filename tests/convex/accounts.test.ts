@@ -6,9 +6,8 @@
 import { beforeAll, describe, expect, test } from "vitest";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { as, createSchool, enableSignIn, errorCode, makeTest, overwritePassword, signInResult, type T } from "./fixtures";
+import { as, changeOwnPassword, createSchool, enableSignIn, errorCode, makeTest, OWN_PASSWORD, overwritePassword, signInResult, type T } from "./fixtures";
 import { canonicalLoginId, formatLoginId, parseGeneratedLoginId } from "../../convex/model/loginIds";
-import { STUDENT_DEFAULT_PASSWORD } from "../../convex/model/accounts";
 
 beforeAll(() => enableSignIn());
 
@@ -47,17 +46,20 @@ describe("Login IDs", () => {
 });
 
 describe("accounts.create", () => {
-  test("admin creates a student account linked to the student record: Login ID = scholar number, default password", async () => {
+  test("admin creates a student account linked to the student record: Login ID = scholar number, random temporary password (SEC-01)", async () => {
     const { t, A } = await setup();
     const admin = await as(t, A.users.admin);
     const r = await admin.action(api.accounts.create, { person: { kind: "student", studentId: A.studentB } });
     expect(r.loginId).toBe("ALPHABALA"); // the fixture student's scholar number
-    expect(r.temporaryPassword).toBe(STUDENT_DEFAULT_PASSWORD);
+    // No shared default: a random password, unique per account.
+    expect(r.temporaryPassword).toMatch(/^[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}$/);
+    expect(r.temporaryPassword).not.toBe("Aster@123");
     const { m, user, account } = await memberFor(t, r.membershipId);
     expect(m).toMatchObject({ schoolId: A.schoolId, role: "student", status: "active", studentId: A.studentB, loginId: r.loginId });
     expect(m.teacherId).toBeUndefined();
-    // Marked as the school default; nothing forces a change (only administrators change passwords).
-    expect(user).toMatchObject({ loginId: r.loginId, defaultPassword: true });
+    // Temporary: the owner must change it at first sign-in.
+    expect(user).toMatchObject({ loginId: r.loginId, requiresPasswordChange: true });
+    expect(user?.defaultPassword).toBeUndefined();
     expect(user?.mustChangePassword).toBeUndefined();
     // A student without a scholar number cannot get an account; a typed Login ID is refused.
     const other = await t.run((ctx) => ctx.db.insert("students", { schoolId: A.schoolId, admissionNo: "X-1", firstName: "No", lastName: "Scholar", status: "active" }));
@@ -82,15 +84,21 @@ describe("accounts.create", () => {
     expect((await admin.action(api.accounts.create, { person: { kind: "teacher", teacherId: t2 } })).loginId).toBe("TCH-00125");
   });
 
-  test("the issued password works (verified by Convex Auth) and the account is usable right away", async () => {
+  test("the issued password works (verified by Convex Auth) but must be changed before any school data (SEC-01)", async () => {
     const { t, A } = await setup();
     const r = await (await as(t, A.users.admin)).action(api.accounts.create, { person: { kind: "student", studentId: A.studentB } });
     const { m } = await memberFor(t, r.membershipId);
     expect(await signInResult(t, r.loginId, "wrong-pass-1")).toMatch(/InvalidSecret/);
     expect(await signInResult(t, r.loginId, r.temporaryPassword)).toBe("OK");
-    const student = await as(t, m.userId!);
+    const pending = await as(t, m.userId!);
+    expect((await pending.query(api.users.session, {})).status).toBe("passwordChangeRequired");
+    expect(await errorCode(pending.query(api.attendance.studentHistory, { studentId: A.studentB }))).toBe("PASSWORD_CHANGE_REQUIRED");
+    const student = await changeOwnPassword(t, m.userId!, r.temporaryPassword);
     const s = await student.query(api.users.session, {});
     expect(s.status === "signedIn" && s.viewer.loginId === r.loginId && s.viewer.role === "student").toBe(true);
+    // The temporary password no longer works; the owner's does.
+    expect(await signInResult(t, r.loginId, r.temporaryPassword)).toMatch(/InvalidSecret/);
+    expect(await signInResult(t, r.loginId, OWN_PASSWORD)).toBe("OK");
   });
 
   test("duplicate Login ID and a second account for the same person are rejected", async () => {
@@ -126,7 +134,7 @@ describe("disable / enable / reset", () => {
     const admin = await as(t, A.users.admin);
     const r = await admin.action(api.accounts.create, { person: { kind: "student", studentId: A.studentB } });
     const userId = (await memberFor(t, r.membershipId)).m.userId!;
-    const student = await as(t, userId);
+    const student = await changeOwnPassword(t, userId, r.temporaryPassword);
     expect((await student.query(api.users.session, {})).status).toBe("signedIn");
     await admin.action(api.accounts.setStatus, { targetMembershipId: r.membershipId, status: "suspended" });
     // Disabling revokes every session: the old token no longer identifies anyone.

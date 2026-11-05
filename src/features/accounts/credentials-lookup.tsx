@@ -62,7 +62,7 @@ function PasswordCell({ a }: { a: CredentialAccount }) {
     <span className="inline-flex items-center gap-1.5 text-[13px] text-ink-muted" title="Stored as a secure hash — it cannot be viewed. Reset it to issue a new one.">
       <Lock className="h-3.5 w-3.5" aria-hidden />
       <span className="font-mono tracking-widest" aria-label="Hidden">••••••••</span>
-      {a.defaultPassword && <Badge tone="lavender">School default</Badge>}
+      {a.defaultPassword && <span title="Still on the former shared default password (no longer issued); the student must change it at next sign-in. Reset the password to replace it now."><Badge tone="lavender">Old default — reissue</Badge></span>}
     </span>
   );
 }

@@ -11,10 +11,9 @@
 import { afterEach, beforeAll, describe, expect, test } from "vitest";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { as, captureEmails, createSchool, enableSignIn, errorCode, makeTest, modules, overwritePassword, signInResult, type T } from "./fixtures";
+import { as, captureEmails, changeOwnPassword, createSchool, enableSignIn, errorCode, makeTest, modules, OWN_PASSWORD, overwritePassword, signInResult, type T } from "./fixtures";
 import { OTP_MAX_ATTEMPTS, OTP_MAX_REQUESTS, PASSWORD_OVERWRITE } from "../../convex/credentials";
 import { ACCOUNTANT_ACCESS } from "../../convex/core/grants";
-import { STUDENT_DEFAULT_PASSWORD } from "../../convex/model/accounts";
 
 beforeAll(() => enableSignIn());
 
@@ -31,6 +30,8 @@ async function setup() {
   const stu = await admin.action(api.accounts.create, { person: { kind: "student", studentId: A.studentB } });
   const userOf = (id: Id<"schoolMemberships">) => t.run(async (ctx) => (await ctx.db.get(id))!.userId!);
   const adminEmail = await t.run(async (ctx) => (await ctx.db.get(A.memberships.admin))!.email!);
+  // The teacher has replaced the issued password with their own (OWN_PASSWORD); the student is still on the temporary one.
+  await changeOwnPassword(t, await userOf(tch.membershipId), tch.temporaryPassword);
   return { t, A, B, admin, tch, stu, userOf, adminEmail };
 }
 
@@ -56,8 +57,8 @@ describe("only administrators reach credential functions", () => {
     }
     expect(await errorCode(t.query(api.credentials.search, { query: "bala" }))).toBe("UNAUTHENTICATED");
     expect(await errorCode(t.action(api.credentials.requestPasswordOverwriteOtp, { targetMembershipId: stu.membershipId }))).toBe("UNAUTHENTICATED");
-    // Nothing changed: the default password still works, and only the admin's own challenge exists.
-    expect(await signInResult(t, stu.loginId, STUDENT_DEFAULT_PASSWORD)).toBe("OK");
+    // Nothing changed: the issued password still works, and only the admin's own challenge exists.
+    expect(await signInResult(t, stu.loginId, stu.temporaryPassword)).toBe("OK");
     expect((await otpRows(t)).length).toBe(1);
     expect(await overwriteAudits(t)).toEqual([]);
   });
@@ -69,7 +70,7 @@ describe("credential lookup", () => {
     const find = async (query: string) => (await admin.query(api.credentials.search, { query })).results;
 
     const byScholar = await find("alphabala");
-    expect(byScholar[0]).toMatchObject({ membershipId: stu.membershipId, role: "student", loginId: "ALPHABALA", scholarNo: "ALPHABALA", classSection: "8-B", state: "active", defaultPassword: true, passwordAction: "reset" });
+    expect(byScholar[0]).toMatchObject({ membershipId: stu.membershipId, role: "student", loginId: "ALPHABALA", scholarNo: "ALPHABALA", classSection: "8-B", state: "active", defaultPassword: false, passwordAction: "reset" });
     expect((await find("Bala")).map((r) => r.membershipId)).toContain(stu.membershipId);
     const byEmployee = await find("emp-77");
     expect(byEmployee[0]).toMatchObject({ membershipId: tch.membershipId, role: "teacher", employeeId: "EMP-77", department: "Science Department", loginId: tch.loginId, defaultPassword: false });
@@ -80,7 +81,8 @@ describe("credential lookup", () => {
     const details = await admin.query(api.credentials.account, { targetMembershipId: stu.membershipId });
     expect(details.history.map((h) => h.action)).toContain("account.created");
     const json = JSON.stringify([byScholar, byEmployee, details]);
-    expect(json).not.toContain(STUDENT_DEFAULT_PASSWORD);
+    expect(json).not.toContain(stu.temporaryPassword);
+    expect(json).not.toContain(OWN_PASSWORD);
     expect(json).not.toMatch(/secret|hash/i);
   });
 
@@ -119,7 +121,7 @@ describe("OTP-gated password overwrite", () => {
     const r = await admin.action(api.credentials.verifyOtpAndSetPassword, { challengeId: req.challengeId, code, newPassword: "Fresh#Pass2026" });
     expect(r).toMatchObject({ ok: true, loginId: tch.loginId });
     expect(await signInResult(t, tch.loginId, "Fresh#Pass2026")).toBe("OK");
-    expect(await signInResult(t, tch.loginId, tch.temporaryPassword)).toMatch(/InvalidSecret/);
+    expect(await signInResult(t, tch.loginId, OWN_PASSWORD)).toMatch(/InvalidSecret/);
     expect((await targetSession.query(api.users.session, {})).status).toBe("signedOut");
 
     const [audit] = await overwriteAudits(t);
@@ -150,7 +152,7 @@ describe("OTP-gated password overwrite", () => {
     expect(await errorCode(admin.action(api.credentials.verifyOtpAndSetPassword, { challengeId, code: wrong, newPassword: "Guess#2026x" }))).toBe("FORBIDDEN");
     expect((await otpRows(t))[0]).toMatchObject({ closedReason: "locked" });
     expect(await errorCode(admin.action(api.credentials.verifyOtpAndSetPassword, { challengeId, code, newPassword: "Guess#2026x" }))).toBe("FORBIDDEN");
-    expect(await signInResult(t, stu.loginId, STUDENT_DEFAULT_PASSWORD)).toBe("OK");
+    expect(await signInResult(t, stu.loginId, stu.temporaryPassword)).toBe("OK");
     expect(await overwriteAudits(t)).toEqual([]);
   });
 
@@ -184,7 +186,7 @@ describe("OTP-gated password overwrite", () => {
     // The challenge decides the target: the second code changes the TEACHER, never the student.
     await admin.action(api.credentials.verifyOtpAndSetPassword, { challengeId: second.challengeId, code: mail.lastCode(), newPassword: "Teach#2026x" });
     expect(await signInResult(t, tch.loginId, "Teach#2026x")).toBe("OK");
-    expect(await signInResult(t, stu.loginId, STUDENT_DEFAULT_PASSWORD)).toBe("OK");
+    expect(await signInResult(t, stu.loginId, stu.temporaryPassword)).toBe("OK");
   });
 
   test("requests are rate-limited per administrator", async () => {
@@ -226,36 +228,47 @@ describe("OTP-gated password overwrite", () => {
     expect(mail.sent).toEqual([]);
   });
 
-  test("the overwrite clears the student-default marker", async () => {
+  test("the overwrite clears the legacy student-default marker", async () => {
     const { t, admin, stu, userOf } = await setup();
     const userId = await userOf(stu.membershipId);
+    await t.run((ctx) => ctx.db.patch(userId, { defaultPassword: true })); // an account from before SEC-01
+    expect((await admin.query(api.credentials.search, { query: "alphabala" })).results[0].defaultPassword).toBe(true);
     await overwritePassword(admin, stu.membershipId, "Bala#2026x");
     expect((await t.run((ctx) => ctx.db.get(userId)))?.defaultPassword).toBeUndefined();
     expect((await admin.query(api.credentials.search, { query: "alphabala" })).results[0].defaultPassword).toBe(false);
   });
 });
 
-describe("no self-service credential changes", () => {
-  test("there is no password-change endpoint, and Convex Auth reset / sign-up flows are refused", async () => {
+describe("self-service credentials: only the owner's own password change (SEC-01)", () => {
+  test("the only self-service endpoint is account.changePassword; Convex Auth reset / sign-up flows are refused", async () => {
     const { t, stu } = await setup();
-    expect(Object.keys(modules).filter((k) => /\/convex\/account\.ts$/.test(k))).toEqual([]); // the removed changePassword module
+    // convex/account.ts changePassword (current password required; covered in password-change.test.ts).
+    expect(Object.keys(modules).filter((k) => /\/convex\/account\.ts$/.test(k))).toHaveLength(1);
+    expect(await errorCode(t.action(api.account.changePassword, { currentPassword: stu.temporaryPassword, newPassword: "Mine#2026x" }))).toBe("UNAUTHENTICATED");
     const reset = String(await errorCode(t.action(api.auth.signIn, { provider: "password", params: { flow: "reset", loginId: stu.loginId } })));
     expect(reset).not.toBe("NO_ERROR");
     const verify = String(await errorCode(t.action(api.auth.signIn, { provider: "password", params: { flow: "reset-verification", loginId: stu.loginId, code: "123456", newPassword: "Mine#2026x" } })));
     expect(verify).not.toBe("NO_ERROR");
     expect(String(await errorCode(t.action(api.auth.signIn, { provider: "password", params: { flow: "signUp", loginId: stu.loginId, password: "Mine#2026x" } })))).toBe("FORBIDDEN");
     expect(await signInResult(t, stu.loginId, "Mine#2026x")).toMatch(/InvalidSecret/);
-    expect(await signInResult(t, stu.loginId, STUDENT_DEFAULT_PASSWORD)).toBe("OK");
+    expect(await signInResult(t, stu.loginId, stu.temporaryPassword)).toBe("OK");
   });
 
-  test("first-credential issuing cannot overwrite a password (no OTP bypass)", async () => {
-    const { t, admin, tch, stu } = await setup();
+  test("first-credential issuing cannot overwrite a password the owner chose (no OTP bypass)", async () => {
+    const { t, admin, tch, stu, userOf } = await setup();
+    // The teacher set their own password: refused.
     const [r] = await admin.action(api.accounts.issuePendingCredentials, { targetMembershipIds: [tch.membershipId] });
     expect(r).toMatchObject({ ok: false });
-    expect(await signInResult(t, tch.loginId, tch.temporaryPassword)).toBe("OK");
-    // A student still on the school default only gets it shown again (nothing is written).
+    expect(await signInResult(t, tch.loginId, OWN_PASSWORD)).toBe("OK");
+    // A student still on an undelivered temporary password gets a NEW temporary one (signed out; still must change it).
     const [again] = await admin.action(api.accounts.issuePendingCredentials, { targetMembershipIds: [stu.membershipId] });
-    expect(again).toMatchObject({ ok: true, temporaryPassword: STUDENT_DEFAULT_PASSWORD });
+    expect(again).toMatchObject({ ok: true });
+    const rotated = again.ok ? again.temporaryPassword : "";
+    expect(rotated).not.toBe(stu.temporaryPassword);
+    expect(await signInResult(t, stu.loginId, stu.temporaryPassword)).toMatch(/InvalidSecret/);
+    expect(await signInResult(t, stu.loginId, rotated)).toBe("OK");
+    const stuUser = await userOf(stu.membershipId);
+    expect((await t.run((ctx) => ctx.db.get(stuUser)))?.requiresPasswordChange).toBe(true);
     // Once an administrator set another password, it is refused too.
     await overwritePassword(admin, stu.membershipId, "Bala#2026x");
     const [after] = await admin.action(api.accounts.issuePendingCredentials, { targetMembershipIds: [stu.membershipId] });
@@ -263,12 +276,13 @@ describe("no self-service credential changes", () => {
     expect(await signInResult(t, stu.loginId, "Bala#2026x")).toBe("OK");
   });
 
-  test("a legacy 'must change password' flag no longer locks anyone out", async () => {
+  test("the removed legacy 'must change password' flag does not lock anyone out (only requiresPasswordChange does)", async () => {
     const { t, stu, userOf, A } = await setup();
     const userId = await userOf(stu.membershipId);
+    await changeOwnPassword(t, userId, stu.temporaryPassword);
     await t.run((ctx) => ctx.db.patch(userId, { mustChangePassword: true, temporaryPasswordIssuedAt: Date.now() - 365 * 24 * 3600 * 1000 }));
     const me = await as(t, userId);
     expect((await me.query(api.attendance.studentHistory, { studentId: A.studentB })).studentId).toBe(A.studentB);
-    expect(await signInResult(t, stu.loginId, STUDENT_DEFAULT_PASSWORD)).toBe("OK");
+    expect(await signInResult(t, stu.loginId, OWN_PASSWORD)).toBe("OK");
   });
 });

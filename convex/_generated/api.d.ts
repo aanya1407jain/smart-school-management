@@ -75,6 +75,7 @@ import type * as model_studentProviders from "../model/studentProviders.js";
 import type * as model_studentRecords from "../model/studentRecords.js";
 import type * as notices from "../notices.js";
 import type * as notifications from "../notifications.js";
+import type * as account from "../account.js";
 import type * as profile from "../profile.js";
 import type * as reports from "../reports.js";
 import type * as rollNumberMaintenance from "../rollNumberMaintenance.js";
@@ -172,6 +173,7 @@ declare const fullApi: ApiFromModules<{
   "model/studentRecords": typeof model_studentRecords;
   notices: typeof notices;
   notifications: typeof notifications;
+  account: typeof account;
   profile: typeof profile;
   reports: typeof reports;
   rollNumberMaintenance: typeof rollNumberMaintenance;

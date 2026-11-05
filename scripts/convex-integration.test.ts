@@ -264,13 +264,16 @@ async function main() {
     check("Public sign-up cannot claim a pending (reserved) Login ID", true, codeOf(e));
   }
   const [issued] = await admin.action(api.accounts.issuePendingCredentials, { targetMembershipIds: [newStudent.membershipId!] });
-  check("Admin issues the default student password", issued.ok && issued.loginId === newStudent.loginId && issued.temporaryPassword === "Aster@123");
+  check("Admin issues a random temporary student password (no shared default)", issued.ok && issued.loginId === newStudent.loginId && /^[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}$/.test(issued.temporaryPassword));
   const temp = issued.ok ? issued.temporaryPassword : "";
   const ishita = await signIn(newStudent.loginId!.toLowerCase(), temp);
+  check("Temporary password: session requires a password change first", (await ishita.query(api.users.session, {})).status === "passwordChangeRequired");
+  await expectCode("Temporary password: school data is refused until it is changed", () => ishita.query(api.studentPortal.myProfile, {}), "PASSWORD_CHANGE_REQUIRED");
+  await ishita.action(api.account.changePassword, { currentPassword: temp, newPassword: "Ishita#2026x" });
   const sIshita = await ishita.query(api.users.session, {});
   check("New student signs in; role and school come from the server",
     sIshita.status === "signedIn" && sIshita.viewer.role === "student" && sIshita.viewer.school.slug === vAdmin.school.slug && sIshita.viewer.student?.name === `Ishita ${surname}`);
-  check("No forced password change: the student uses the portal straight away", (await ishita.query(api.users.viewer, {})).role === "student");
+  check("After changing the password the student uses the portal", (await ishita.query(api.users.viewer, {})).role === "student");
   // Student portal: the new account resolves ITS OWN student record server-side.
   const pIshita = await ishita.query(api.studentPortal.myProfile, {});
   check("Student portal: new account resolves its own record, class, section and year",
@@ -297,11 +300,13 @@ async function main() {
     }
     check("Bulk account: run completes with one account", issued.length === 1 && (await admin.query(api.bulkAccounts.getJob, { jobId })).status === "completed");
     const cred = issued[0];
-    const pb = await (await signIn(cred.loginId, cred.temporaryPassword)).query(api.studentPortal.myProfile, {});
+    const firstClient = await signIn(cred.loginId, cred.temporaryPassword);
+    await firstClient.action(api.account.changePassword, { currentPassword: cred.temporaryPassword, newPassword: "Bulk#2026xy" }); // forced at first sign-in
+    const pb = await firstClient.query(api.studentPortal.myProfile, {});
     check("Bulk account: signs in and resolves its own record (10-C, current year)",
       pb.state === "ok" && pb.student.studentId === bulkImported.studentId && pb.enrollment?.sectionDisplayName === "10-C" && typeof pb.enrollment.rollNo === "number");
     // Every student-portal module resolves for the bulk-created account (real records, own only).
-    const bulkClient = await signIn(cred.loginId, cred.temporaryPassword);
+    const bulkClient = await signIn(cred.loginId, "Bulk#2026xy");
     const [tt, hw, res, fees, notices] = await Promise.all([
       bulkClient.query(api.timetable.myStudentTimetable, {}), bulkClient.query(api.homework.myHomework, {}), bulkClient.query(api.exams.myResults, {}),
       bulkClient.query(api.fees.myFees, {}), bulkClient.query(api.studentPortal.myNotices, { today: TODAY }),

@@ -64,7 +64,7 @@ export const FILE_RULES: readonly [RegExp, Owner][] = [
   [/^convex\/seed\.ts$/, "demo"],
   [/^convex\/migrations\.ts$/, "core"],
   [/^convex\/(auth|auth\.config|users|memberships|schools|schoolModules|profile|audit|notifications|setup|http|notices|events|academicYearMaintenance|academics|teachers)\.ts$/, "core"],
-  [/^convex\/(accounts|bulkAccounts|credentials|files|studentLoginMigration)\.ts$/, "core"],
+  [/^convex\/(account|accounts|bulkAccounts|credentials|files|studentLoginMigration)\.ts$/, "core"],
   [/^convex\/(students|studentReports|studentPortal|studentLifecycle|admissionRegister|imports|scholarNumberMaintenance|rollNumberMaintenance|tcVerification)\.ts$/, "students"],
   [/^convex\/(attendance|attendanceReports|staff)\.ts$/, "attendance"],
   [/^convex\/(fees|feeReports|feeReminders)\.ts$/, "fees"],

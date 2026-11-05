@@ -3,7 +3,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { LogoMark } from "@/components/brand/logo";
-import { useSession } from "@/features/auth/session-provider";
+import { SET_PASSWORD_ROUTE, useSession } from "@/features/auth/session-provider";
 import { landingRouteFor } from "@/lib/permissions";
 import { useSchoolProfile } from "@/lib/hooks/use-school-profile";
 import { PRODUCT } from "@/lib/constants/product";
@@ -16,7 +16,7 @@ export default function SplashPage() {
 
   useEffect(() => {
     if (status === "loading") return;
-    const t = setTimeout(() => router.replace(user ? landingRouteFor(user) : "/login"), 2300);
+    const t = setTimeout(() => router.replace(status === "passwordChange" ? SET_PASSWORD_ROUTE : user ? landingRouteFor(user) : "/login"), 2300);
     return () => clearTimeout(t);
   }, [status, user, router]);
 

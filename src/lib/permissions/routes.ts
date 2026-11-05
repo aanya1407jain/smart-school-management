@@ -68,6 +68,29 @@ export function isRouteShipped(href: string): boolean {
 }
 const SHIPPED_PATHS = [...CORE.routes, ...MODULE_MANIFESTS.flatMap((m) => m.routes)].map((r) => toRule(r.path, r.anyOf, undefined).pattern);
 
+/**
+ * SEC-05: a post-sign-in `next` target, or null. Only same-origin paths are
+ * kept: absolute URLs (`https://…`, `javascript:` and any other scheme),
+ * protocol-relative URLs (`//host`), backslash tricks (`/\host`, which
+ * browsers treat as `//host`) and control characters are rejected, so the
+ * caller falls back to the role's dashboard. Pure (no `window`) for unit tests.
+ */
+export function safeInternalPath(next: string | null | undefined): string | null {
+  if (!next || next.length > 2048) return null;
+  if (!next.startsWith("/") || next.startsWith("//")) return null;
+  // eslint-disable-next-line no-control-regex
+  if (/[\\\u0000-\u001f\u007f]/.test(next)) return null;
+  const base = "http://same-origin.invalid";
+  let url: URL;
+  try {
+    url = new URL(next, base);
+  } catch {
+    return null;
+  }
+  if (url.origin !== base) return null;
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
 export function isProtectedRoute(pathname: string) {
   return AREA_RULES.some((a) => pathname === a.prefix || pathname.startsWith(`${a.prefix}/`));
 }

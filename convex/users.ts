@@ -20,7 +20,7 @@ import { v } from "convex/values";
 import { query, type QueryCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { schoolQuery } from "./core/functions";
-import { activeMembershipsOf, getCurrentUser, requireActor, type Actor } from "./core/actor";
+import { activeMembershipsOf, getCurrentUser, passwordChangePending, requireActor, type Actor } from "./core/actor";
 import { linkedStudentIds } from "./core/authorization";
 import { AppError } from "./core/errors";
 import { fullName, teacherDisplayName } from "./model/academics";
@@ -99,6 +99,10 @@ export const viewer = schoolQuery({
 /**
  * The browser session in one call. `membershipId` only CHOOSES among the
  * caller's own memberships (verified by `requireActor`).
+ *
+ * `passwordChangeRequired`: signed in with an issued/temporary password
+ * (SEC-01). Only who-and-where is returned — no viewer, permissions or school
+ * data — and the UI must send the person to /set-password.
  */
 export const session = query({
   args: { membershipId: v.optional(v.id("schoolMemberships")) },
@@ -107,7 +111,14 @@ export const session = query({
     if (!user) return { status: "signedOut" as const };
     const memberships = await membershipsOf(ctx, user._id);
     try {
-      const actor = await requireActor(ctx, membershipId);
+      const actor = await requireActor(ctx, membershipId, { allowPendingPasswordChange: true });
+      if (passwordChangePending(user)) {
+        const school = await ctx.db.get(actor.schoolId);
+        return {
+          status: "passwordChangeRequired" as const,
+          loginId: actor.loginId, displayName: actor.displayName, schoolName: school?.name ?? null, memberships,
+        };
+      }
       return { status: "signedIn" as const, viewer: await buildViewer(ctx, actor), memberships };
     } catch (e) {
       if (e instanceof AppError && (e.data.code === "NO_SCHOOL_ACCESS" || e.data.code === "SCHOOL_SELECTION_REQUIRED")) {

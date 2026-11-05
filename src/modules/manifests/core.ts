@@ -30,6 +30,8 @@ export const core: CoreContributions = {
     page("/", [], [], "Entry point; redirects to sign-in or the user's workspace."),
     page("/login", [], [], "Sign-in page."),
     page("/account", ["profile:read:own"], ["admin", "teacher", "student"]),
+    // Any signed-in person (also one still on a temporary password, who has no viewer yet): convex/account.ts changePassword.
+    page("/set-password", [], [], "Set or change your own password; forced after an issued temporary password."),
     page("/admin", ["area:admin"], ["admin"]),
     page("/admin/dashboard", ["reports:read", "fees:manage"], ["admin"]),
     page("/admin/academics", ["academics:manage"], ["admin"]),
