@@ -28,7 +28,7 @@ export function LoginScreen() {
   const [error, setError] = useState<string | null>(null);
   const [demoOpen, setDemoOpen] = useState(false);
 
-  const { register, handleSubmit, setValue, formState: { errors, isSubmitting } } = useForm<FormValues>({
+  const { register, handleSubmit, setValue, clearErrors, formState: { errors, isSubmitting } } = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: { loginId: "", password: "", remember: true },
   });
@@ -59,10 +59,16 @@ export function LoginScreen() {
     }
   };
 
+  const handleSelectDemoPersona = (a: { loginId: string; password?: string }) => {
+    setError(null);
+    clearErrors();
+    const demoPassword = a.password || "Password@123";
+    setValue("loginId", a.loginId, { shouldDirty: true, shouldTouch: true });
+    setValue("password", demoPassword, { shouldValidate: true, shouldDirty: true, shouldTouch: true });
+  };
+
   return (
     <main className="relative grid min-h-screen place-items-center overflow-hidden bg-bg px-4 py-10">
-      {/* Very subtle ambient shapes */}
-
       <motion.div initial={{ opacity: 0, y: 14, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: 0.5, ease: [0.2, 0.7, 0.2, 1] }} className="relative w-full max-w-[460px]">
         <div className="glass rounded-2xl px-6 pb-7 pt-8 sm:px-9">
           <div className="flex flex-col items-center text-center">
@@ -73,7 +79,6 @@ export function LoginScreen() {
           </div>
 
           <form onSubmit={handleSubmit(onSubmit)} noValidate className="mt-7 space-y-5">
-
             <FormField label="Login ID" hint="Students: your scholar number." required error={errors.loginId?.message}>
               <Input type="text" autoComplete="username" autoCapitalize="characters" spellCheck={false} placeholder="e.g. 0246CBSE0001 or TCH-00124" {...register("loginId")} />
             </FormField>
@@ -113,12 +118,12 @@ export function LoginScreen() {
                 <li key={a.loginId}>
                   <button
                     type="button"
-                    onClick={() => { setValue("loginId", a.loginId, { shouldValidate: true }); setValue("password", a.password, { shouldValidate: true }); setError(null); }}
+                    onClick={() => handleSelectDemoPersona(a)}
                     className="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left hover:bg-white"
                   >
                     <span className="min-w-0">
                       <span className="block text-[13px] font-semibold text-ink">{a.label}</span>
-                      <span className="block truncate font-mono text-[12px] text-ink-muted">{a.loginId} · {a.password}</span>
+                      <span className="block truncate font-mono text-[12px] text-ink-muted">{a.loginId} · {a.password || "••••••••"}</span>
                     </span>
                     <span className="shrink-0 rounded-full bg-teal-soft px-2 py-0.5 text-[11px] font-semibold text-lagoon">{a.roleLabel}</span>
                   </button>
@@ -129,7 +134,6 @@ export function LoginScreen() {
         </div>}
         <p className="mt-5 text-center text-[12px] text-ink-muted">© {new Date().getFullYear()} {school?.name ?? "Your school"} · {PRODUCT.name}</p>
       </motion.div>
-
     </main>
   );
 }
