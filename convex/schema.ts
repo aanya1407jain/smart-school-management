@@ -20,6 +20,7 @@ import { defineSchema, defineTable } from "convex/server";
 import { authTables } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { vModuleKey } from "./core/modules";
+import { vAuditCategory } from "./core/auditCategories";
 import {
   vAcademicYearStatus, vAttendanceStatus, vAudience, vConcessionKind, vEnrollmentStatus, vEntityRef, vEventKind,
   vExamStatus, vFileKind, vFileOwnerType, vGender, vHomeworkStatus, vLeaveStatus, vLeaveType, vMembershipStatus, vNoticeStatus,
@@ -958,10 +959,20 @@ export default defineSchema({
     entity: vEntityRef,
     summary: v.string(),
     metadata: v.optional(v.any()),
+    /**
+     * Derived from `action` by writeAudit (core/auditCategories.ts). Optional
+     * only for rows written before it existed: audit:backfillCategories fills them.
+     */
+    category: v.optional(vAuditCategory),
+    /** The actor's display name in this school when they acted (kept even if the member is later removed). */
+    actorName: v.optional(v.string()),
+    // The time of the event is the server-set, immutable `_creationTime` (every index ends with it).
   })
     .index("by_school", ["schoolId"])
     .index("by_school_entity", ["schoolId", "entity.table", "entity.id"])
-    .index("by_school_action", ["schoolId", "action"]),
+    .index("by_school_action", ["schoolId", "action"])
+    .index("by_school_category", ["schoolId", "category"])
+    .index("by_school_actor", ["schoolId", "actorUserId"]),
 
   /** Metadata for every stored file; the blob lives in Convex storage. */
   files: defineTable({

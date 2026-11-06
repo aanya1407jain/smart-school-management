@@ -178,6 +178,13 @@ export const openChallenge = internalMutation({
       schoolId: actor.schoolId, adminUserId: actor.userId, adminMembershipId: actor.membershipId, targetMembershipId,
       codeHash, salt, expiresAt, attempts: 0,
     });
+    // Audited as soon as it is opened (a code that fails to send is closed right after, still on record).
+    await writeAudit(ctx, {
+      schoolId: actor.schoolId, actor, action: "credential.otp_requested",
+      entity: { table: "schoolMemberships", id: targetMembershipId },
+      summary: `${actor.displayName} requested a one-time code to reset the password of ${target.loginId} (${target.displayName})`,
+      metadata: { ...accountTarget(target.membership), challengeId },
+    });
     const school = (await ctx.db.get(actor.schoolId))!;
     return { challengeId, sentTo, expiresAt, school: school.name, adminName: actor.displayName, targetName: target.displayName, targetLoginId: target.loginId };
   },
@@ -226,6 +233,16 @@ export const consumeChallenge = internalMutation({
       const attempts = c.attempts + 1;
       const locked = attempts >= OTP_MAX_ATTEMPTS;
       await ctx.db.patch(c._id, { attempts, ...(locked ? { closedAt: now, closedReason: "locked" as const } : {}) });
+      // Returned (not thrown), so this audit entry persists with the attempt counter.
+      const m = await ctx.db.get(c.targetMembershipId);
+      await writeAudit(ctx, {
+        schoolId: actor.schoolId, actor, action: locked ? "credential.otp_locked" : "credential.otp_failed",
+        entity: { table: "schoolMemberships", id: c.targetMembershipId },
+        summary: locked
+          ? `Password-reset code for ${m?.loginId ?? "an account"} locked after ${OTP_MAX_ATTEMPTS} incorrect attempts`
+          : `Incorrect password-reset code for ${m?.loginId ?? "an account"} (attempt ${attempts} of ${OTP_MAX_ATTEMPTS})`,
+        metadata: { ...(m ? accountTarget(m) : {}), challengeId: c._id, attempts, maxAttempts: OTP_MAX_ATTEMPTS },
+      });
       return { ok: false as const, reason: locked ? ("locked" as const) : ("wrong" as const), attemptsLeft: OTP_MAX_ATTEMPTS - attempts };
     }
     await ctx.db.patch(c._id, { closedAt: now, closedReason: "used" });
