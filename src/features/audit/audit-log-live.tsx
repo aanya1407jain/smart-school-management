@@ -1,55 +1,85 @@
 "use client";
 /**
- * Audit log viewer (audit:read): every recorded change in the school, newest
- * first, filterable by action, with who did it and the recorded details.
- * Read-only — there is no way to edit or delete audit rows.
+ * Audit log viewer for live school accounts (audit:read — the server refuses
+ * everyone else). Reads convex/audit.ts getAuditLogs page by page; exports the
+ * same filters through exportAuditLogsCsv (the export is itself audited).
  */
-import { useState } from "react";
-import { ScrollText } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@convex/_generated/api";
-import { useSchoolPaginatedQuery, useSchoolQuery } from "@/lib/convex/membership";
-import { Badge, Button, Card, EmptyState, LoadingState, PageHeader, Select } from "@/components/ui";
-import { formatDateTime } from "@/lib/utils/dates";
+import { useSchoolAction, useSchoolPaginatedQuery } from "@/lib/convex/membership";
+import { errorMessage } from "@/lib/convex/errors";
+import { AuditLogView } from "./audit-log-view";
+import { EMPTY_AUDIT_FILTERS, saveCsv, serverFilters, type AuditEntry, type AuditFilterState } from "./audit-format";
+
+const PAGE = 50;
+/** While a text search runs, keep reading older pages until this many matches show (or the log ends). */
+const SEARCH_TARGET = 25;
+/** …but stop auto-reading after this many pages; the person can press "Load more". */
+const MAX_AUTO_PAGES = 15;
+
+function useDebounced<T>(value: T, ms: number): T {
+  const [v, setV] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setV(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return v;
+}
 
 export function LiveAuditLog() {
-  const [action, setAction] = useState("");
-  const actions = useSchoolQuery(api.audit.actions, {});
-  const feed = useSchoolPaginatedQuery(api.audit.feed, action ? { action } : {}, { initialNumItems: 50 });
-  const [open, setOpen] = useState<string | null>(null);
+  const [filters, setFilters] = useState<AuditFilterState>(EMPTY_AUDIT_FILTERS);
+  const search = useDebounced(filters.search, 300);
+  const args = useMemo(() => serverFilters({ ...filters, search }), [filters, search]);
+  const badRange = !!filters.from && !!filters.to && filters.from > filters.to;
+  const feed = useSchoolPaginatedQuery(api.audit.getAuditLogs, badRange ? "skip" : args, { initialNumItems: PAGE });
+  const exportCsv = useSchoolAction(api.audit.exportAuditLogsCsv);
+  const [exporting, setExporting] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  // Text search is matched after reading: read further pages automatically until enough matches show.
+  const autoPages = useRef(0);
+  const key = JSON.stringify(args);
+  useEffect(() => { autoPages.current = 0; }, [key]);
+  const searching = !!args.search;
+  const results = feed.results as AuditEntry[];
+  const wantMore = searching && feed.status === "CanLoadMore" && results.length < SEARCH_TARGET && autoPages.current < MAX_AUTO_PAGES;
+  const { loadMore } = feed;
+  useEffect(() => {
+    if (!wantMore) return;
+    autoPages.current += 1;
+    loadMore(PAGE);
+  }, [wantMore, loadMore, results.length]);
+
+  const onExport = async () => {
+    setExporting(true);
+    setNotice(null);
+    try {
+      const r = await exportCsv(args);
+      saveCsv(r.fileName, r.csv);
+      setNotice(r.truncated
+        ? `Exported the newest ${r.rowCount.toLocaleString()} matching entries (the export limit). Narrow the date range to export the rest.`
+        : `Exported ${r.rowCount.toLocaleString()} entr${r.rowCount === 1 ? "y" : "ies"}.`);
+    } catch (e) {
+      setNotice(errorMessage(e, "We couldn't export the audit log. Please try again."));
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div data-testid="live-audit-log">
-      <PageHeader title="Audit log" description="Who changed what, and when. Entries are written by the server with each change and cannot be edited or deleted." />
-      <Card className="mb-4 p-4">
-        <Select aria-label="Action" value={action} onChange={(e) => setAction(e.target.value)} className="w-72">
-          <option value="">All actions</option>
-          {(actions ?? []).map((a) => <option key={a} value={a}>{a}</option>)}
-        </Select>
-      </Card>
-      <Card>
-        {feed.status === "LoadingFirstPage" ? <LoadingState variant="table" /> : feed.results.length === 0 ? (
-          <EmptyState icon={<ScrollText className="h-6 w-6" />} title="No audit entries" description={action ? "Nothing recorded for this action yet." : "Changes appear here as they are made."} />
-        ) : (
-          <ul className="divide-y divide-line/60">
-            {feed.results.map((r) => (
-              <li key={r._id} className="px-5 py-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge tone="neutral" className="font-mono">{r.action}</Badge>
-                  <span className="text-[12.5px] text-ink-muted">{formatDateTime(new Date(r.at).toISOString())}</span>
-                  <span className="text-[12.5px] text-ink-muted">· {r.actor ? `${r.actor.name}${r.actor.loginId ? ` (${r.actor.loginId})` : ""}` : "System"}{r.actorRole ? ` · ${r.actorRole}` : ""}</span>
-                </div>
-                <p className="mt-1 text-sm text-ink">{r.summary}</p>
-                {r.metadata != null && (
-                  <button className="mt-1 text-[12.5px] font-medium text-lagoon hover:underline" onClick={() => setOpen(open === r._id ? null : r._id)} aria-expanded={open === r._id}>
-                    {open === r._id ? "Hide details" : "Details"}
-                  </button>
-                )}
-                {open === r._id && <pre className="mt-2 max-h-60 overflow-auto rounded-lg bg-alabaster p-3 text-[12px] text-ink-soft">{JSON.stringify(r.metadata, null, 2)}</pre>}
-              </li>
-            ))}
-          </ul>
-        )}
-        {feed.status === "CanLoadMore" && <div className="border-t border-line/60 p-3 text-center"><Button variant="outline" size="sm" onClick={() => feed.loadMore(50)}>Load more</Button></div>}
-      </Card>
+      <AuditLogView
+        filters={filters}
+        onFiltersChange={setFilters}
+        rows={badRange ? [] : feed.status === "LoadingFirstPage" ? undefined : results}
+        canLoadMore={!badRange && feed.status === "CanLoadMore"}
+        loadingMore={feed.status === "LoadingMore"}
+        onLoadMore={() => loadMore(PAGE)}
+        onExport={onExport}
+        exporting={exporting}
+        notice={notice}
+        scanning={wantMore || (searching && feed.status === "LoadingMore")}
+      />
     </div>
   );
 }

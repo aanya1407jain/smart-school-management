@@ -20,7 +20,7 @@ import { AppError, conflict, invalid, invalidRelationship } from "./core/errors"
 import { assertIsoDate, assertNonEmpty, vGender, vPreviousSchool } from "./core/validators";
 import { maybeProvider } from "./core/registry";
 import { activeRoster, fullName, teacherDisplayName } from "./model/academics";
-import { writeAudit } from "./model/audit";
+import { auditDiff, writeAudit } from "./model/audit";
 import { compareRosterEntries, renumberSections } from "./model/rollNumbers";
 import { nextAdmissionNumber } from "./model/counters";
 import { assertScholarNoAvailable, parseScholarNo, possibleDuplicates, scholarForNewStudent, syncScholarCounter } from "./model/scholarNumbers";
@@ -444,7 +444,12 @@ export const updateStudentProfile = studentsMutation({
     await writeAudit(ctx, {
       schoolId: ctx.actor.schoolId, actor: ctx.actor, action: "student.updated", entity: { table: "students", id: student._id },
       summary: `Updated ${fullName({ firstName: patch.firstName ?? student.firstName, lastName: patch.lastName ?? student.lastName })} (${student.admissionNo})`,
-      metadata: { fields: changed, renumberedSections: renumbered.length },
+      metadata: {
+        fields: changed,
+        ...auditDiff(student as unknown as Record<string, unknown>, patch as Record<string, unknown>, changed.filter((k) => k !== "lastNameKey" && k !== "scholarNoKey")),
+        scholarNo: patch.scholarNo ?? student.scholarNo ?? null,
+        renumberedSections: renumbered.length,
+      },
     });
     return { changed, renumberedSections: renumbered.length };
   },

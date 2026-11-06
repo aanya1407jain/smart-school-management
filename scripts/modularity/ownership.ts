@@ -86,7 +86,7 @@ export const FILE_RULES: readonly [RegExp, Owner][] = [
   // demo layer (D4: internal-only, never shipped): in-browser services, mock data, store, demo model and demo-only screens
   [/^src\/lib\/(services|mock-data|store)\//, "demo"],
   [/^src\/types\/domain\.ts$/, "demo"],
-  [/^src\/features\/(teachers\/(teachers-workspace|teacher-form|teacher-profile)|profile\/profile-page|attendance\/my-attendance|students\/(students-list|demo-student-profile)|academics\/academics-workspace-demo|homework\/(my-homework-demo|homework-manager)|auth\/demo-accounts|examinations\/(exams-list|exam-detail|marks-entry|teacher-exams|my-results|result-sheet|demo-result-card)|fees\/my-fees|timetable\/(timetable-pages|week-grid))\.tsx?$/, "demo"],
+  [/^src\/features\/(teachers\/(teachers-workspace|teacher-form|teacher-profile)|profile\/profile-page|attendance\/my-attendance|students\/(students-list|demo-student-profile)|academics\/academics-workspace-demo|homework\/(my-homework-demo|homework-manager)|auth\/demo-accounts|examinations\/(exams-list|exam-detail|marks-entry|teacher-exams|my-results|result-sheet|demo-result-card)|fees\/my-fees|audit\/audit-log-demo|timetable\/(timetable-pages|week-grid))\.tsx?$/, "demo"],
   [/^src\/lib\/(convex|hooks|utils|constants|permissions|demo|contributions)\//, "core"],
   [/^src\/types\/core\.ts$/, "core"],
   [/^src\/types\/students\.ts$/, "students"],

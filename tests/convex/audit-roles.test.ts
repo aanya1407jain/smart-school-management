@@ -122,6 +122,7 @@ describe("audit: actor role vs target role", () => {
     const rows = await t.run(async (ctx) => (await ctx.db.query("auditLogs").collect()).filter((a) => a.entity.id === r.membershipId));
     expect(rows.map((e) => [e.action, e.actorRole, (e.metadata as { targetRole?: string }).targetRole])).toEqual([
       ["account.created", "admin", "student"],
+      ["credential.otp_requested", "admin", "student"], // the emailed code is audited too
       ["PASSWORD_OVERWRITE", "admin", "student"],
       ["account.disabled", "admin", "student"],
       ["membership.access_changed", "admin", "student"],

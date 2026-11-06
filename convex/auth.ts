@@ -34,6 +34,8 @@ import type { Id } from "./_generated/dataModel";
 import { AppError, invalid } from "./core/errors";
 import { canonicalLoginId } from "./model/loginIds";
 import { activatePendingAccount, assertSessionAllowed } from "./model/accounts";
+import { activeMembershipsOf } from "./core/actor";
+import { writeAudit } from "./model/audit";
 
 /** Password policy for administrator-set passwords (credentials.verifyOtpAndSetPassword). */
 export function validatePassword(password: string) {
@@ -103,11 +105,21 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
     /**
      * Gate every new session (runs after the password was verified):
      * disabled users and users without an active membership in an active
-     * school get no session.
+     * school get no session. An allowed sign-in is audited ("auth.signed_in")
+     * in every school the person has active access to. (Token refreshes do
+     * not create sessions, so they are not logged.)
      */
     async beforeSessionCreation(rawCtx, { userId }) {
       const ctx = rawCtx as unknown as MutationCtx;
       await assertSessionAllowed(ctx, userId as Id<"users">);
+      for (const { membership: m } of await activeMembershipsOf(ctx, userId as Id<"users">)) {
+        await writeAudit(ctx, {
+          schoolId: m.schoolId, actor: { userId: m.userId!, role: m.role, displayName: m.displayName },
+          action: "auth.signed_in", entity: { table: "schoolMemberships", id: m._id },
+          summary: `${m.displayName}${m.loginId ? ` (${m.loginId})` : ""} signed in`,
+          metadata: { ...(m.loginId ? { targetLoginId: m.loginId } : {}), method: "password" },
+        });
+      }
     },
   },
 });

@@ -25,6 +25,7 @@ import { MyResults } from "@/features/examinations/my-results";
 import { MyFees } from "@/features/fees/my-fees";
 import { HomeworkManager, TeacherHomeworkDetail } from "@/features/homework/homework-manager";
 import { StudentTimetable, TeacherTimetable } from "@/features/timetable/timetable-pages";
+import { DemoAuditLog } from "@/features/audit/audit-log-demo";
 
 function DemoStudentEditForm({ studentId }: { studentId: string }) {
   return <StudentForm studentId={studentId} demoEdit={{ load: () => services.students.getEditable(studentId), save: (v) => services.students.update(studentId, v) }} />;
@@ -38,6 +39,7 @@ export const DEMO_SLOTS: Record<string, ComponentType<any>> = {
   "profile.page": ProfilePage,
   "attendance.myAttendance": MyAttendance,
   "students.edit": DemoStudentEditForm,
+  "audit.log": DemoAuditLog,
   "students.profile": DemoStudentProfile,
   "teacher.myClasses": MyClasses,
   "teacher.classDetail": TeacherClassDetail,
