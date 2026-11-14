@@ -1,0 +1,9 @@
+.env*
+!.env.example
+.revamp-screens
+.convex
+.next
+node_modules
+NOTES.md
+.DS_Store
+tests/fixtures
