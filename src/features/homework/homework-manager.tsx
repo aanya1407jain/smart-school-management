@@ -297,7 +297,7 @@ export function SubmissionsPanel({ homeworkId }: { homeworkId: string }) {
         return (
           <div className="space-y-4">
             <div>
-              <p className="text-[12px] font-semibold uppercase tracking-wide text-plum">{d.homework.subject} · Class {d.homework.sectionLabel}</p>
+              <p className="text-[12.5px] font-medium text-brand-700">{d.homework.subject} · Class {d.homework.sectionLabel}</p>
               <h2 className="text-lg font-semibold text-sapphire">{d.homework.title}</h2>
               <p className="mt-1 text-sm text-ink-muted">{d.homework.description}</p>
               <p className="mt-2 text-[13px] text-ink-soft">Due {formatDate(d.homework.dueDate)} · {submitted}/{d.rows.length} submitted</p>

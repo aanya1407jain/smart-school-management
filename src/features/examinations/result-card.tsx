@@ -12,7 +12,7 @@ export function ResultSummary({ term, examName, percentage, grade, rank, failed,
     <div className="relative flex items-center gap-4 overflow-hidden border-b border-line/60 bg-bg px-5 py-4">
       <ProgressRing value={percentage} size={72} stroke={7} tone={failed ? "plum" : "teal"} />
       <div className="relative min-w-0 flex-1">
-        {term && <p className="text-[12px] font-semibold uppercase tracking-wide text-plum">{term}</p>}
+        {term && <p className="text-[12.5px] font-medium text-brand-700">{term}</p>}
         <h3 className="truncate text-base font-semibold text-sapphire">{examName}</h3>
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
           {grade && <Badge tone="lavender"><Award className="h-3 w-3" aria-hidden />Grade {grade}</Badge>}

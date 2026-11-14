@@ -72,13 +72,13 @@ function Kpi({ icon: Icon, label, value, caption, progress = null, onClick }: { 
   const body = (
     <>
       <span className="flex items-center gap-2 text-[12.5px] font-medium text-ink-muted">
-        <Icon className="h-4 w-4 text-emerald-700" aria-hidden /> {label}
+        <Icon className="h-4 w-4 text-pd-ok" aria-hidden /> {label}
       </span>
       <span className="figures mt-1.5 block text-2xl font-semibold leading-none tracking-tight text-ink">{value}</span>
       <span className="mt-2 flex items-center gap-2">
         {progress !== null && (
           <span className="h-1 w-12 shrink-0 overflow-hidden rounded-full bg-line" aria-hidden>
-            <span className={cn("block h-full rounded-full", progress >= 100 ? "bg-emerald-600" : "bg-amber-500")} style={{ width: `${Math.min(100, progress)}%` }} />
+            <span className={cn("block h-full rounded-full", progress >= 100 ? "bg-mint" : "bg-amber-500")} style={{ width: `${Math.min(100, progress)}%` }} />
           </span>
         )}
         <span className="truncate text-[12px] text-ink-muted">{caption}</span>
@@ -87,6 +87,6 @@ function Kpi({ icon: Icon, label, value, caption, progress = null, onClick }: { 
   );
   const cls = "block min-w-0 border-line px-5 py-4 text-left [&:nth-child(n+2)]:border-l max-lg:[&:nth-child(3)]:border-l-0 max-lg:[&:nth-child(n+3)]:border-t";
   return onClick ? (
-    <button type="button" onClick={onClick} className={cn(cls, "transition-colors hover:bg-emerald-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-600/40")}>{body}</button>
+    <button type="button" onClick={onClick} className={cn(cls, "transition-colors hover:bg-pd-ok-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500/40")}>{body}</button>
   ) : <div className={cls}>{body}</div>;
 }

@@ -95,7 +95,7 @@ export function StudentLedger({ studentId }: { studentId: string }) {
                 <div className="flex items-center gap-4">
                   <Avatar name={l.student.name} size="lg" />
                   <div>
-                    <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-plum">Fee ledger · {l.yearLabel ?? "2026–27"}</p>
+                    <p className="text-[12.5px] font-medium text-brand-700">Fee ledger · {l.yearLabel ?? "2026–27"}</p>
                     <h1 className="text-2xl font-semibold text-sapphire">{l.student.name}</h1>
                     <p className="text-sm text-ink-muted"><span className="font-mono">{l.student.admissionNo}</span> · {l.student.classLabel} · <Link href={`/admin/students/${l.student.id}`} className="text-lagoon hover:underline">Profile</Link></p>
                   </div>

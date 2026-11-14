@@ -17,8 +17,8 @@ export function ClassFilter({ classes, value, onChange }: { classes: { id: strin
           aria-pressed={value === c.id}
           onClick={() => onChange(c.id)}
           className={cn(
-            "h-8 shrink-0 rounded-lg border px-3 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/40",
-            value === c.id ? "border-emerald-600 bg-emerald-600 text-white" : "border-line bg-white text-ink-soft hover:border-emerald-300 hover:text-emerald-800",
+            "h-8 shrink-0 rounded-lg border px-3 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40",
+            value === c.id ? "border-pd-ok/40 bg-mint text-white" : "border-line bg-white text-ink-soft hover:border-pd-ok/40 hover:text-pd-ok",
           )}
         >
           {c.name}
@@ -34,7 +34,7 @@ export function KindBadge({ elective, stream, label }: { elective: boolean; stre
     <span className="inline-flex flex-wrap items-center gap-1">
       <span className={cn(
         "inline-flex items-center rounded-full px-2 py-0.5 text-[11.5px] font-medium ring-1 ring-inset",
-        elective ? "bg-amber-50 text-amber-800 ring-amber-500/25" : "bg-emerald-50 text-emerald-800 ring-emerald-600/20",
+        elective ? "bg-amber-50 text-amber-800 ring-amber-500/25" : "bg-pd-ok-soft text-pd-ok ring-pd-ok/20",
       )}>
         {label ?? (elective ? "Elective" : "Core")}
       </span>

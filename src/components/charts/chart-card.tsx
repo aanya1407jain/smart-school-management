@@ -22,11 +22,11 @@ export const axisProps = {
 export const gridProps = { vertical: false, stroke: CHART_GRID, strokeDasharray: CHART_GRID_DASH } as const;
 
 /** Soft column highlight behind the hovered bar group. */
-export const barCursor = { fill: "rgb(15 118 110 / 0.06)", radius: 6 } as const;
+export const barCursor = { fill: "rgb(17 19 24 / 0.04)", radius: 6 } as const;
 
 /** Flat, slightly rounded bars in the role's own colour (series stay distinguishable); a hovered bar dims a little. */
 export function barProps(role: keyof typeof CHART_FILL, { horizontal = false, top = true }: { horizontal?: boolean; top?: boolean } = {}) {
-  const r = 4;
+  const r = 6;
   return {
     fill: CHART_FILL[role].solid,
     radius: (top ? (horizontal ? [0, r, r, 0] : [r, r, 0, 0]) : [0, 0, 0, 0]) as [number, number, number, number],

@@ -364,7 +364,7 @@ function SubjectsTab({ d, autoOpen = false }: { d: Overview; autoOpen?: boolean 
           <fieldset>
             <div className="mb-2 flex items-center justify-between">
               <legend className="text-[13px] font-medium text-ink-soft">Applicable classes</legend>
-              <button type="button" className="text-[12.5px] font-semibold text-emerald-800 hover:underline" onClick={() => setForm({ ...form, classIds: allChecked ? [] : d.classes.map((c) => c.id) })}>{allChecked ? "Clear" : "Select all"}</button>
+              <button type="button" className="text-[12.5px] font-semibold text-pd-ok hover:underline" onClick={() => setForm({ ...form, classIds: allChecked ? [] : d.classes.map((c) => c.id) })}>{allChecked ? "Clear" : "Select all"}</button>
             </div>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">{d.classes.map((c) => <Checkbox key={c.id} label={c.name} checked={form.classIds.includes(c.id)} onChange={(e) => setForm({ ...form, classIds: e.target.checked ? [...form.classIds, c.id] : form.classIds.filter((x) => x !== c.id) })} />)}</div>
           </fieldset>

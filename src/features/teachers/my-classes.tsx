@@ -42,7 +42,7 @@ export function TeacherClassDetail({ sectionId }: { sectionId: string }) {
               <GlassCard className="p-6">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                   <div>
-                    <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-plum">{c.isClassTeacher ? "You are the class teacher" : `Class teacher: ${c.classTeacher ?? "—"}`}</p>
+                    <p className="text-[12.5px] font-medium text-brand-700">{c.isClassTeacher ? "You are the class teacher" : `Class teacher: ${c.classTeacher ?? "—"}`}</p>
                     <h1 className="text-[28px] font-semibold text-sapphire">Class {c.label}</h1>
                     <p className="text-sm text-ink-muted">{c.longLabel} · {c.room} · {c.roster.length} students</p>
                   </div>

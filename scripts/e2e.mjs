@@ -1,4 +1,4 @@
-// Smart School Management System — end-to-end checks (demo tenant: Aster Academy) for auth, route guards and the six cross-module workflows.
+// Atrium — end-to-end checks (demo tenant: Aster Academy) for auth, route guards and the six cross-module workflows.
 // Sign-in is real Convex Auth, so this needs a Convex deployment seeded with the demo accounts
 // (`npm run seed:demo`) and a build with NEXT_PUBLIC_CONVEX_URL pointing at it:
 //   npm run build && npm start   (in another terminal)  then  npx playwright install chromium && npm run test:e2e
@@ -74,13 +74,14 @@ async function serverAnswer(ctx, path) {
   const loginPage = await serverAnswer(ctx, "/login");
   check("Login page stays public", loginPage.status === 200, String(loginPage.status));
   await page.goto(BASE + "/");
-  check("Splash shows demo school (tenant) name", await waitText(page, /Aster Academy/i));
-  check("Splash shows product name", await waitText(page, /Smart School Management System/i));
-  check("Browser title is the product name", /Smart School Management System/.test(await page.title()) && !/Aster/.test(await page.title()));
+  check("Landing shows product name", await waitText(page, /Run your whole school/i));
+  check("Browser title is the product name", /Atrium/.test(await page.title()) && !/Aster/.test(await page.title()));
   const hasNav = await page.getByRole("navigation", { name: /main navigation/i }).count();
-  check("Splash has no dashboard/sidebar", hasNav === 0);
+  check("Landing has no dashboard/sidebar", hasNav === 0);
+  await page.getByRole("link", { name: /^sign in$/i }).first().click();
   await page.waitForURL(/\/login/, { timeout: 8000 });
-  check("Login appears after splash", page.url().endsWith("/login"));
+  check("Sign in leads to login", page.url().endsWith("/login"));
+  check("Login shows demo school (tenant) name", await waitText(page, /Aster Academy/i));
 
   await page.getByLabel(/^login id/i).waitFor();
   check("Login form has no role selector (the server decides the portal)", (await page.getByRole("radio").count()) === 0 && (await page.getByLabel(/^login id/i).count()) === 1);
@@ -365,7 +366,7 @@ async function serverAnswer(ctx, path) {
   check("W2 Admin creates & assigns fee structure", await waitText(page, /Assigned to \d+ students/));
   // Dynamically resolve student ID from balances tab
   await page.goto(BASE + "/admin/fees?tab=balances");
-  await page.getByPlaceholder(/search student/i).fill("Aarav Sharma");
+  await page.getByLabel("Search student", { exact: true }).fill("Aarav Sharma");
   const aaravRow = page.locator("tr", { hasText: "Aarav Sharma" });
   await aaravRow.waitFor();
   await aaravRow.click();
@@ -397,10 +398,13 @@ async function serverAnswer(ctx, path) {
   await page.goto(BASE + "/teacher/homework?action=new");
   const dlg = page.getByRole("dialog");
   await dlg.getByLabel(/^title/i).fill("Probability — practice set A");
-  await choose(dlg.getByLabel(/class & subject/i), { label: "Class 10-A · Mathematics (8 students)" });
+  // The form picks a subject, then the sections to assign it to (all of them are pre-selected).
+  await choose(dlg.getByLabel(/^subject/i), { label: "Mathematics" });
+  await dlg.getByRole("button", { name: /^clear$/i }).click();
+  await dlg.getByLabel(/^Class 10-A \(/).check();
   await dlg.getByLabel(/instructions/i).fill("Solve all 12 probability questions from the practice set.");
   await page.getByRole("button", { name: /assign homework/i }).click();
-  check("W4 Teacher creates homework for 10-A", await waitText(page, /Visible to Class 10-A only/));
+  check("W4 Teacher creates homework for 10-A", await waitText(page, /Assigned to Class 10-A ·/));
   await logout(page);
   await login(page, "STU-2026-00001", "Student@123");
   await page.goto(BASE + "/student/homework");

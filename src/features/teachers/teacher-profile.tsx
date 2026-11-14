@@ -75,7 +75,7 @@ function Body({ p, self, periods }: { p: TeacherProfile; self?: boolean; periods
                 const href = classHref(a.sectionId);
                 const body = (
                   <Card className={cn("p-4", href && "transition-all hover:shadow-lift")}>
-                    <p className="text-[12px] font-semibold uppercase tracking-wide text-plum">{a.subject}</p>
+                    <p className="text-[12.5px] font-medium text-brand-700">{a.subject}</p>
                     <p className="mt-1 text-lg font-semibold text-sapphire">Class {a.sectionLabel}</p>
                     <p className="text-[13px] text-ink-muted">{a.students} students</p>
                   </Card>

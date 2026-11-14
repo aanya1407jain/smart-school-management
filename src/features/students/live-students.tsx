@@ -11,12 +11,14 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { GraduationCap, Pencil, UserPlus, Users } from "lucide-react";
+import { GraduationCap, LayoutGrid, Pencil, Rows3, UserPlus, Users } from "lucide-react";
+import { cn } from "@/lib/utils/cn";
+import { buttonClass } from "@/components/ui/button";
 import { motion, useReducedMotion } from "framer-motion";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { useSchoolMutation, useSchoolPaginatedQuery, useSchoolQuery } from "@/lib/convex/membership";
-import { Avatar, BadgeChip, Button, Card, EmptyState, FormField, Input, LinkButton, LoadingState, PageHeader, SearchInput, Select, StatCard, Tabs, TabsContent, TabsList, Textarea, useToast } from "@/components/ui";
+import { Avatar, Button, Card, EmptyState, FormField, Input, LinkButton, LoadingState, PageHeader, SearchInput, Select, StatCard, Tabs, TabsContent, TabsList, Textarea, useToast } from "@/components/ui";
 import { useSession } from "@/features/auth/session-provider";
 import { errorMessage } from "@/lib/convex/errors";
 import { AdmissionRegisterPanel } from "./admission-register";
@@ -28,6 +30,10 @@ export function LiveStudentsList() {
   const sections = useSchoolQuery(api.academics.listSections, {});
   const [sectionId, setSectionId] = useState("");
   const [search, setSearch] = useState("");
+  // Card grid by default; the dense list is one click away (remembered on this device).
+  const [view, setViewState] = useState<"grid" | "list">("grid");
+  useEffect(() => { try { const v = window.localStorage.getItem("ssms-students-view"); if (v === "list" || v === "grid") setViewState(v); } catch { /* ignore */ } }, []);
+  const setView = (v: "grid" | "list") => { setViewState(v); try { window.localStorage.setItem("ssms-students-view", v); } catch { /* ignore */ } };
   const [debounced, setDebounced] = useState("");
   useEffect(() => { const t = setTimeout(() => setDebounced(search.trim()), 250); return () => clearTimeout(t); }, [search]);
   const list = useSchoolPaginatedQuery(
@@ -48,52 +54,78 @@ export function LiveStudentsList() {
           ]}
         />
         <TabsContent value="roster">
-          <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3" data-testid="student-totals">
-            <StatCard label={counts ? `Enrolled in ${counts.academicYear.name}` : "Enrolled this year"} value={<span data-testid="students-enrolled">{counts?.enrolled ?? "—"}</span>} icon={<GraduationCap className="h-5 w-5" />} hint="Distinct students with an active class enrollment" />
-            <StatCard label="Active student records" value={<span data-testid="students-active-records">{counts?.activeRecords ?? "—"}</span>} icon={<Users className="h-5 w-5" />} tone="sapphire" hint={counts ? `${counts.notEnrolled} not yet enrolled in a class` : undefined} />
+          <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-[repeat(auto-fit,minmax(240px,1fr))]" data-testid="student-totals">
+            <StatCard label={counts ? `Enrolled in ${counts.academicYear.name}` : "Enrolled this year"} value={<span data-testid="students-enrolled">{counts?.enrolled ?? "—"}</span>} accent="students" icon={<GraduationCap className="h-5 w-5" />} hint="With an active class" />
+            <StatCard label="Active student records" value={<span data-testid="students-active-records">{counts?.activeRecords ?? "—"}</span>} accent="classes" icon={<Users className="h-5 w-5" />} tone="sapphire" hint={counts ? `${counts.notEnrolled} not in a class yet` : undefined} />
             {counts?.section && <StatCard label={`Enrolled in ${counts.section.label}`} value={<span data-testid="students-section">{counts.section.enrolled}</span>} icon={<GraduationCap className="h-5 w-5" />} tone="lavender" />}
           </div>
-          <Card className="mb-4 flex flex-col gap-3 p-4 sm:flex-row">
-            <Select aria-label="Section" value={sectionId} onChange={(e) => setSectionId(e.target.value)} className="w-56">
+          <div className="mb-4 flex flex-col gap-2.5 sm:flex-row sm:items-center">
+            <SearchInput value={search} onChange={setSearch} placeholder="Search name or scholar no." label="Filter students by name or scholar no." className="sm:w-80" />
+            <Select aria-label="Section" value={sectionId} onChange={(e) => setSectionId(e.target.value)} className="sm:w-52">
               <option value="">All sections</option>
               {(sections ?? []).map((s) => <option key={s._id} value={s._id}>{s.displayName}</option>)}
             </Select>
-            <SearchInput value={search} onChange={setSearch} placeholder="Search name or scholar no." label="Filter students by name or scholar no." className="sm:w-72" />
-          </Card>
-          <Card className="p-2.5 sm:p-3">
+            <div role="radiogroup" aria-label="Layout" className="flex shrink-0 gap-0.5 rounded-[11px] bg-ink/[0.05] p-0.5 sm:ml-auto">
+              {(["grid", "list"] as const).map((v) => (
+                <button key={v} type="button" role="radio" aria-checked={view === v} onClick={() => setView(v)} aria-label={v === "grid" ? "Cards" : "List"} className={cn("grid h-8 w-9 place-items-center rounded-[9px] text-ink-muted transition-[background-color,color] duration-150", view === v && "bg-surface text-ink shadow-card")}>
+                  {v === "grid" ? <LayoutGrid className="h-4 w-4" aria-hidden /> : <Rows3 className="h-4 w-4" aria-hidden />}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
             {list.status === "LoadingFirstPage" ? (
-              <LoadingState variant="table" />
+              <Card><LoadingState variant="table" /></Card>
             ) : list.results.length === 0 ? (
-              <EmptyState
+              <Card><EmptyState
                 icon={<GraduationCap className="h-6 w-6" />}
                 title="No students"
                 description={debounced ? "No students match this search on current page." : sectionId ? "No active students in this section." : "Admit students or import them in Accounts & Import."}
-              />
-            ) : (
-              <motion.ul className="space-y-1.5" data-testid="live-students" initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: reduceMotion ? 0 : 0.04 } } }}>
+              /></Card>
+            ) : view === "grid" ? (
+              <motion.ul className="grid grid-cols-1 gap-3 min-[480px]:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4" data-testid="live-students" initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: reduceMotion ? 0 : 0.025 } } }}>
                 {list.results.map((p) => (
-                  <motion.li
-                    key={p.personId}
-                    variants={{ hidden: reduceMotion ? { opacity: 0 } : { opacity: 0, y: 8 }, show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 420, damping: 32 } } }}
-                    className="group flex items-center gap-3 rounded-xl border border-transparent bg-white px-3.5 py-2.5 transition-all duration-200 ease-out hover:scale-[1.003] hover:border-teal/20 hover:bg-teal-soft/40 hover:shadow-ambient-lg"
-                  >
-                    {sectionId && <BadgeChip tone="sapphire" className="min-w-[2.5rem] justify-center" title="Roll number"><span className="sr-only">Roll </span>{p.rollNo ?? "—"}</BadgeChip>}
-                    <Avatar name={p.name} size="md" className="transition-transform duration-200 group-hover:scale-105" />
-                    <Link href={`/admin/students/${p.personId}`} className="min-w-0 flex-1 rounded-lg focus-visible:outline-none focus-visible:shadow-focus">
-                      <span className="block truncate font-semibold text-ink transition-colors group-hover:text-lagoon">{p.name}</span>
-                      <span className="mt-1 flex flex-wrap items-center gap-1.5 text-[12px] text-ink-muted">
-                        <BadgeChip title="Scholar number"><span className="sr-only">Scholar No: </span>{p.number}</BadgeChip>
-                        <span className="rounded-full bg-alabaster px-2 py-0.5 font-medium text-ink-soft ring-1 ring-inset ring-line/80">{p.detail}</span>
-                      </span>
-                    </Link>
-                    {canWrite && (
-                      <LinkButton href={`/admin/students/${p.personId}/edit`} variant="ghost" size="sm" className="opacity-80 group-hover:opacity-100">
-                        <Pencil className="h-3.5 w-3.5" aria-hidden /> Edit
-                      </LinkButton>
-                    )}
+                  <motion.li key={p.personId} variants={{ hidden: reduceMotion ? { opacity: 0 } : { opacity: 0, y: 10, scale: 0.98 }, show: { opacity: 1, y: 0, scale: 1, transition: { type: "spring", stiffness: 420, damping: 32 } } }} className="group lift relative flex flex-col rounded-[20px] bg-surface p-4 shadow-card">
+                    <div className="flex items-start gap-3">
+                      <Avatar name={p.name} size="lg" className="transition-transform duration-200 group-hover:-rotate-6 group-hover:scale-105" />
+                      <div className="min-w-0 flex-1 pt-0.5">
+                        <Link href={`/admin/students/${p.personId}`} className="block truncate text-[15px] font-semibold tracking-[-0.01em] text-ink after:absolute after:inset-0 after:rounded-[20px] focus-visible:outline-none">{p.name}</Link>
+                        <p className={cn("mono-id mt-0.5 truncate", /^no /i.test(p.number) ? "text-ink-faint" : "text-ink-muted")}>{p.number}</p>
+                      </div>
+                      {sectionId && <span className="figures rounded-lg bg-bg px-2 py-1 text-[12px] font-semibold text-ink-soft" title="Roll number">#{p.rollNo ?? "—"}</span>}
+                    </div>
+                    <div className="mt-4 flex items-center justify-between gap-2">
+                      <span className={cn("rounded-full px-2.5 py-1 text-[12px] font-medium", classTone(p.detail))}>{p.detail}</span>
+                      {canWrite && (
+                        <Link href={`/admin/students/${p.personId}/edit`} className="relative z-10 grid h-8 w-8 place-items-center rounded-lg text-ink-muted opacity-0 transition-[opacity,background-color] duration-150 hover:bg-bg hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 max-md:opacity-100" aria-label={`Edit ${p.name}`}>
+                          <Pencil className="h-3.5 w-3.5" aria-hidden />
+                        </Link>
+                      )}
+                    </div>
                   </motion.li>
                 ))}
               </motion.ul>
+            ) : (
+              <Card className="p-2"><motion.ul className="space-y-0.5" data-testid="live-students" initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: reduceMotion ? 0 : 0.02 } } }}>
+                {list.results.map((p) => (
+                  <motion.li
+                    key={p.personId}
+                    variants={{ hidden: reduceMotion ? { opacity: 0 } : { opacity: 0, y: 6 }, show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 420, damping: 32 } } }}
+                    className="group flex items-center gap-3 rounded-2xl px-3 py-2 transition-colors duration-150 hover:bg-bg/80"
+                  >
+                    {sectionId && <span className="figures w-9 text-center text-[12px] font-semibold text-ink-muted" title="Roll number">{p.rollNo ?? "—"}</span>}
+                    <Avatar name={p.name} size="sm" />
+                    <Link href={`/admin/students/${p.personId}`} className="min-w-0 flex-1 truncate rounded-lg font-medium text-ink focus-visible:outline-none focus-visible:shadow-focus">{p.name}</Link>
+                    <span className="mono-id hidden w-40 truncate text-ink-muted sm:block">{p.number}</span>
+                    <span className={cn("hidden rounded-full px-2.5 py-0.5 text-[12px] font-medium md:inline-block", classTone(p.detail))}>{p.detail}</span>
+                    {canWrite && (
+                      <Link href={`/admin/students/${p.personId}/edit`} className={buttonClass("ghost", "icon-sm", "opacity-60 group-hover:opacity-100")} aria-label={`Edit ${p.name}`}>
+                        <Pencil className="h-3.5 w-3.5" aria-hidden />
+                      </Link>
+                    )}
+                  </motion.li>
+                ))}
+              </motion.ul></Card>
             )}
 
             {/* BUG-002 Fix: Load more button sits outside the results empty-check */}
@@ -104,7 +136,7 @@ export function LiveStudentsList() {
                 </Button>
               </div>
             )}
-          </Card>
+          </div>
         </TabsContent>
         <TabsContent value="register">
           <AdmissionRegisterPanel />
@@ -214,4 +246,13 @@ export function LiveStudentEdit({ studentId }: { studentId: string }) {
       </Card>
     </div>
   );
+}
+/** A colour per grade for class chips ("Class 10-B" → green), so classes are recognisable at a glance. */
+function classTone(detail: string): string {
+  const g = Number(detail.match(/(\d{1,2})/)?.[1] ?? NaN);
+  const tones: Record<number, string> = {
+    6: "bg-[#FCE6F1] text-[#BE185D]", 7: "bg-[#FFEBD9] text-[#C2410C]", 8: "bg-[#EEE9FF] text-[#6D4AE0]", 9: "bg-[#DFF1FD] text-[#0369A1]",
+    10: "bg-[#E1F5E7] text-[#15803D]", 11: "bg-[#FFF0D3] text-[#B26A00]", 12: "bg-[#E7E8FF] text-[#4338CA]",
+  };
+  return tones[g] ?? "bg-bg text-ink-soft";
 }

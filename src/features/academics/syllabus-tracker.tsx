@@ -82,7 +82,7 @@ export function SyllabusProgressTracker({
       {/* Header + filters */}
       <div className="flex flex-col gap-3 border-b border-line p-5 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex min-w-0 items-start gap-3">
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-emerald-50 text-emerald-700" aria-hidden><BookOpen className="h-[18px] w-[18px]" /></span>
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-pd-ok-soft text-pd-ok" aria-hidden><BookOpen className="h-[18px] w-[18px]" /></span>
           <div className="min-w-0">
             <h2 id="pacing-title" className="text-[15px] font-semibold text-ink">Curriculum progress &amp; pacing</h2>
             <p className="text-[13px] text-ink-muted">{readOnly ? "Chapter coverage against each subject's planned pace." : "Log chapters as you finish them."}</p>
@@ -194,7 +194,7 @@ function Summary({ label, value, hint, tone }: { label: string; value: string; h
   return (
     <div className="bg-white px-5 py-3">
       <p className="truncate text-[12px] font-medium text-ink-muted">{label}</p>
-      <p className={cn("figures text-lg font-semibold leading-snug", tone === "ok" ? "text-emerald-700" : tone === "warn" ? "text-amber-700" : "text-ink")}>{value}</p>
+      <p className={cn("figures text-lg font-semibold leading-snug", tone === "ok" ? "text-pd-ok" : tone === "warn" ? "text-amber-700" : "text-ink")}>{value}</p>
       <p className="truncate text-[11.5px] text-ink-muted">{hint}</p>
     </div>
   );
@@ -206,7 +206,7 @@ function ProgressCell({ sub, pct, expected, status }: { sub: SyllabusSubject; pc
   return (
     <div className="min-w-[9rem]">
       <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-line" role="progressbar" aria-valuenow={rounded} aria-valuemin={0} aria-valuemax={100} aria-label={`${sub.subject} chapters completed`}>
-        <div className={cn("h-full rounded-full", status === "behind" ? "bg-amber-500" : "bg-emerald-600")} style={{ width: `${rounded}%` }} />
+        <div className={cn("h-full rounded-full", status === "behind" ? "bg-amber-500" : "bg-mint")} style={{ width: `${rounded}%` }} />
         {status !== "completed" && <span aria-hidden title="Expected by today" className="absolute inset-y-0 w-0.5 bg-ink/50" style={{ left: `${Math.min(99.5, expected)}%` }} />}
       </div>
       <p className="figures mt-1 text-[12px] text-ink-muted"><span className="font-semibold text-ink">{sub.completedChapters}/{sub.totalChapters}</span> chapters · {rounded}%</p>
@@ -219,12 +219,12 @@ function RowActions({ readOnly, done, isOpen, id, onAdd, onToggle, align = "end"
     <div className={cn("flex items-center gap-1", align === "end" ? "justify-end" : "justify-start")}>
       {!readOnly && (
         <button type="button" disabled={done} onClick={onAdd}
-          className="inline-flex h-8 items-center gap-1 rounded-lg border border-line px-2 text-[12px] font-semibold text-emerald-800 transition-colors hover:border-emerald-300 hover:bg-emerald-50 disabled:opacity-40">
+          className="inline-flex h-8 items-center gap-1 rounded-lg border border-line px-2 text-[12px] font-semibold text-pd-ok transition-colors hover:border-pd-ok/40 hover:bg-pd-ok-soft disabled:opacity-40">
           <Plus className="h-3 w-3" aria-hidden /> Chapter
         </button>
       )}
       <button type="button" aria-expanded={isOpen} aria-controls={`pacing-log-${id}`} onClick={onToggle}
-        className="inline-flex h-8 items-center gap-0.5 whitespace-nowrap rounded-lg px-2 text-[12.5px] font-semibold text-emerald-800 transition-colors hover:bg-emerald-50 focus-visible:outline-none focus-visible:shadow-focus">
+        className="inline-flex h-8 items-center gap-0.5 whitespace-nowrap rounded-lg px-2 text-[12.5px] font-semibold text-pd-ok transition-colors hover:bg-pd-ok-soft focus-visible:outline-none focus-visible:shadow-focus">
         Pacing log <ChevronDown className={cn("h-3.5 w-3.5 transition-transform duration-200", isOpen && "rotate-180")} aria-hidden />
       </button>
     </div>
@@ -236,7 +236,7 @@ function PacingLog({ sub, pct, expected }: { sub: SyllabusSubject; pct: number; 
   return (
     <dl className="figures grid grid-cols-2 gap-3 rounded-lg border border-line bg-white p-3 text-[12.5px] sm:grid-cols-4">
       <div><dt className="text-ink-muted">Expected by today</dt><dd className="font-semibold text-ink">{Math.round(expected)}%</dd></div>
-      <div><dt className="text-ink-muted">Gap</dt><dd className={cn("font-semibold", gap < -PACING_TOLERANCE ? "text-amber-700" : "text-emerald-700")}>{gap > 0 ? "+" : ""}{gap} pts</dd></div>
+      <div><dt className="text-ink-muted">Gap</dt><dd className={cn("font-semibold", gap < -PACING_TOLERANCE ? "text-amber-700" : "text-pd-ok")}>{gap > 0 ? "+" : ""}{gap} pts</dd></div>
       <div><dt className="text-ink-muted">Chapters left</dt><dd className="font-semibold text-ink">{sub.totalChapters - sub.completedChapters}</dd></div>
       <div><dt className="text-ink-muted">Target date</dt><dd className="font-semibold text-ink">{formatDate(sub.targetDate)}</dd></div>
     </dl>
@@ -245,10 +245,10 @@ function PacingLog({ sub, pct, expected }: { sub: SyllabusSubject; pct: number; 
 
 function PacingBadge({ status }: { status: PacingStatus }) {
   if (status === "completed") {
-    return <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-emerald-50 px-2 py-0.5 text-[12px] font-medium text-emerald-800 ring-1 ring-inset ring-emerald-600/20"><CheckCircle2 className="h-3 w-3" aria-hidden /> Completed</span>;
+    return <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-pd-ok-soft px-2 py-0.5 text-[12px] font-medium text-pd-ok ring-1 ring-inset ring-pd-ok/20"><CheckCircle2 className="h-3 w-3" aria-hidden /> Completed</span>;
   }
   if (status === "behind") {
     return <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-amber-50 px-2 py-0.5 text-[12px] font-medium text-amber-800 ring-1 ring-inset ring-amber-500/30"><span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden /> Behind pacing</span>;
   }
-  return <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-emerald-50/70 px-2 py-0.5 text-[12px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-600/15"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden /> On schedule</span>;
+  return <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-pd-ok-soft px-2 py-0.5 text-[12px] font-medium text-pd-ok ring-1 ring-inset ring-pd-ok/20"><span className="h-1.5 w-1.5 rounded-full bg-pd-ok-soft0" aria-hidden /> On schedule</span>;
 }

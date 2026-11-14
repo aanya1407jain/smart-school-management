@@ -1,10 +1,13 @@
 "use client";
 import Link from "next/link";
-import { ArrowRight, Award, BookOpenCheck, CalendarCheck2, CalendarClock, ClipboardList, Clock, Megaphone, Wallet } from "lucide-react";
+import { ArrowRight, ArrowUpRight, Award, BookOpenCheck, CalendarCheck2, CalendarClock, ClipboardList, Clock, Megaphone, Wallet } from "lucide-react";
 import { services } from "@/lib/services";
 import { useQuery } from "@/lib/hooks/use-query";
 import { useActiveStudentId, useSession } from "@/features/auth/session-provider";
 import { Badge, Card, CardHeader, EmptyState, GlassCard, ProgressRing, QueryView, StatusBadge, Avatar } from "@/components/ui";
+import { AskHero } from "@/components/command/ask-hero";
+import { AppIcon, IconTile, type AppIconName } from "@/components/icons/app-icon";
+import { subjectTone } from "@/lib/utils/subject-tone";
 import { formatClock, formatDate, formatLongDate, formatShortDate, greeting, todayISO, dueLabel, WEEKDAY_NAMES } from "@/lib/utils/dates";
 import { formatCurrency, formatPercent } from "@/lib/utils/format";
 import { NoticeListItem } from "@/features/notices/notice-list-item";
@@ -23,32 +26,15 @@ export function StudentDashboard() {
       {(d) => {
         const lowAttendance = (d.attendance.percentage ?? 100) < d.attendance.threshold;
         return (
-          <div className="space-y-6">
-            {/* Identity header */}
-            <GlassCard className="relative overflow-hidden p-6">
-              <div className="relative flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-center gap-4">
-                  <Avatar name={d.student.name} size="lg" />
-                  <div>
-                    <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-plum">{formatLongDate(todayISO())}</p>
-                    <h1 className="text-[26px] font-semibold text-sapphire">
-                      {`${greeting()}, ${d.student.firstName}`}
-                    </h1>
-                    <p className="text-sm text-ink-muted">
-                                            Class {d.student.grade} · Section {d.student.section} · Roll {d.student.rollNo}
-                    </p>
-                  </div>
-                </div>
-                <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:text-right">
-                  <dt className="text-ink-muted">Class teacher</dt><dd className="font-medium text-ink">{d.student.classTeacher ?? "—"}</dd>
-                  <dt className="text-ink-muted">Classroom</dt><dd className="font-medium text-ink">{d.student.room ?? "—"}</dd>
-                </dl>
-              </div>
-            </GlassCard>
+          <div className="rise space-y-5">
+            <AskHero
+              title={`${greeting()}, ${d.student.firstName}`}
+              subtitle={[formatLongDate(todayISO()), `Class ${d.student.grade}-${d.student.section}`, `Roll ${d.student.rollNo}`, d.student.classTeacher ? `Class teacher ${d.student.classTeacher}` : null].filter(Boolean).join(" · ")}
+            />
 
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-              {A && <Link href="/student/attendance" className="block rounded-2xl focus-visible:shadow-focus">
-                <GlassCard hover className="flex h-full items-center gap-4 p-5">
+            <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
+              {A && <Link href="/student/attendance" className="group col-span-2 block rounded-[22px] focus-visible:shadow-focus xl:col-span-1">
+                <GlassCard hover className="lift flex h-full items-center gap-4 rounded-[22px] p-5">
                   <ProgressRing value={d.attendance.percentage} size={84} stroke={8} tone={lowAttendance ? "plum" : "teal"} />
                   <div>
                     <p className="text-[13px] font-medium text-ink-muted">Attendance</p>
@@ -66,6 +52,7 @@ export function StudentDashboard() {
                 value={d.fees.outstanding > 0 ? formatCurrency(d.fees.outstanding) : "Paid"}
                 hint={d.fees.nextDue ? `${d.fees.nextDue.label} · due ${formatShortDate(d.fees.nextDue.dueDate)}` : "No dues pending"}
                 tone="lavender"
+                wide
                 badge={<StatusBadge status={d.fees.standing} />}
               />}
             </div>
@@ -80,10 +67,10 @@ export function StudentDashboard() {
                 />
                 <div className="p-5">
                   {d.upcomingClass && (
-                    <div className="mb-4 flex items-center gap-4 rounded-2xl bg-sapphire p-4 text-white">
-                      <div className="grid h-11 w-11 place-items-center rounded-xl bg-white/15"><Clock className="h-5 w-5" aria-hidden /></div>
+                    <div className="group mb-4 flex items-center gap-4 rounded-2xl bg-brand-700 p-4 text-white">
+                      <div className="grid h-11 w-11 place-items-center rounded-xl bg-white/15"><AppIcon name="timetable" live className="h-6 w-6" /></div>
                       <div className="min-w-0 flex-1">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/60">{d.day.isToday ? "Up next" : "First class"}</p>
+                        <p className="text-[12px] font-medium text-white/60">{d.day.isToday ? "Up next" : "First class"}</p>
                         <p className="truncate text-base font-semibold">{d.upcomingClass.subject}</p>
                         <p className="text-[12.5px] text-white/75">{formatClock(d.upcomingClass.startTime)} – {formatClock(d.upcomingClass.endTime)} · {d.upcomingClass.teacher} · {d.upcomingClass.room}</p>
                       </div>
@@ -92,12 +79,13 @@ export function StudentDashboard() {
                   {d.timetable.length === 0 ? <EmptyState title="No classes scheduled" /> : (
                     <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                       {d.timetable.map((e) => (
-                        <li key={e.id} className={cn("flex items-center gap-3 rounded-xl border border-line/70 bg-white px-3.5 py-2.5", d.upcomingClass?.id === e.id && "border-teal/40 bg-teal-soft/60")}>
-                          <span className="w-16 shrink-0 text-[12px] font-medium text-ink-muted">{formatClock(e.startTime)}</span>
-                          <span className="min-w-0">
+                        <li key={e.id} className={cn("flex items-center gap-3 rounded-2xl bg-bg/70 p-2.5", d.upcomingClass?.id === e.id && "ring-2 ring-inset ring-brand-500/40")}>
+                          <span className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[13px] font-bold", subjectTone(e.subject).chip)}>{e.subject.slice(0, 2)}</span>
+                          <span className="min-w-0 flex-1">
                             <span className="block truncate text-sm font-semibold text-ink">{e.subject}</span>
                             <span className="block truncate text-[12px] text-ink-muted">{e.teacher}</span>
                           </span>
+                          <span className="figures shrink-0 text-[12px] font-medium text-ink-muted">{formatClock(e.startTime)}</span>
                         </li>
                       ))}
                     </ul>
@@ -111,7 +99,7 @@ export function StudentDashboard() {
                   <div className="p-5">
                     {d.nextExam ? (
                       <div>
-                        <p className="text-[12px] font-semibold uppercase tracking-wide text-plum">{d.nextExam.examName}</p>
+                        <p className="text-[12.5px] font-medium text-brand-700">{d.nextExam.examName}</p>
                         <p className="mt-1 text-lg font-semibold text-sapphire">{d.nextExam.subject}</p>
                         <p className="text-sm text-ink-muted">{formatLongDate(d.nextExam.date)} · {formatClock(d.nextExam.startTime)} · {d.nextExam.maxMarks} marks</p>
                       </div>
@@ -151,7 +139,7 @@ export function StudentDashboard() {
                       {d.latestResult.rows.map((r) => (
                         <li key={r.subjectId} className="flex items-center justify-between text-sm">
                           <span className="text-ink-soft">{r.subject}</span>
-                          <span className="font-semibold text-ink">{r.absent ? "Absent" : `${r.marks}/${r.maxMarks}`} <span className="ml-1 text-[12px] font-medium text-plum">{r.grade}</span></span>
+                          <span className="font-semibold text-ink">{r.absent ? "Absent" : `${r.marks}/${r.maxMarks}`} <span className="ml-1 rounded-md bg-[#F4E8FF] px-1.5 py-0.5 text-[11px] font-semibold text-[#9333EA]">{r.grade}</span></span>
                         </li>
                       ))}
                     </ul>
@@ -166,21 +154,20 @@ export function StudentDashboard() {
   );
 }
 
-function SummaryTile({ href, icon, label, value, hint, tone, badge }: { href: string; icon: React.ReactNode; label: string; value: string; hint: string; tone: "purple" | "sapphire" | "lavender"; badge?: React.ReactNode }) {
-  const iconTone = { purple: "bg-lavender/30 text-plum", sapphire: "bg-sapphire/[0.08] text-sapphire", lavender: "bg-blush/60 text-plum" }[tone];
+function SummaryTile({ href, label, value, hint, tone, badge, wide }: { href: string; icon: React.ReactNode; label: string; value: string; hint: string; tone: "purple" | "sapphire" | "lavender"; badge?: React.ReactNode; wide?: boolean }) {
+  const name: AppIconName = { purple: "homework", sapphire: "results", lavender: "fees" }[tone] as AppIconName;
   return (
-    <Link href={href} className="block rounded-2xl focus-visible:shadow-focus">
-      <GlassCard hover className="h-full p-5">
-        <div className="flex items-start justify-between">
-          <p className="text-[13px] font-medium text-ink-muted">{label}</p>
-          <span className={cn("grid h-10 w-10 place-items-center rounded-xl", iconTone)}>{icon}</span>
-        </div>
-        <p className="mt-1 text-[26px] font-semibold leading-none text-sapphire">{value}</p>
-        <div className="mt-3 flex items-center justify-between gap-2">
-          <p className="truncate text-[12.5px] text-ink-muted">{hint}</p>
-          {badge ?? <ArrowRight className="h-4 w-4 shrink-0 text-ink-muted" aria-hidden />}
-        </div>
-      </GlassCard>
+    <Link href={href} className={cn("group lift flex h-full flex-col rounded-[22px] bg-surface p-4 shadow-card focus-visible:shadow-focus sm:p-5", wide && "col-span-2 xl:col-span-1")}>
+      <div className="flex items-center gap-2.5">
+        <IconTile name={name} size="md" />
+        <p className="flex-1 text-[13px] font-medium text-ink-muted">{label}</p>
+        <ArrowUpRight className="hidden h-4 w-4 shrink-0 text-ink-faint sm:block transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-ink" aria-hidden />
+      </div>
+      <p className="mt-4 whitespace-nowrap text-[24px] font-semibold leading-none tracking-[-0.04em] text-ink sm:text-[30px]">{value}</p>
+      <div className="mt-auto flex items-center justify-between gap-2 pt-3">
+        <p className="truncate text-[12.5px] text-ink-muted">{hint}</p>
+        {badge}
+      </div>
     </Link>
   );
 }

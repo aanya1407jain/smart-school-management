@@ -87,7 +87,7 @@ export const FILE_RULES: readonly [RegExp, Owner][] = [
   [/^src\/lib\/(services|mock-data|store)\//, "demo"],
   [/^src\/types\/domain\.ts$/, "demo"],
   [/^src\/features\/(teachers\/(teachers-workspace|teacher-form|teacher-profile)|profile\/profile-page|attendance\/my-attendance|students\/(students-list|demo-student-profile)|academics\/academics-workspace-demo|homework\/(my-homework-demo|homework-manager)|auth\/demo-accounts|examinations\/(exams-list|exam-detail|marks-entry|teacher-exams|my-results|result-sheet|demo-result-card)|fees\/my-fees|audit\/audit-log-demo|timetable\/(timetable-pages|week-grid))\.tsx?$/, "demo"],
-  [/^src\/lib\/(convex|hooks|utils|constants|permissions|demo|contributions)\//, "core"],
+  [/^src\/lib\/(convex|hooks|utils|constants|permissions|demo|contributions|ask)\//, "core"],
   [/^src\/types\/core\.ts$/, "core"],
   [/^src\/types\/students\.ts$/, "students"],
   [/^src\/types\/attendance\.ts$/, "attendance"],
@@ -101,7 +101,7 @@ export const FILE_RULES: readonly [RegExp, Owner][] = [
   [/^src\/modules\/fees\//, "fees"],
   [/^src\/modules\/examinations\//, "examinations"],
   // ---------------------------------------------------------------- frontend: features
-  [/^src\/features\/(auth|settings|profile|audit|notifications|shared|imports|notices|live)\//, "core"],
+  [/^src\/features\/(auth|settings|profile|audit|notifications|shared|imports|notices|live|landing)\//, "core"],
   [/^src\/features\/student-portal\//, "students"], // the student portal is part of Students
   [/^src\/features\/accounts\/import-wizard\.tsx$/, "students"],
   [/^src\/features\/accounts\//, "core"],

@@ -202,7 +202,7 @@ function StatusBanner({ c }: { c: TeacherClassCard }) {
   }
   if (c.markedToday === null) return null;
   return c.markedToday
-    ? <p className="flex items-center gap-2 rounded-xl bg-emerald-50 px-3 py-2 text-[12.5px] font-semibold text-emerald-800 ring-1 ring-inset ring-emerald-600/20"><CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden /> Today&apos;s attendance is marked</p>
+    ? <p className="flex items-center gap-2 rounded-xl bg-pd-ok-soft px-3 py-2 text-[12.5px] font-semibold text-pd-ok ring-1 ring-inset ring-pd-ok/20"><CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden /> Today&apos;s attendance is marked</p>
     : (
       <p role="status" className="flex items-center gap-2 rounded-xl bg-amber-50 px-3 py-2 text-[12.5px] font-semibold text-amber-800 ring-1 ring-inset ring-amber-500/30">
         <span className="relative grid h-2 w-2 place-items-center" aria-hidden><span className="absolute h-2 w-2 animate-ping rounded-full bg-amber-500 opacity-60 motion-reduce:hidden" /><span className="h-2 w-2 rounded-full bg-amber-500" /></span>
