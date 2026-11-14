@@ -154,14 +154,10 @@ const GLYPHS: Record<AppIconName, ReactNode> = {
     <circle className="li-hop li-d2" cx="15.6" cy="10.8" r="1.15" fill="currentColor" stroke="none" />
   </>),
   spark: (<>
-    {/* The Ask mark: the Atrium arch with a light inside it. The orb floats and sends out a soft pulse. */}
-    <path d="M4.5 21V11.2a7.5 7.5 0 0 1 15 0V21" {...T} />
-    <path d="M4.5 21V11.2a7.5 7.5 0 0 1 15 0V21" strokeWidth={2} />
-    <path d="M3 21h18" strokeWidth={2} />
-    <g className="li-orb">
-      <circle className="li-orb-ring" cx="12" cy="13" r="3" fill="none" strokeWidth={1.5} />
-      <circle cx="12" cy="13" r="3" fill="currentColor" stroke="none" />
-    </g>
+    {/* Ask Atrium: a speech bubble with a spark inside. Ask, and the school answers. */}
+    <path d="M5 3.8h14a2.6 2.6 0 0 1 2.6 2.6v8.5a2.6 2.6 0 0 1-2.6 2.6h-7.1L7.3 21v-3.5H5a2.6 2.6 0 0 1-2.6-2.6V6.4A2.6 2.6 0 0 1 5 3.8z" {...T} />
+    <path className="li-bubble" d="M5 3.8h14a2.6 2.6 0 0 1 2.6 2.6v8.5a2.6 2.6 0 0 1-2.6 2.6h-7.1L7.3 21v-3.5H5a2.6 2.6 0 0 1-2.6-2.6V6.4A2.6 2.6 0 0 1 5 3.8z" strokeWidth={1.9} />
+    <path className="li-star" d="M12 6.4c.45 2.6 1.65 3.8 4.25 4.25-2.6.45-3.8 1.65-4.25 4.25-.45-2.6-1.65-3.8-4.25-4.25 2.6-.45 3.8-1.65 4.25-4.25z" fill="currentColor" stroke="none" />
   </>),
   search: (<>
     <g className="li-wiggle"><circle cx="10.8" cy="10.8" r="6.6" {...T} /><circle cx="10.8" cy="10.8" r="6.6" /><path d="m15.8 15.8 4.7 4.7" strokeWidth={2.1} /></g>
