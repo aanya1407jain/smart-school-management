@@ -29,11 +29,23 @@ const config: Config = {
         // Deep forest green for the navigation sidebar (#0A382C).
         forest: channel("c-forest"),
 
+        // Atrium brand (Evergreen)
+        brand: {
+          50: channel("c-brand-50"), 100: channel("c-brand-100"), 200: channel("c-brand-200"), 400: channel("c-brand-400"),
+          500: channel("c-brand-500"), 600: channel("c-brand-600"), DEFAULT: channel("c-brand-600"), 700: channel("c-brand-700"),
+          800: channel("c-brand-800"), 900: channel("c-brand-900"),
+        },
+        cobalt: { DEFAULT: channel("c-cobalt"), deep: channel("c-cobalt-deep"), soft: channel("c-cobalt-soft") },
+        marigold: { DEFAULT: channel("c-marigold"), soft: channel("c-marigold-soft") },
+        mint: channel("c-mint"),
+        coral: channel("c-coral"),
+
         // Semantic tokens
+        ground: channel("ground"),
         bg: channel("bg"),
-        surface: channel("surface"),
-        ink: { DEFAULT: channel("ink"), soft: channel("ink-soft"), muted: channel("ink-muted") },
-        line: channel("line"),
+        surface: { DEFAULT: channel("surface"), 2: channel("surface-2") },
+        ink: { DEFAULT: channel("ink"), soft: channel("ink-soft"), muted: channel("ink-muted"), faint: channel("ink-faint") },
+        line: { DEFAULT: channel("line"), strong: channel("line-strong") },
         primary: { DEFAULT: channel("primary"), hover: channel("primary-hover"), fg: channel("primary-fg") },
         accent: channel("accent"),
         success: channel("success"),
@@ -51,20 +63,24 @@ const config: Config = {
       },
       fontFamily: {
         sans: ["var(--font-sans)", "system-ui", "sans-serif"],
-        display: ["var(--font-display)", "Georgia", "serif"],
+        display: ["var(--font-display)", "system-ui", "sans-serif"],
+        serif: ["var(--font-serif)", "Georgia", "serif"],
+        mono: ["var(--font-mono)", "ui-monospace", "SFMono-Regular", "monospace"],
       },
-      // Moderate, consistent corners: 12px controls, 16px cards, 20px large overlays.
-      borderRadius: { xl: "0.75rem", "2xl": "1rem", "3xl": "1.25rem" },
-      // Restrained elevation: hairline shadows for surfaces, one soft shadow for overlays, no glows.
+      // Corners: 10px controls, 14px small cards, 18px panels, 24px overlays.
+      borderRadius: { lg: "0.5rem", xl: "0.625rem", "2xl": "0.875rem", "3xl": "1.125rem", "4xl": "1.5rem" },
       boxShadow: {
-        glass: "0 1px 2px rgb(16 24 40 / 0.04)",
-        soft: "0 1px 3px rgb(16 24 40 / 0.08)",
-        lift: "0 12px 32px -12px rgb(16 24 40 / 0.18)",
-        // Focus ring for inputs, selects and search.
-        focus: "0 0 0 3px rgb(var(--primary) / 0.18)",
-        ambient: "0 1px 2px rgb(16 24 40 / 0.04)",
-        "ambient-lg": "0 2px 8px -2px rgb(16 24 40 / 0.08)",
-        glow: "0 0 0 3px rgb(var(--primary) / 0.1)",
+        glass: "0 1px 2px rgb(17 19 24 / 0.04), 0 0 0 1px rgb(17 19 24 / 0.06)",
+        soft: "0 1px 3px rgb(17 19 24 / 0.08)",
+        lift: "0 18px 40px -16px rgb(17 19 24 / 0.22), 0 0 0 1px rgb(17 19 24 / 0.06)",
+        // Focus ring for inputs, selects and search (cobalt).
+        focus: "0 0 0 3px rgb(var(--c-brand-500) / 0.22)",
+        ambient: "0 1px 2px rgb(17 19 24 / 0.04)",
+        "ambient-lg": "0 2px 8px -2px rgb(17 19 24 / 0.08)",
+        glow: "0 0 0 3px rgb(var(--c-brand-500) / 0.14)",
+        card: "var(--shadow-card)",
+        button: "inset 0 1px 0 rgb(255 255 255 / 0.18), 0 1px 2px rgb(11 52 44 / 0.25), 0 0 0 1px rgb(var(--c-brand-700))",
+        canvas: "0 0 0 1px rgb(17 19 24 / 0.06), 0 1px 3px rgb(17 19 24 / 0.04)",
       },
       keyframes: {
         "fade-up": { from: { opacity: "0", transform: "translateY(6px)" }, to: { opacity: "1", transform: "none" } },

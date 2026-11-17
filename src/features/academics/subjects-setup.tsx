@@ -153,7 +153,7 @@ function CurriculumModal({ year, klass, subjects, onClose }: { year: Year; klass
           {shown.map((s) => {
             const d = chosen.get(s._id);
             return (
-              <li key={s._id} className={cn("flex flex-col gap-2 px-3.5 py-2.5 sm:flex-row sm:items-center sm:gap-3", d && "bg-emerald-50/30")}>
+              <li key={s._id} className={cn("flex flex-col gap-2 px-3.5 py-2.5 sm:flex-row sm:items-center sm:gap-3", d && "bg-pd-ok-soft")}>
                 <div className="min-w-0 flex-1">
                   <Checkbox label={<span>{s.name} <span className="font-mono text-[12px] text-ink-muted">{s.code}</span></span>} checked={!!d} onChange={(e) => {
                     const next = new Map(chosen);
@@ -275,7 +275,7 @@ function ClassPicker({ classes, value, onChange, disabled }: { classes: Klass[];
       <div className="mb-2 flex items-center justify-between">
         <legend className="text-[13px] font-medium text-ink-soft">Applicable classes</legend>
         {classes.length > 1 && (
-          <button type="button" className="text-[12.5px] font-semibold text-emerald-800 hover:underline" onClick={() => onChange(all ? new Set() : new Set(classes.map((c) => c._id)))}>
+          <button type="button" className="text-[12.5px] font-semibold text-pd-ok hover:underline" onClick={() => onChange(all ? new Set() : new Set(classes.map((c) => c._id)))}>
             {all ? "Clear" : "Select all"}
           </button>
         )}

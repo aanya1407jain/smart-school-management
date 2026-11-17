@@ -74,7 +74,7 @@ export function LiveMyClasses() {
       {sectionIds.length === 0 ? <Card><EmptyState icon={<Users className="h-6 w-6" />} title="No classes assigned" description="The school office has not assigned you a section or subject yet." /></Card> : (
         <>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {(teaching.classTeacherOf ?? []).map((c: any) => <Card key={c.sectionId} className="p-4"><p className="text-[12px] font-semibold uppercase tracking-wide text-plum">Class teacher</p><p className="text-lg font-semibold text-sapphire">{c.displayName}</p><p className="text-[12.5px] text-ink-muted">You mark this section&apos;s attendance.</p></Card>)}
+            {(teaching.classTeacherOf ?? []).map((c: any) => <Card key={c.sectionId} className="p-4"><p className="text-[12.5px] font-medium text-brand-700">Class teacher</p><p className="text-lg font-semibold text-sapphire">{c.displayName}</p><p className="text-[12.5px] text-ink-muted">You mark this section&apos;s attendance.</p></Card>)}
             {(teaching.assignments ?? []).map((a: any) => <Card key={a._id} className="p-4"><p className="text-[12px] font-semibold uppercase tracking-wide text-ink-muted">Subject teacher</p><p className="text-lg font-semibold text-sapphire">{a.subjectName}</p><p className="text-[12.5px] text-ink-muted">Class {a.sectionName}</p></Card>)}
           </div>
           <Card>
@@ -581,7 +581,7 @@ export function LiveTeacherDashboard() {
     <div className="space-y-6" data-testid="live-teacher-dashboard">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-plum">{formatLongDate(d.today)}</p>
+          <p className="text-[12.5px] font-medium text-brand-700">{formatLongDate(d.today)}</p>
           <h1 className="mt-1 text-[28px] font-semibold text-sapphire">{greeting()}{user?.displayName ? `, ${user.displayName}` : ""}</h1>
           <p className="mt-1 text-sm text-ink-muted">
             {classTeacherOf.length > 0 ? <>Class teacher of <strong className="text-ink">{classTeacherOf.map((s: any) => s.displayName).join(", ")}</strong> · </> : null}

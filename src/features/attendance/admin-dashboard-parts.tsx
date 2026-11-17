@@ -1,10 +1,10 @@
 "use client";
 /** Attendance's parts of the admin dashboard (contributed, see src/modules/attendance/contributions.tsx). */
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { CalendarCheck2 } from "lucide-react";
 import type { AdminAttentionItem, AdminDashboardPartProps, AdminDashboardVM } from "@/lib/contributions/types";
-import { MetricCard, Panel, PanelEmpty, PanelLink } from "@/features/dashboard/principal-ui";
-import { PD_CHART } from "@/lib/constants/theme";
+import { MetricCard, Panel, PanelEmpty, PanelLink, Sparkline } from "@/features/dashboard/principal-ui";
+import { PALETTE, PD_CHART } from "@/lib/constants/theme";
 import { formatPercent, pluralize } from "@/lib/utils/format";
 import { formatShortDate, isSchoolDay, todayISO } from "@/lib/utils/dates";
 
@@ -20,7 +20,7 @@ export function AttendanceMetric({ d }: AdminDashboardPartProps) {
   // a non-school day (and every section on a school day with nothing marked yet).
   const schoolDay = att.isToday || (d.tasks.unmarkedToday !== null ? d.tasks.unmarkedToday > 0 : isSchoolDay(todayISO()));
   if (att.percentage === null) {
-    return <MetricCard label="Attendance" value="Not marked" support={att.isToday ? "No register marked today yet" : "No attendance recorded yet"} tone={schoolDay ? "warning" : "neutral"} icon={CalendarCheck2} href="/admin/attendance" />;
+    return <MetricCard label="Attendance" value="Not marked" support={att.isToday ? "No register marked today yet" : "No attendance recorded yet"} tone={schoolDay ? "warning" : "neutral"} icon={CalendarCheck2} accent="attendance" href="/admin/attendance" />;
   }
   return (
     <MetricCard
@@ -33,6 +33,8 @@ export function AttendanceMetric({ d }: AdminDashboardPartProps) {
       }
       tone={(!att.isToday && schoolDay) || partial ? "warning" : "neutral"}
       icon={CalendarCheck2}
+      accent="attendance"
+      viz={<Sparkline values={d.attendanceTrend.slice(-12).map((p) => p.percentage)} color="#15803D" />}
       href="/admin/attendance"
     />
   );
@@ -70,6 +72,7 @@ export function AttendanceTrendOverview({ d }: AdminDashboardPartProps) {
   const minY = low ? Math.max(0, Math.floor((low.percentage - 5) / 10) * 10) : 0;
   return (
     <Panel
+      icon="attendance"
       title="Attendance trend"
       description={first && last ? `Daily, school-wide · ${pluralize(rows.length, "school day")} (${first.label} – ${last.label})` : "Daily, school-wide"}
       action={<PanelLink href="/admin/reports?tab=attendance">Report</PanelLink>}
@@ -79,12 +82,12 @@ export function AttendanceTrendOverview({ d }: AdminDashboardPartProps) {
         <>
           <p className="text-[13px] text-pd-muted">
             Average <span className="font-semibold text-pd-ink tabular-nums">{formatPercent(avg, 1)}</span>
-            {low && <> · lowest <span className="font-semibold text-pd-ink tabular-nums">{formatPercent(low.percentage, 1)}</span> on {low.label}</>}
+            {low && <> · <span aria-hidden className="mx-0.5 inline-block h-2 w-2 rounded-full bg-marigold align-middle" /> lowest <span className="font-semibold text-pd-ink tabular-nums">{formatPercent(low.percentage, 1)}</span> on {low.label}</>}
           </p>
           <div className="mt-2 h-40" role="img" aria-label={`Daily attendance from ${first.label} to ${last.label}: average ${formatPercent(avg, 1)}, latest ${formatPercent(last.percentage, 1)}.`}>
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={rows} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
-                <CartesianGrid vertical={false} stroke={PD_CHART.grid} />
+                <CartesianGrid vertical={false} stroke={PD_CHART.grid} strokeDasharray="3 4" />
                 <XAxis dataKey="label" tick={{ fill: PD_CHART.axis, fontSize: 11 }} axisLine={false} tickLine={false} interval="preserveStartEnd" minTickGap={24} />
                 <YAxis domain={[minY, 100]} allowDataOverflow tick={{ fill: PD_CHART.axis, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => `${v}%`} width={40} tickCount={3} />
                 <Tooltip
@@ -93,14 +96,17 @@ export function AttendanceTrendOverview({ d }: AdminDashboardPartProps) {
                     const r = active ? (payload?.[0]?.payload as (typeof rows)[number] | undefined) : undefined;
                     if (!r) return null;
                     return (
-                      <div className="rounded-lg border border-pd-line bg-white px-2.5 py-1.5 text-[12px] text-pd-ink shadow-sm">
+                      <div className="glass-strong rounded-xl px-3 py-2 text-[12px] text-pd-ink">
                         <p className="font-semibold">{r.label} · {formatPercent(r.percentage, 1)}</p>
                         {typeof r.counted === "number" && <p className="text-pd-muted">{r.present} of {r.counted} students present</p>}
                       </div>
                     );
                   }}
                 />
-                <Bar dataKey="percentage" name="Attendance" fill={PD_CHART.accent} radius={[3, 3, 0, 0]} maxBarSize={22} isAnimationActive={false} />
+                <Bar dataKey="percentage" name="Attendance" fill={PD_CHART.accent} radius={[6, 6, 6, 6]} maxBarSize={20} animationDuration={700} animationEasing="ease-out">
+                  {/* Latest day in ink, the lowest day in marigold, the rest in evergreen. */}
+                  {rows.map((r) => <Cell key={r.date} fill={r === low ? PALETTE.marigold : r === last ? PALETTE.ink : PD_CHART.accent} />)}
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           </div>

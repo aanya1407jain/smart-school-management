@@ -26,13 +26,13 @@ export function TabsList({ items, className, variant = "pills" }: { items: { val
             value={i.value}
             className={cn(
               "group -mb-px inline-flex min-h-11 shrink-0 items-center gap-2 border-b-2 border-transparent px-3 text-sm font-medium text-ink-muted transition-colors duration-150",
-              "hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-600/40",
-              "data-[state=active]:border-emerald-600 data-[state=active]:font-semibold data-[state=active]:text-emerald-800",
+              "hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500/40",
+              "data-[state=active]:border-brand-600 data-[state=active]:font-medium data-[state=active]:text-ink",
             )}
           >
             {i.label}
             {i.count !== undefined && (
-              <span className="figures rounded-full bg-bg px-1.5 text-[11px] font-semibold text-ink-soft ring-1 ring-inset ring-line group-data-[state=active]:bg-emerald-50 group-data-[state=active]:text-emerald-800 group-data-[state=active]:ring-emerald-200">{i.count}</span>
+              <span className="figures rounded-full bg-bg px-1.5 text-[11px] font-semibold text-ink-soft ring-1 ring-inset ring-line group-data-[state=active]:bg-brand-600 group-data-[state=active]:text-white group-data-[state=active]:ring-brand-600">{i.count}</span>
             )}
           </T.Trigger>
         ))}
@@ -41,19 +41,19 @@ export function TabsList({ items, className, variant = "pills" }: { items: { val
   }
   return (
     // Quiet grey rail; the active tab is a white chip with a hairline border.
-    <T.List className={cn("scrollbar-thin flex max-w-full gap-1 relative overflow-x-auto rounded-xl bg-bg p-1 ring-1 ring-inset ring-line sm:w-fit", className)} aria-label="Sections">
+    <T.List className={cn("scrollbar-thin flex max-w-full gap-1 relative overflow-x-auto rounded-xl bg-ink/[0.045] p-1 sm:w-fit", className)} aria-label="Sections">
       {items.map((i) => (
         <T.Trigger
           key={i.value}
           value={i.value}
           className={cn(
-            "group inline-flex shrink-0 items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium text-ink-muted transition-colors duration-150 focus-visible:outline-none focus-visible:shadow-focus",
-            "hover:bg-white/60 hover:text-ink data-[state=active]:bg-white data-[state=active]:text-lagoon data-[state=active]:shadow-[0_1px_2px_rgb(16_24_40/0.08)] data-[state=active]:ring-1 data-[state=active]:ring-line",
+            "group inline-flex shrink-0 items-center gap-2 rounded-[9px] px-3 py-1.5 text-[13.5px] font-medium text-ink-muted transition-colors duration-150 focus-visible:outline-none focus-visible:shadow-focus",
+            "hover:text-ink data-[state=active]:bg-surface data-[state=active]:text-ink data-[state=active]:shadow-card",
           )}
         >
           {i.label}
           {i.count !== undefined && (
-            <span className="figures rounded-full bg-heather/30 px-1.5 text-[11px] font-semibold text-ink-soft group-data-[state=active]:bg-teal-soft group-data-[state=active]:text-lagoon">{i.count}</span>
+            <span className="figures rounded-full bg-ink/[0.06] px-1.5 text-[11px] font-medium text-ink-soft group-data-[state=active]:bg-brand-100 group-data-[state=active]:text-brand-700">{i.count}</span>
           )}
         </T.Trigger>
       ))}

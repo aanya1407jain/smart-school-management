@@ -5,7 +5,7 @@ import { api } from "@convex/_generated/api";
 import { useSchoolQuery } from "@/lib/convex/membership";
 import type { AdminDashboardPartProps } from "@/lib/contributions/types";
 import type { AchievementCategory, StudentAchievement } from "@/types/students";
-import { Collapsible, MetricCard } from "@/features/dashboard/principal-ui";
+import { Collapsible, MetricCard, MiniBars } from "@/features/dashboard/principal-ui";
 import { formatNumber, pluralize } from "@/lib/utils/format";
 import { formatShortDate } from "@/lib/utils/dates";
 
@@ -22,6 +22,8 @@ export function StudentsMetric({ d, live }: AdminDashboardPartProps) {
       value={<span data-testid="dash-students">{value}</span>}
       support={`Across ${pluralize(d.stats.sections, "section")}`}
       icon={GraduationCap}
+      accent="students"
+      viz={d.performance.rows.length > 0 ? <MiniBars rows={d.performance.rows.slice(0, 10).map((r) => ({ name: r.name, value: r.average }))} caption={`Average by class${d.performance.examName ? ` · ${d.performance.examName}` : ""}`} /> : undefined}
       href="/admin/students"
     />
   );

@@ -4,11 +4,13 @@ import Link from "next/link";
 import { AlertTriangle, Lock, SearchX, Inbox, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { Button } from "./button";
+import { IconTile } from "@/components/icons/app-icon";
+import { liveIconFor } from "@/components/icons/from-lucide";
 
 export function Skeleton({ className }: { className?: string }) {
   return (
-    <div className={cn("relative overflow-hidden rounded-xl bg-heather/20", className)} aria-hidden>
-      <div className="absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-white/60 to-transparent" />
+    <div className={cn("relative overflow-hidden rounded-xl bg-ink/[0.05]", className)} aria-hidden>
+      <div className="absolute inset-0 -translate-x-full animate-shimmer bg-white/50" />
     </div>
   );
 }
@@ -41,7 +43,11 @@ export function LoadingState({ variant = "page", label = "Loading" }: { variant?
 function StateShell({ icon, title, description, action, className, tone = "neutral" }: { icon: ReactNode; title: string; description?: ReactNode; action?: ReactNode; className?: string; tone?: "neutral" | "warn" }) {
   return (
     <div className={cn("flex flex-col items-center justify-center px-6 py-12 text-center", className)}>
-      <div className={cn("mb-4 grid h-14 w-14 place-items-center rounded-2xl", tone === "warn" ? "bg-blush/60 text-plum" : "bg-teal-soft text-lagoon")}>{icon}</div>
+      {liveIconFor(icon) && tone !== "warn" ? (
+        <span className="float-y mb-4 rounded-[20px] bg-surface p-2 shadow-card"><IconTile name={liveIconFor(icon)!} size="lg" live /></span>
+      ) : (
+        <div className={cn("mb-4 grid h-14 w-14 place-items-center rounded-2xl", tone === "warn" ? "bg-blush text-plum" : "bg-brand-50 text-brand-600")}>{icon}</div>
+      )}
       <h3 className="text-base font-semibold text-ink">{title}</h3>
       {description && <p className="mt-1.5 max-w-sm text-sm leading-relaxed text-ink-muted">{description}</p>}
       {action && <div className="mt-5 flex flex-wrap justify-center gap-2">{action}</div>}

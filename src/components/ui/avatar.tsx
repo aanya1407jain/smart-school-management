@@ -6,11 +6,12 @@ import { initials } from "@/lib/utils/format";
  * person always gets the same avatar colour.
  */
 const meshes = [
-  "bg-teal-soft text-lagoon",
-  "bg-blush/50 text-plum",
-  "bg-sapphire/[0.07] text-sapphire",
-  "bg-cyan/[0.12] text-lagoon",
-  "bg-heather/30 text-sapphire",
+  "bg-[#E4E9FF] text-[#2440D8]",
+  "bg-[#FDE8C8] text-[#8A4B00]",
+  "bg-[#DDF3E4] text-[#146B34]",
+  "bg-[#FFE1E1] text-[#A3262B]",
+  "bg-[#EDE6FF] text-[#5135C4]",
+  "bg-[#DDF1F4] text-[#0E6170]",
 ];
 
 function hash(s: string) {

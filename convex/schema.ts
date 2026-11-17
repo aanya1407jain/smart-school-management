@@ -1,5 +1,5 @@
 /**
- * Smart School Management System — production schema.
+ * Atrium — production schema.
  *
  * MULTI-TENANT RULES (read docs/BACKEND.md before adding a table):
  *  1. Every school-owned table has a `schoolId` field.

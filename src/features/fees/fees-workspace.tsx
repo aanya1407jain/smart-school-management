@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
+import { cn } from "@/lib/utils/cn";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -59,6 +60,21 @@ export function FeesWorkspace() {
   );
 }
 
+const STANDING_LABEL: Record<FeeStanding, string> = { paid: "Fully paid", clear: "Up to date", due_soon: "Due soon", overdue: "Overdue", not_assigned: "Not assigned" } as Record<FeeStanding, string>;
+const STANDING_DOT: Record<string, string> = { paid: "bg-brand-500", clear: "bg-mint", due_soon: "bg-marigold", overdue: "bg-coral" };
+const METHOD_CHIP: Record<string, string> = { upi: "bg-[#EEE9FF] text-[#6D4AE0]", cash: "bg-pd-ok-soft text-pd-ok", bank_transfer: "bg-[#E5EDFF] text-[#2563EB]", cheque: "bg-[#FFF0D3] text-[#B26A00]", card: "bg-[#FCE6F1] text-[#BE185D]" };
+
+/** One bar, split by how many students are in each standing. */
+function StandingBar({ standing }: { standing: Record<string, number> }) {
+  const keys = ["paid", "clear", "due_soon", "overdue"];
+  const total = keys.reduce((n, k) => n + (standing[k] ?? 0), 0) || 1;
+  return (
+    <div className="flex h-3 gap-0.5 overflow-hidden rounded-full bg-bg" role="img" aria-label={keys.map((k) => `${standing[k] ?? 0} ${STANDING_LABEL[k as FeeStanding]}`).join(", ")}>
+      {keys.map((k) => (standing[k] ?? 0) > 0 && <span key={k} className={cn("grow-x h-full rounded-full", STANDING_DOT[k])} style={{ width: `${((standing[k] ?? 0) / total) * 100}%` }} />)}
+    </div>
+  );
+}
+
 function Overview() {
   const { dataSource } = useSession();
   const live = dataSource === "live";
@@ -98,7 +114,7 @@ function Overview() {
       {(s) => (
         <div className="space-y-5">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <StatCard label="Collected this year" value={formatCurrency(s.totals.paid)} icon={<CircleDollarSign className="h-5 w-5" />} hint={`${formatPercent(s.totals.collectionRate, 1)} of net fees`} />
+            <StatCard accent="fees" label="Collected this year" value={formatCurrency(s.totals.paid)} icon={<CircleDollarSign className="h-5 w-5" />} hint={`${formatPercent(s.totals.collectionRate, 1)} of net fees`} />
             <StatCard label="Outstanding" value={formatCurrency(s.totals.outstanding)} icon={<Wallet className="h-5 w-5" />} tone="sapphire" hint={`Net fees ${formatCurrency(s.totals.net)}`} />
             <StatCard label="Overdue" value={formatCurrency(s.totals.overdue)} icon={<AlertCircle className="h-5 w-5" />} tone="lavender" hint={`${s.standing.overdue} students`} />
             <StatCard label="Due in 30 days" value={formatCurrency(s.totals.dueSoon)} icon={<Clock className="h-5 w-5" />} tone="purple" hint={`${s.standing.due_soon} students · concessions ${formatCurrency(s.totals.concession)}`} />
@@ -116,17 +132,20 @@ function Overview() {
               </ResponsiveContainer>
             </ChartCard>
             <Card>
-              <CardHeader title="Student standing" description="Where every student's account stands today" />
-              <ul className="space-y-2.5 p-5">
-                {(["paid", "clear", "due_soon", "overdue"] as FeeStanding[]).map((k) => (
-                  <li key={k}>
-                    <Link href={`/admin/fees?tab=balances&standing=${k}`} className="flex items-center justify-between rounded-xl border border-line/70 px-3.5 py-2.5 hover:bg-alabaster">
-                      <StatusBadge status={k} />
-                      <span className="text-sm font-semibold text-ink">{s.standing[k]} students</span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
+              <CardHeader title="Student standing" description="Every account, today" />
+              <div className="p-5">
+                <StandingBar standing={s.standing} />
+                <ul className="mt-4 grid grid-cols-2 gap-2">
+                  {(["paid", "clear", "due_soon", "overdue"] as FeeStanding[]).map((k) => (
+                    <li key={k}>
+                      <Link href={`/admin/fees?tab=balances&standing=${k}`} className="lift block rounded-2xl bg-bg/70 p-3 hover:bg-bg">
+                        <span className="flex items-center gap-1.5 text-[12px] font-medium text-ink-muted"><span className={cn("h-2 w-2 rounded-full", STANDING_DOT[k])} />{STANDING_LABEL[k]}</span>
+                        <span className="figures mt-1 block text-[22px] font-semibold tracking-[-0.03em] text-ink">{s.standing[k]}</span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </Card>
           </div>
           <Card>
@@ -137,9 +156,12 @@ function Overview() {
                 <li key={p.id} className="flex items-center justify-between gap-3 py-3">
                   <Link href={`/admin/fees/${p.studentId}`} className="flex min-w-0 items-center gap-3 hover:text-lagoon">
                     <Avatar name={p.studentName} size="sm" />
-                    <span className="min-w-0"><span className="block truncate text-sm font-semibold text-ink">{p.studentName}</span><span className="block text-[12px] text-ink-muted">{p.receiptNo} · {PAYMENT_METHOD_LABELS[p.method as PaymentMethod] ?? p.method} · {formatShortDate(p.paidOn)}</span></span>
+                    <span className="min-w-0"><span className="block truncate text-sm font-semibold text-ink">{p.studentName}</span><span className="mono-id block text-[11.5px] text-ink-muted">{p.receiptNo} · {formatShortDate(p.paidOn)}</span></span>
                   </Link>
-                  <span className="text-sm font-semibold text-sapphire">{formatCurrency(p.amount)}</span>
+                  <span className="flex shrink-0 items-center gap-3">
+                    <span className={cn("hidden rounded-full px-2 py-0.5 text-[11.5px] font-medium sm:inline-block", METHOD_CHIP[p.method as string] ?? "bg-bg text-ink-soft")}>{PAYMENT_METHOD_LABELS[p.method as PaymentMethod] ?? p.method}</span>
+                    <span className="figures text-[15px] font-semibold text-ink">{formatCurrency(p.amount)}</span>
+                  </span>
                 </li>
               ))}
             </ul>

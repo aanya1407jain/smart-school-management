@@ -33,7 +33,7 @@ export function ReportCard({ d }: { d: ReportCardData }) {
     <article id="report-card" className="rounded-2xl border border-line/70 bg-white p-6 text-ink" aria-label={`Report card: ${d.studentName}, ${d.examName}`}>
       <header className="border-b border-line/70 pb-4 text-center">
         <p className="text-lg font-semibold text-sapphire">{d.schoolName}</p>
-        <p className="mt-0.5 text-[12px] font-semibold uppercase tracking-[0.18em] text-plum">Report card</p>
+        <p className="mt-0.5 text-[12.5px] font-medium text-brand-700">Report card</p>
         <p className="mt-2 text-base font-semibold">{d.examName}{d.term ? ` · ${d.term}` : ""}</p>
         {d.startDate && <p className="text-[12px] text-ink-muted">{d.academicYear ? `${d.academicYear} · ` : ""}from {formatDate(d.startDate)}</p>}
       </header>

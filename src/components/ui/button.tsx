@@ -8,28 +8,29 @@ type Size = "sm" | "md" | "lg" | "icon" | "icon-sm";
 
 const variants: Record<Variant, string> = {
   // Solid accent for the main action (white on #0F766E: 5.5:1).
-  primary: "bg-primary text-primary-fg hover:bg-primary-hover",
-  secondary: "bg-sapphire text-white hover:bg-sapphire/90",
-  accent: "bg-primary text-primary-fg hover:bg-primary-hover",
-  outline: "border border-line bg-white text-ink hover:border-ink-muted/40 hover:bg-bg",
-  ghost: "text-ink-soft hover:bg-teal-soft/60 hover:text-lagoon",
-  soft: "bg-teal-soft text-lagoon hover:bg-teal/15",
-  // Destructive actions stay visibly distinct: semantic red (white on #B42318: 6.6:1).
-  danger: "bg-pd-danger text-white hover:bg-pd-danger/90",
+  // Evergreen with a top highlight: the one primary action per view.
+  primary: "bg-primary text-primary-fg shadow-button hover:bg-primary-hover",
+  secondary: "bg-surface text-ink shadow-card hover:bg-surface-2",
+  accent: "bg-marigold text-ink shadow-[inset_0_1px_0_rgb(255_255_255/0.35),0_1px_2px_rgb(154_91_0/0.3)] hover:bg-[#E9960F]",
+  outline: "bg-surface text-ink shadow-card hover:bg-surface-2",
+  ghost: "text-ink-soft hover:bg-ink/5 hover:text-ink",
+  soft: "bg-brand-50 text-brand-700 hover:bg-brand-100",
+  // Destructive actions stay visibly distinct: semantic red.
+  danger: "bg-pd-danger text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.15)] hover:bg-pd-danger/90",
 };
 const sizes: Record<Size, string> = {
-  sm: "h-8 max-sm:h-9 px-3 text-[13px] gap-1.5 rounded-lg",
-  md: "h-10 max-sm:h-11 px-4 text-sm gap-2 rounded-xl",
-  lg: "h-12 px-6 text-[15px] gap-2 rounded-xl",
-  icon: "h-10 w-10 max-sm:h-11 max-sm:w-11 rounded-xl",
-  "icon-sm": "h-8 w-8 max-sm:h-10 max-sm:w-10 rounded-lg",
+  sm: "h-8 max-sm:h-9 px-3 text-[13px] gap-1.5 rounded-[9px]",
+  md: "h-9 max-sm:h-11 px-3.5 text-[13.5px] gap-2 rounded-[10px]",
+  lg: "h-11 px-5 text-[14.5px] gap-2 rounded-xl",
+  icon: "h-9 w-9 max-sm:h-11 max-sm:w-11 rounded-[10px]",
+  "icon-sm": "h-8 w-8 max-sm:h-10 max-sm:w-10 rounded-[9px]",
 };
 
 export function buttonClass(variant: Variant = "primary", size: Size = "md", className?: string) {
   return cn(
     // Quiet colour transition and a slight press; clear focus ring.
     "inline-flex select-none items-center justify-center font-medium whitespace-nowrap transition-[color,background-color,border-color,transform] duration-150",
-    "active:scale-[.98] disabled:pointer-events-none disabled:opacity-55 focus-visible:outline-none focus-visible:shadow-focus",
+    "active:scale-[.97] disabled:pointer-events-none disabled:opacity-55 focus-visible:outline-none focus-visible:shadow-focus",
     variants[variant],
     sizes[size],
     className,

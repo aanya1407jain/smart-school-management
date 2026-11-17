@@ -5,14 +5,14 @@ import { DateInput } from "./date-input";
 
 /** Glass text controls: frosted fill, teal hover border, glowing focus ring. */
 const control =
-  "w-full rounded-xl border bg-white px-3.5 text-sm max-sm:text-base text-ink placeholder:text-ink-muted/70 " +
-  "shadow-[0_1px_2px_rgb(6_49_84_/_0.04)] transition-[border-color,box-shadow,background-color] duration-200 hover:border-teal/40 " +
-  "focus:outline-none focus:border-teal focus:bg-white focus:shadow-focus disabled:cursor-not-allowed disabled:bg-alabaster disabled:text-ink-muted";
+  "w-full rounded-[10px] border bg-surface px-3 text-[14px] max-sm:text-base text-ink placeholder:text-ink-faint " +
+  "shadow-[0_1px_2px_rgb(17_19_24/0.04)] transition-[border-color,box-shadow] duration-150 hover:border-line-strong " +
+  "focus:outline-none focus:border-brand-500 focus:shadow-focus disabled:cursor-not-allowed disabled:bg-bg disabled:text-ink-muted";
 
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean }>(function Input(
   { className, invalid, ...props }, ref,
 ) {
-  const cls = cn(control, "h-10 max-sm:h-11", invalid ? "border-plum/60" : "border-line", className);
+  const cls = cn(control, "h-9 max-sm:h-11", invalid ? "border-plum/60" : "border-line", className);
   // Dates get the themed calendar flyout over the same native input (same value/onChange/ref).
   if (props.type === "date") return <DateInput ref={ref} aria-invalid={invalid || undefined} className={cls} {...props} />;
   return <input ref={ref} aria-invalid={invalid || undefined} className={cls} {...props} />;
@@ -34,7 +34,7 @@ export const Checkbox = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInp
   const cid = id ?? auto;
   return (
     <label htmlFor={cid} className={cn("flex cursor-pointer items-start gap-2.5 text-sm text-ink", className)}>
-      <input ref={ref} id={cid} type="checkbox" className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-heather accent-lagoon" {...props} />
+      <input ref={ref} id={cid} type="checkbox" className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-heather accent-ink" {...props} />
       <span>
         <span className="font-medium">{label}</span>
         {description && <span className="block text-[13px] text-ink-muted">{description}</span>}

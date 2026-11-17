@@ -27,7 +27,7 @@ export function LiveTeacherDashboard() {
     <div className="space-y-6" data-testid="live-teacher-dashboard">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-plum">{formatLongDate(d.today)}</p>
+          <p className="text-[12.5px] font-medium text-brand-700">{formatLongDate(d.today)}</p>
           <h1 className="mt-1 text-[28px] font-semibold text-sapphire">{greeting()}{user?.displayName ? `, ${user.displayName}` : ""}</h1>
           <p className="mt-1 text-sm text-ink-muted">
             {d.classTeacherOf.length > 0 ? <>Class teacher of <strong className="text-ink">{d.classTeacherOf.map((s) => s.displayName).join(", ")}</strong> · </> : null}

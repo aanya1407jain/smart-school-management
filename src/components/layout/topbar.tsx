@@ -2,7 +2,9 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
-import { Bell, ChevronDown, ChevronRight, LogOut, Menu, Settings, UserRound, Search, CheckCheck } from "lucide-react";
+import { Bell, ChevronDown, ChevronRight, LogOut, Settings, UserRound, Search, CheckCheck } from "lucide-react";
+import { LogoMark } from "@/components/brand/logo";
+import { useAsk } from "@/components/command/ask-provider";
 import { useSession } from "@/features/auth/session-provider";
 import { findNavItem, hasPermission, ROLE_LABELS } from "@/lib/permissions";
 import { requireDemo } from "@/lib/demo/runtime";
@@ -54,10 +56,10 @@ function LiveNotificationBell() {
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownTrigger asChild>
-        <Button variant="ghost" size="icon" className="relative hover:bg-emerald-50 hover:text-emerald-700" aria-label={`Notifications${unread ? `, ${unread} unread` : ""}`}>
+        <Button variant="ghost" size="icon" className="relative text-ink-soft hover:bg-ink/5 hover:text-ink" aria-label={`Notifications${unread ? `, ${unread} unread` : ""}`}>
           <Bell className="h-[19px] w-[19px]" />
           {unread > 0 && (
-            <span className="absolute right-1.5 top-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-emerald-700 px-1 text-[10px] font-bold text-white ring-2 ring-white">
+            <span className="absolute right-1.5 top-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-coral px-1 text-[10px] font-semibold text-white ring-2 ring-surface">
               {unread > 9 ? "9+" : unread}
             </span>
           )}
@@ -117,10 +119,10 @@ function NotificationBell() {
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownTrigger asChild>
-        <Button variant="ghost" size="icon" className="relative hover:bg-emerald-50 hover:text-emerald-700" aria-label={`Notifications${unread ? `, ${unread} unread` : ""}`}>
+        <Button variant="ghost" size="icon" className="relative text-ink-soft hover:bg-ink/5 hover:text-ink" aria-label={`Notifications${unread ? `, ${unread} unread` : ""}`}>
           <Bell className="h-[19px] w-[19px]" />
           {unread > 0 && (
-            <span className="absolute right-1.5 top-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-emerald-700 px-1 text-[10px] font-bold text-white ring-2 ring-white">
+            <span className="absolute right-1.5 top-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-coral px-1 text-[10px] font-semibold text-white ring-2 ring-surface">
               {unread > 9 ? "9+" : unread}
             </span>
           )}
@@ -173,8 +175,8 @@ function ProfileMenu() {
   return (
     <DropdownMenu>
       <DropdownTrigger asChild>
-        <button className="flex items-center gap-2.5 rounded-xl py-1 pl-1 pr-2 transition-colors hover:bg-emerald-50/70" aria-label="Open profile menu">
-          <Avatar name={user.displayName} size="sm" className="bg-emerald-100 text-emerald-800" />
+        <button className="flex items-center gap-2.5 rounded-xl py-1 pl-1 pr-2 transition-colors hover:bg-ink/5" aria-label="Open profile menu">
+          <Avatar name={user.displayName} size="sm" />
           <span className="hidden text-left leading-tight lg:block">
             <span className="block text-[13px] font-semibold text-ink">{user.displayName}</span>
             <span className="block text-[11.5px] text-ink-muted">{roleLabel}</span>
@@ -186,7 +188,7 @@ function ProfileMenu() {
         <div className="px-3 pb-2 pt-2">
           <p className="text-sm font-semibold text-ink">{user.displayName}</p>
           <p className="text-[12px] text-ink-muted">{secondary}</p>
-          <span className="mt-1.5 inline-block rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 ring-1 ring-inset ring-emerald-200">{roleLabel}</span>
+          <span className="mt-1.5 inline-block rounded-full bg-bg px-2 py-0.5 text-[11px] font-medium text-ink-soft ring-1 ring-inset ring-line">{roleLabel}</span>
         </div>
         <DropdownSeparator />
         <DropdownItem onSelect={() => router.push(`${base}/profile`)}><UserRound className="h-4 w-4" /> Profile</DropdownItem>
@@ -199,26 +201,24 @@ function ProfileMenu() {
   );
 }
 
-function GlobalSearch() {
-  const { user } = useSession();
-  const router = useRouter();
-  const [q, setQ] = useState("");
-  if (!user || !hasPermission(user, "students:read:all")) return null;
+/** The search/ask pill: opens Ask Atrium (⌘K). Replaces the old students-only search box. */
+function AskTrigger() {
+  const { open } = useAsk();
   return (
-    <form
-      role="search"
-      onSubmit={(e) => { e.preventDefault(); router.push(`/admin/students?q=${encodeURIComponent(q)}`); }}
-      className="relative hidden w-full max-w-xs xl:block"
-    >
-      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" aria-hidden />
-      <input
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        aria-label="Search students"
-        placeholder="Search students by name or ID…"
-        className="h-10 w-full rounded-xl border border-line bg-white pl-9 pr-3 text-sm placeholder:text-ink-muted/70 focus:border-emerald-600 focus:shadow-focus focus:outline-none"
-      />
-    </form>
+    <>
+      <button
+        type="button"
+        onClick={() => open()}
+        className="group hidden h-9 w-full max-w-[300px] items-center gap-2 rounded-[10px] bg-surface px-3 text-[13px] text-ink-muted shadow-card transition-colors duration-150 hover:text-ink focus-visible:outline-none focus-visible:shadow-focus md:flex"
+      >
+        <Search className="h-4 w-4" aria-hidden />
+        <span className="flex-1 truncate text-left">Search or ask anything…</span>
+        <span className="kbd">⌘K</span>
+      </button>
+      <Button variant="ghost" size="icon" className="text-ink-soft hover:bg-ink/5 hover:text-ink md:hidden" onClick={() => open()} aria-label="Search or ask">
+        <Search className="h-[19px] w-[19px]" />
+      </Button>
+    </>
   );
 }
 
@@ -227,27 +227,27 @@ export function Topbar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
   // Live-portal accounts never touch the demo-data services.
   const live = useSession().dataSource === "live";
   return (
-    <header className="sticky top-0 z-30 border-b border-line bg-surface">
-      <div className="flex h-16 items-center gap-3 px-4 sm:px-6 lg:px-8">
-        <Button variant="ghost" size="icon" className="hover:bg-emerald-50 hover:text-emerald-700 md:hidden" onClick={onOpenMobileNav} aria-label="Open navigation menu">
-          <Menu className="h-5 w-5" />
-        </Button>
+    <header className="sticky top-0 z-30 border-b border-line/80 bg-surface-2/85 pt-[env(safe-area-inset-top)] backdrop-blur-xl md:rounded-t-[20px]">
+      <div className="flex h-14 items-center gap-2 px-4 sm:px-6 lg:px-8">
+        <button type="button" className="-ml-1 grid h-10 w-10 place-items-center rounded-xl md:hidden" onClick={onOpenMobileNav} aria-label="Open navigation menu">
+          <LogoMark size={28} />
+        </button>
         <nav aria-label="Breadcrumb" className="min-w-0 flex-1">
           <ol className="flex items-center gap-1.5 text-[13px] text-ink-muted">
             {crumbs.map((c, i) => (
               // Phones: the page name, plus its parent on sub-pages ("Students › New"); the workspace crumb only from `sm`.
               <li key={i} className={cn("flex min-w-0 items-center gap-1.5", i < Math.min(crumbs.length - 1, Math.max(1, crumbs.length - 2)) && "hidden sm:flex")}>
-                {i > 0 && <ChevronRight className={cn("h-3.5 w-3.5 shrink-0 opacity-60", i === Math.max(1, crumbs.length - 2) && "hidden sm:block")} aria-hidden />}
+                {i > 0 && <ChevronRight className={cn("h-3.5 w-3.5 shrink-0 opacity-50", i === Math.max(1, crumbs.length - 2) && "hidden sm:block")} aria-hidden />}
                 {c.href && i < crumbs.length - 1 ? (
-                  <Link href={c.href} className="truncate transition-colors hover:text-emerald-700">{c.label}</Link>
+                  <Link href={c.href} className="truncate transition-colors hover:text-ink">{c.label}</Link>
                 ) : (
-                  <span className={cn("truncate", i === crumbs.length - 1 && "font-medium text-emerald-800")} aria-current={i === crumbs.length - 1 ? "page" : undefined}>{c.label}</span>
+                  <span className={cn("truncate", i === crumbs.length - 1 && "font-medium text-ink")} aria-current={i === crumbs.length - 1 ? "page" : undefined}>{c.label}</span>
                 )}
               </li>
             ))}
           </ol>
         </nav>
-        <GlobalSearch />
+        <AskTrigger />
         {live ? <LiveNotificationBell /> : <NotificationBell />}
         <ProfileMenu />
       </div>

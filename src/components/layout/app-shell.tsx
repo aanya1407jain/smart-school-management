@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { STORAGE_NAMESPACE } from "@/lib/constants/product";
 import { ChartGradients } from "@/components/charts/chart-card";
 import { Sidebar } from "./sidebar";
-import { MobileNav } from "./mobile-nav";
+import { MobileNav, MobileTabBar } from "./mobile-nav";
 import { Topbar } from "./topbar";
 
 const COLLAPSE_KEY = `${STORAGE_NAMESPACE}-sidebar-collapsed`;
@@ -67,7 +67,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <LogoMark size={44} />
           <p className="text-sm text-ink-soft">{notice}</p>
           <div className="flex flex-wrap justify-center gap-2">
-            {viewer && <Link href="/account" className="inline-flex h-10 items-center rounded-xl bg-sapphire px-4 text-sm font-semibold text-white hover:bg-lagoon">My account</Link>}
+            {viewer && <Link href="/account" className="inline-flex h-10 items-center rounded-xl bg-brand-600 px-4 text-sm font-medium text-white hover:bg-brand-700">My account</Link>}
             <Button variant="outline" onClick={async () => { await logout(); router.replace("/login"); }}>Sign out</Button>
           </div>
         </div>
@@ -77,9 +77,9 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   if (status === "loading" || access === null || access === "unauthenticated" || !user) {
     return (
-      <div className="grid min-h-screen place-items-center bg-bg" role="status" aria-label="Checking your session">
+      <div className="grid min-h-screen place-items-center bg-ground" role="status" aria-label="Checking your session">
         <div className="flex flex-col items-center gap-3">
-          <LogoMark size={44} className="animate-pulse" />
+          <LogoMark size={40} className="animate-pulse" />
           <p className="text-sm text-ink-muted">Checking your session…</p>
         </div>
       </div>
@@ -89,34 +89,37 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="ambient flex min-h-screen">
       <ChartGradients />
-      <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[70] focus:rounded-lg focus:bg-white focus:px-3 focus:py-2 focus:shadow-lift">
+      <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[70] focus:rounded-lg focus:bg-surface focus:px-3 focus:py-2 focus:shadow-lift">
         Skip to content
       </a>
       <Sidebar collapsed={collapsed} onToggle={toggle} />
       <MobileNav open={mobileOpen} onOpenChange={setMobileOpen} />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <Topbar onOpenMobileNav={() => setMobileOpen(true)} />
-        <main id="main" className="flex-1 px-4 pb-16 pt-6 sm:px-6 lg:px-8 lg:pt-8">
-          {/* No keyed remount or fade-in per route: the page swaps in place and is visible at once
-              (a 280 ms fade from transparent on every navigation read as lag). */}
-          <div className="mx-auto w-full max-w-[1400px]">
-            {access === "forbidden" ? (
-              <div className="solid-card mx-auto mt-6 max-w-xl">
-                <UnauthorizedState
-                  homeHref={landingRouteFor(user)}
-                  message={`Your ${user.role} account can't open ${pathname}. Access is decided by your account's role, not by the link you followed.`}
-                />
-              </div>
-            ) : access === "module_disabled" && modulesStatus !== "ok" ? (
-              <ModulesUnconfirmed homeHref={landingRouteFor(user)} />
-            ) : access === "module_disabled" ? (
-              <ModuleNotEnabled pathname={pathname} homeHref={landingRouteFor(user)} />
-            ) : dataSource === "live" && !isLiveRoute(pathname) ? (
-              <LiveNotConnected user={user} schoolName={viewer?.school.name ?? ""} />
-            ) : children}
-          </div>
-        </main>
+      {/* The canvas: a raised sheet on the app ground (md+), full-bleed on phones. */}
+      <div className="flex min-w-0 flex-1 flex-col md:py-2 md:pr-2">
+        <div className="flex min-h-full flex-1 flex-col bg-surface-2 md:rounded-[20px] md:shadow-canvas">
+          <Topbar onOpenMobileNav={() => setMobileOpen(true)} />
+          <main id="main" className="flex-1 px-4 pb-28 pt-5 sm:px-6 md:pb-16 lg:px-10 lg:pt-8">
+            {/* No keyed remount or fade-in per route: the page swaps in place and is visible at once. */}
+            <div className="mx-auto w-full max-w-[1320px]">
+              {access === "forbidden" ? (
+                <div className="solid-card mx-auto mt-6 max-w-xl">
+                  <UnauthorizedState
+                    homeHref={landingRouteFor(user)}
+                    message={`Your ${user.role} account can't open ${pathname}. Access is decided by your account's role, not by the link you followed.`}
+                  />
+                </div>
+              ) : access === "module_disabled" && modulesStatus !== "ok" ? (
+                <ModulesUnconfirmed homeHref={landingRouteFor(user)} />
+              ) : access === "module_disabled" ? (
+                <ModuleNotEnabled pathname={pathname} homeHref={landingRouteFor(user)} />
+              ) : dataSource === "live" && !isLiveRoute(pathname) ? (
+                <LiveNotConnected user={user} schoolName={viewer?.school.name ?? ""} />
+              ) : children}
+            </div>
+          </main>
+        </div>
       </div>
+      <MobileTabBar onOpenMenu={() => setMobileOpen(true)} />
     </div>
   );
 }
@@ -127,11 +130,11 @@ function ModuleNotEnabled({ pathname, homeHref }: { pathname: string; homeHref: 
   const label = module ? MODULES[module].label : "This module";
   return (
     <div className="solid-card mx-auto mt-6 max-w-xl p-8 text-center" role="status" data-testid="module-not-enabled">
-      <h1 className="font-display text-xl text-ink">{label} is not enabled for your school</h1>
+      <h1 className="text-xl font-semibold text-ink">{label} is not enabled for your school</h1>
       <p className="mt-2 text-sm text-ink-soft">
         Your school&apos;s plan does not include this module, so its pages are unavailable. Nothing has been deleted. Contact your school or service provider if you need it.
       </p>
-      <Link href={homeHref} className="mt-4 inline-flex h-10 items-center rounded-xl bg-sapphire px-4 text-sm font-semibold text-white hover:bg-lagoon">Go to dashboard</Link>
+      <Link href={homeHref} className="mt-4 inline-flex h-10 items-center rounded-xl bg-brand-600 px-4 text-sm font-medium text-white hover:bg-brand-700">Go to dashboard</Link>
     </div>
   );
 }
@@ -144,9 +147,9 @@ function ModuleNotEnabled({ pathname, homeHref }: { pathname: string; homeHref: 
 function ModulesUnconfirmed({ homeHref }: { homeHref: string }) {
   return (
     <div className="solid-card mx-auto mt-6 max-w-xl p-8 text-center" role="status" data-testid="modules-unconfirmed">
-      <h1 className="font-display text-xl text-ink">This page is unavailable right now</h1>
+      <h1 className="text-xl font-semibold text-ink">This page is unavailable right now</h1>
       <p className="mt-2 text-sm text-ink-soft">{MODULES_UNCONFIRMED_MESSAGE}</p>
-      <Link href={homeHref} className="mt-4 inline-flex h-10 items-center rounded-xl bg-sapphire px-4 text-sm font-semibold text-white hover:bg-lagoon">Go to dashboard</Link>
+      <Link href={homeHref} className="mt-4 inline-flex h-10 items-center rounded-xl bg-brand-600 px-4 text-sm font-medium text-white hover:bg-brand-700">Go to dashboard</Link>
     </div>
   );
 }
@@ -159,14 +162,14 @@ function LiveNotConnected({ user, schoolName }: { user: Parameters<typeof liveNa
   const items = liveNavItems(user);
   return (
     <div className="solid-card mx-auto mt-6 max-w-xl p-8 text-center" role="status" data-testid="live-not-connected">
-      <h1 className="font-display text-xl text-ink">Not connected to {schoolName || "your school"}'s records yet</h1>
+      <h1 className="text-xl font-semibold text-ink">Not connected to {schoolName || "your school"}'s records yet</h1>
       <p className="mt-2 text-sm text-ink-soft">
         This page still runs on demonstration data, so it is hidden for school accounts. These pages already use your school&apos;s records:
       </p>
       <ul className="mt-4 flex flex-wrap justify-center gap-2">
         {items.map((i) => (
           <li key={i.href}>
-            <Link href={i.href} className="inline-flex h-9 items-center rounded-xl border border-line px-3 text-sm font-medium text-ink hover:bg-teal-soft/40">{i.label}</Link>
+            <Link href={i.href} className="inline-flex h-9 items-center rounded-xl border border-line px-3 text-sm font-medium text-ink hover:bg-bg">{i.label}</Link>
           </li>
         ))}
       </ul>

@@ -12,7 +12,8 @@
  */
 import Link from "next/link";
 import { useMemo, type ReactNode } from "react";
-import { BarChart3, CheckCircle2, Megaphone, Users } from "lucide-react";
+import { ArrowRight, BarChart3, CheckCircle2, Megaphone, Users } from "lucide-react";
+import { IconTile, type AppIconName } from "@/components/icons/app-icon";
 import { api } from "@convex/_generated/api";
 import { useQuery, type QueryState } from "@/lib/hooks/use-query";
 import { useSchoolQuery } from "@/lib/convex/membership";
@@ -24,7 +25,8 @@ import { formatLongDate, formatShortDate, greeting, todayISO } from "@/lib/utils
 import { NOTICE_TYPE_LABELS } from "@/lib/constants/labels";
 import { contributionsTo, type AdminAgendaItem, type AdminDashboardAction, type AdminDashboardContribution, type AdminDashboardVM, type AdminFeesOnly } from "@/lib/contributions";
 import { cn } from "@/lib/utils/cn";
-import { MetricCard, Panel, PanelEmpty, PanelLink, StatusTag } from "./principal-ui";
+import { DotRow, MetricCard, Panel, PanelEmpty, PanelLink, QuickActions, StatusTag } from "./principal-ui";
+import { AskHero } from "@/components/command/ask-hero";
 
 /** Core's own header action (notices belong to Administration, which Core hosts). */
 const POST_NOTICE: AdminDashboardAction = { label: "Post notice", href: "/admin/notices?action=new", order: 30, permission: "notices:manage", Icon: Megaphone };
@@ -94,7 +96,7 @@ export function AdminDashboard() {
 
 /** Flat neutral page surface (globals.css drops the shell's ambient glows behind it). */
 function Surface({ children }: { children: ReactNode }) {
-  return <div data-surface="principal-dashboard" className="space-y-4 text-pd-ink sm:space-y-6">{children}</div>;
+  return <div data-surface="principal-dashboard" className="rise space-y-4 text-pd-ink sm:space-y-5">{children}</div>;
 }
 
 function DashboardBody({ d, live, parts }: { d: AdminDashboardVM; live: boolean; parts: AdminDashboardContribution[] }) {
@@ -105,7 +107,7 @@ function DashboardBody({ d, live, parts }: { d: AdminDashboardVM; live: boolean;
   const actions = [...parts.flatMap((c) => c.headerActions ?? []), ...(notices ? [POST_NOTICE] : [])]
     .filter((a) => can(a.permission))
     .sort((a, b) => a.order - b.order)
-    .slice(0, 2);
+    .slice(0, 3);
   const attention = parts.flatMap((c) => c.attention?.(d) ?? []);
   const agenda = [...parts.flatMap((c) => c.agenda?.(d) ?? []), ...(notices ? noticeAgenda(d, today) : [])]
     .sort((a, b) => a.date.localeCompare(b.date))
@@ -114,33 +116,20 @@ function DashboardBody({ d, live, parts }: { d: AdminDashboardVM; live: boolean;
   const secondary = parts.filter((c) => c.Secondary);
   const onLeave = d.stats.teachersOnLeave;
   const firstName = user?.displayName.split(" ")[0] ?? "";
+  // Header actions first (from the modules), then common jobs the user can open.
+  const quick = [
+    ...actions.map((a) => ({ label: a.label, href: a.href, icon: actionIcon(a.href) })),
+    ...(can("attendance:read:all") && hasModule("attendance") ? [{ label: "Attendance today", href: "/admin/attendance", icon: "attendance" as AppIconName }] : []),
+    ...(can("reports:read") ? [{ label: "Open reports", href: "/admin/reports", icon: "reports" as AppIconName }] : []),
+    ...(can("exams:manage") && hasModule("academics") ? [{ label: "Schedule exam", href: "/admin/examinations?action=new", icon: "exams" as AppIconName }] : []),
+  ].filter((x, i, arr) => arr.findIndex((y) => y.href === x.href) === i).slice(0, 4);
 
   return (
     <>
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="text-[22px] font-semibold leading-8 tracking-tight text-pd-ink sm:text-2xl">{greeting()}{firstName ? `, ${firstName}` : ""}</h1>
-          <p className="mt-0.5 text-[13.5px] leading-5 text-pd-muted">{[d.school.name, d.term, formatLongDate(today)].filter(Boolean).join(" · ")}</p>
-        </div>
-        {actions.length > 0 && (
-          <div className={cn("grid gap-2 sm:flex sm:shrink-0", actions.length > 1 && "grid-cols-2")}>
-            {actions.map(({ label, href, Icon }, i) => (
-              <Link
-                key={href}
-                href={href}
-                className={cn(
-                  "inline-flex min-h-11 min-w-0 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold transition-colors",
-                  focusRing,
-                  i === 0 ? "bg-pd-accent text-white hover:bg-pd-accent-hover" : "border border-pd-line bg-white text-pd-ink hover:border-pd-accent/40 hover:text-pd-accent",
-                )}
-              >
-                <Icon className="h-4 w-4 shrink-0" aria-hidden />
-                <span className="truncate">{label}</span>
-              </Link>
-            ))}
-          </div>
-        )}
-      </header>
+      <AskHero
+        title={`${greeting()}${firstName ? `, ${firstName}` : ""}`}
+        subtitle={[d.school.name, d.term, formatLongDate(today)].filter(Boolean).join(" · ")}
+      />
 
       <section aria-label="Key figures" className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 sm:gap-4 xl:grid-cols-4">
         {parts.filter((c) => c.order < 0).map((c, i) => c.Metric && <c.Metric key={i} d={d} live={live} />)}
@@ -149,46 +138,58 @@ function DashboardBody({ d, live, parts }: { d: AdminDashboardVM; live: boolean;
           value={formatNumber(d.stats.teachers)}
           support={onLeave === null ? undefined : onLeave ? `${onLeave} on leave today` : "All on duty today"}
           icon={Users}
+          accent="teachers"
+          viz={<DotRow total={d.stats.teachers} away={onLeave ?? 0} />}
           href="/admin/teachers"
         />
         {parts.filter((c) => c.order >= 0).map((c, i) => c.Metric && <c.Metric key={i} d={d} live={live} />)}
       </section>
 
       <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-2 xl:grid-cols-12">
-        <Panel title="Needs attention" className="xl:col-span-7" testId="dash-attention">
+        <Panel title="Needs attention" icon="notifications" className="xl:col-span-7" testId="dash-attention">
+          <div className="flex h-full flex-col gap-4">
           {attention.length === 0 ? (
-            <p className="flex items-center gap-2 py-1 text-[13.5px] text-pd-muted">
-              <CheckCircle2 className="h-4 w-4 shrink-0 text-pd-ok" aria-hidden /> Nothing needs your attention right now.
-            </p>
+            <div className="flex items-center gap-3 rounded-2xl bg-pd-ok-soft px-4 py-3.5">
+              <CheckCircle2 className="h-5 w-5 shrink-0 text-pd-ok" aria-hidden />
+              <p className="text-[13.5px] font-medium text-pd-ok">All clear. Nothing needs you right now.</p>
+            </div>
           ) : (
-            <ul className="divide-y divide-pd-line">
+            <ul className="space-y-2">
               {attention.map((a) => (
-                <li key={a.key} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                  <div className="flex min-w-0 items-start gap-2.5">
-                    <span aria-hidden className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", a.tone === "danger" ? "bg-pd-danger" : "bg-pd-warning")} />
-                    <div className="min-w-0">
-                      <p className="text-[14px] font-medium leading-5 text-pd-ink">{a.title}</p>
-                      {a.detail && <p className="mt-0.5 text-[12.5px] leading-[18px] text-pd-muted">{a.detail}</p>}
-                    </div>
-                  </div>
-                  <Link href={a.href} className={cn("ml-[18px] inline-flex min-h-11 shrink-0 items-center justify-center self-start rounded-lg border border-pd-line px-3 text-[13px] font-semibold text-pd-accent hover:border-pd-accent/40 hover:bg-pd-accent-soft sm:ml-0 sm:self-center", focusRing)}>
-                    {a.action}
+                <li key={a.key}>
+                  <Link href={a.href} className={cn("group flex items-center gap-3 rounded-2xl bg-bg/70 p-2.5 pr-3 transition-colors duration-150 hover:bg-bg", focusRing)}>
+                    <span className="relative">
+                      <IconTile name={attentionIcon(a.href)} size="md" />
+                      <span aria-hidden className={cn("live-dot absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-surface", a.tone === "danger" ? "bg-coral text-coral" : "bg-marigold text-marigold")} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[14px] font-medium leading-5 text-pd-ink">{a.title}</span>
+                      {a.detail && <span className="block truncate text-[12.5px] leading-[18px] text-pd-muted">{a.detail}</span>}
+                    </span>
+                    <span className="hidden shrink-0 items-center gap-1 rounded-full bg-surface px-3 py-1.5 text-[12.5px] font-medium text-pd-ink shadow-card transition-colors group-hover:bg-brand-600 group-hover:text-white sm:inline-flex">
+                      {a.action} <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+                    </span>
                   </Link>
                 </li>
               ))}
             </ul>
           )}
+          <div className="mt-auto">
+            <p className="mb-2 text-[12px] font-medium text-pd-muted">Quick actions</p>
+            <QuickActions items={quick} />
+          </div>
+          </div>
         </Panel>
 
         <Panel
           title="Upcoming"
-          description="Exams, events and deadlines"
+          icon="timetable"
           className="xl:col-span-5"
           testId="dash-agenda"
           action={hasModule("academics") ? <PanelLink href="/admin/examinations">Exams</PanelLink> : undefined}
         >
           {agenda.length === 0 ? <PanelEmpty>Nothing scheduled.</PanelEmpty> : (
-            <ul className="-my-3 divide-y divide-pd-line">
+            <ul className="space-y-1">
               {agenda.map((a) => <AgendaRow key={a.key} item={a} />)}
             </ul>
           )}
@@ -203,18 +204,18 @@ function DashboardBody({ d, live, parts }: { d: AdminDashboardVM; live: boolean;
 
       <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-2 xl:grid-cols-12">
         {notices && (
-          <Panel title="Recent notices" className="xl:col-span-7" testId="dash-notices" action={<PanelLink href="/admin/notices">All notices</PanelLink>}>
-            {d.notices.length === 0 ? <PanelEmpty>No notices published yet.</PanelEmpty> : (
-              <ul className="-my-3 divide-y divide-pd-line">
+          <Panel title="Recent notices" icon="notices" className="xl:col-span-7" testId="dash-notices" action={<PanelLink href="/admin/notices">All</PanelLink>}>
+            {d.notices.length === 0 ? <PanelEmpty>No notices yet.</PanelEmpty> : (
+              <ul className="space-y-1">
                 {d.notices.slice(0, 3).map((n) => (
                   <li key={n.id}>
-                    <Link href="/admin/notices" className={cn("flex items-start gap-3 rounded-lg py-3 hover:bg-pd-bg/70", focusRing)}>
-                      <span className="w-12 shrink-0 pt-0.5 text-[12px] font-semibold leading-4 text-pd-muted tabular-nums">{formatShortDate(n.publishDate)}</span>
+                    <Link href="/admin/notices" className={cn("group flex items-center gap-3 rounded-2xl p-2 transition-colors hover:bg-bg/70", focusRing)}>
+                      <IconTile name={n.type === "event" ? "classes" : n.type === "holiday" ? "spark" : "notices"} size="sm" />
                       <span className="min-w-0 flex-1">
-                        <span className="line-clamp-2 break-words text-[14px] font-medium leading-5 text-pd-ink">{n.title}</span>
-                        <span className="mt-0.5 block truncate text-[12.5px] leading-[18px] text-pd-muted">{NOTICE_TYPE_LABELS[n.type]} · {n.audienceLabel}</span>
+                        <span className="block truncate text-[14px] font-medium leading-5 text-pd-ink">{n.title}</span>
+                        <span className="block truncate text-[12.5px] leading-[18px] text-pd-muted">{n.audienceLabel} · {formatShortDate(n.publishDate)}</span>
                       </span>
-                      {(n.priority === "urgent" || n.priority === "high") && <StatusTag tone={n.priority === "urgent" ? "danger" : "warning"}>{n.priority === "urgent" ? "Urgent" : "High priority"}</StatusTag>}
+                      {(n.priority === "urgent" || n.priority === "high") && <StatusTag tone={n.priority === "urgent" ? "danger" : "warning"}>{n.priority === "urgent" ? "Urgent" : "High"}</StatusTag>}
                     </Link>
                   </li>
                 ))}
@@ -223,7 +224,7 @@ function DashboardBody({ d, live, parts }: { d: AdminDashboardVM; live: boolean;
           </Panel>
         )}
         {(can("reports:read") || secondary.length > 0) && (
-          <Panel title="Reports & highlights" className={notices ? "xl:col-span-5" : "lg:col-span-2 xl:col-span-12"}>
+          <Panel title="Reports" icon="reports" className={notices ? "xl:col-span-5" : "lg:col-span-2 xl:col-span-12"}>
             <ul className="-my-2 divide-y divide-pd-line">
               {can("reports:read") && (
                 <li>
@@ -246,18 +247,43 @@ function DashboardBody({ d, live, parts }: { d: AdminDashboardVM; live: boolean;
 }
 
 function AgendaRow({ item: a }: { item: AdminAgendaItem }) {
+  const d = new Date(`${a.date}T00:00:00`);
+  const day = Number.isNaN(d.getTime()) ? "" : String(d.getDate());
+  const mon = Number.isNaN(d.getTime()) ? a.when : d.toLocaleDateString("en-IN", { month: "short" });
   return (
     <li>
-      <Link href={a.href} className={cn("flex items-start gap-3 rounded-lg py-3 hover:bg-pd-bg/70", focusRing)}>
-        <span className="w-16 shrink-0 pt-0.5 text-[12px] font-semibold leading-4 text-pd-muted tabular-nums">{a.when}</span>
+      <Link href={a.href} className={cn("group flex items-center gap-3 rounded-2xl p-2 transition-colors hover:bg-bg/70", focusRing)}>
+        <span className="flex h-12 w-12 shrink-0 flex-col items-center justify-center overflow-hidden rounded-[14px] bg-surface shadow-card transition-transform duration-200 group-hover:-rotate-3">
+          <span className="w-full bg-coral py-[1px] text-center text-[9.5px] font-semibold uppercase tracking-[0.06em] text-white">{mon}</span>
+          <span className="figures flex-1 pt-0.5 text-[18px] font-semibold leading-none text-pd-ink">{day}</span>
+        </span>
         <span className="min-w-0 flex-1">
-          <span className="block break-words text-[14px] font-medium leading-5 text-pd-ink">{a.title}</span>
-          {a.meta && <span className="mt-0.5 block text-[12.5px] leading-[18px] text-pd-muted">{a.meta}</span>}
+          <span className="block truncate text-[14px] font-medium leading-5 text-pd-ink">{a.title}</span>
+          {a.meta && <span className="block truncate text-[12.5px] leading-[18px] text-pd-muted">{a.meta}</span>}
         </span>
         <StatusTag tone={a.tone ?? "neutral"}>{a.status}</StatusTag>
       </Link>
     </li>
   );
+}
+
+/** Icon for a header action, from its destination. */
+function actionIcon(href: string): AppIconName {
+  if (href.includes("/students")) return "students";
+  if (href.includes("/fees")) return "fees";
+  if (href.includes("/notices")) return "notices";
+  if (href.includes("/attendance")) return "attendance";
+  return "plus";
+}
+
+/** Which module icon an attention item gets, from where it leads. */
+function attentionIcon(href: string): AppIconName {
+  if (href.includes("/attendance")) return "attendance";
+  if (href.includes("/fees")) return "fees";
+  if (href.includes("/teachers")) return "teachers";
+  if (href.includes("/examinations")) return "exams";
+  if (href.includes("/students")) return "students";
+  return "notices";
 }
 
 /** Published notices that announce an event or holiday still to come. */
@@ -281,7 +307,7 @@ function FinanceOnlyDashboard({ school, today, fees }: { school: string; today: 
   return (
     <Surface>
       <header>
-        <h1 className="text-[22px] font-semibold leading-8 tracking-tight text-pd-ink sm:text-2xl">Fees</h1>
+        <h1 className="text-[26px] font-semibold leading-8 tracking-[-0.035em] text-pd-ink">Fees</h1>
         <p className="mt-0.5 text-[13.5px] text-pd-muted">{school} · {formatLongDate(today)}</p>
       </header>
       {!fees || !view?.FinanceOnly

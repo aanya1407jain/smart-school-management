@@ -31,9 +31,9 @@ export function ProgressBar({ value, className, tone = "teal", label }: { value:
 }
 
 const RING: Record<"teal" | "purple" | "plum", [string, string]> = {
-  teal: [PALETTE.cyan, PALETTE.teal],
-  purple: [PALETTE.mauve, PALETTE.purple],
-  plum: [PALETTE.purple, PALETTE.plum],
+  teal: [PALETTE.mint, PALETTE.mint],
+  purple: [PALETTE.marigold, PALETTE.marigold],
+  plum: [PALETTE.coral, PALETTE.coral],
 };
 
 /** Circular gauge for percentages (attendance, collection rate, exam scores). */
@@ -63,12 +63,12 @@ export function ProgressRing({ value, size = 96, stroke = 9, label, sublabel, to
           strokeLinecap="round"
           strokeDasharray={c}
           strokeDashoffset={c - (v / 100) * c}
-          style={{ transition: "stroke-dashoffset .8s cubic-bezier(.2,.8,.2,1)", filter: `drop-shadow(0 0 4px ${to}55)` }}
+          style={{ transition: "stroke-dashoffset .8s cubic-bezier(.2,.8,.2,1)" }}
         />
       </svg>
       <div className="absolute text-center">
-        <div className="figures text-lg font-semibold text-sapphire">{label ?? (value === null ? "—" : `${Math.round(v)}%`)}</div>
-        {sublabel && <div className="text-[10.5px] font-medium uppercase tracking-wide text-ink-muted">{sublabel}</div>}
+        <div className="figures text-lg font-semibold tracking-[-0.03em] text-ink">{label ?? (value === null ? "—" : `${Math.round(v)}%`)}</div>
+        {sublabel && <div className="text-[10.5px] font-medium text-ink-muted">{sublabel}</div>}
       </div>
     </div>
   );
