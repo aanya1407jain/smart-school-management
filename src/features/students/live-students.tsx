@@ -10,7 +10,7 @@
  */
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { GraduationCap, LayoutGrid, Pencil, Rows3, UserPlus, Users } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { buttonClass } from "@/components/ui/button";
@@ -29,12 +29,16 @@ export function LiveStudentsList() {
   const canWrite = can("students:write");
   const sections = useSchoolQuery(api.academics.listSections, {});
   const [sectionId, setSectionId] = useState("");
-  const [search, setSearch] = useState("");
+  // Ask ("Find Aarav") and other links open this list pre-filtered with ?q=.
+  // useSearchParams needs the <Suspense> boundary in src/app/admin/students/page.tsx.
+  const q = useSearchParams().get("q") ?? "";
+  const [search, setSearch] = useState(q);
+  useEffect(() => { setSearch(q); }, [q]);
   // Card grid by default; the dense list is one click away (remembered on this device).
   const [view, setViewState] = useState<"grid" | "list">("grid");
   useEffect(() => { try { const v = window.localStorage.getItem("ssms-students-view"); if (v === "list" || v === "grid") setViewState(v); } catch { /* ignore */ } }, []);
   const setView = (v: "grid" | "list") => { setViewState(v); try { window.localStorage.setItem("ssms-students-view", v); } catch { /* ignore */ } };
-  const [debounced, setDebounced] = useState("");
+  const [debounced, setDebounced] = useState(q.trim());
   useEffect(() => { const t = setTimeout(() => setDebounced(search.trim()), 250); return () => clearTimeout(t); }, [search]);
   const list = useSchoolPaginatedQuery(
     api.accounts.listPeople,

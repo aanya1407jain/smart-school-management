@@ -1,4 +1,4 @@
-# Smart School Management System
+# Atrium
 
 A reusable, role-based school management platform built around connected workflows —
 students, academics, attendance, fees, examinations, timetable, homework, notices and reports.
@@ -13,7 +13,7 @@ storage and a dataset-driven seed. UI modules migrate to Convex one at a time.
 
 | | What it is | Where it lives |
 |---|---|---|
-| **Smart School Management System** | The product / platform | `src/lib/constants/product.ts` (name, browser title, storage namespace) |
+| **Atrium** | The product / platform | `src/lib/constants/product.ts` (name, browser title, storage namespace) |
 | **Aster Academy** | A fictional demo school — the seed tenant used for development and tests | `src/lib/mock-data/seed.ts` (`db.school`, people, emails, IDs) |
 
 Nothing outside the seed and the test scripts hard-codes the school. The app chrome (splash, login, sidebar,
@@ -67,7 +67,7 @@ Staff*) live only in the browser's demo store and get no account.
 (`users.session`), so each account opens its own portal. Signed-out requests to `/admin`, `/teacher`, `/student`
 and `/account` are redirected to `/login` by the server (`src/proxy.ts`) before any page code is sent.
 
-The login page has a collapsible *Development demo accounts* helper that fills these in.
+The login page has a collapsible *Try a demo account* helper that fills these in.
 To start over, sign in as admin → **Settings → Demo data → Reset**.
 
 ## What to demo

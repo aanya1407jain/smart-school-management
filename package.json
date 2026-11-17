@@ -1,6 +1,6 @@
 {
   "name": "smart-school-management",
-  "description": "Smart School Management System — reusable, role-based school management platform (Stage 1: frontend with mock services; demo tenant: Aster Academy).",
+  "description": "Atrium — reusable, role-based school management platform (Stage 1: frontend with mock services; demo tenant: Aster Academy).",
   "version": "0.1.0",
   "private": true,
   "scripts": {
